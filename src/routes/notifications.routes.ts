@@ -51,9 +51,9 @@ router.get('/', requireAuth, async (req, res) => {
 
         const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
         const isZoneAdmin = auth.role === 'zone_admin' || isHqAdmin;
-        const userZone = auth.zoneId as string | undefined;
+        const effectiveOrgId = ((req.headers['x-organization-id'] as string) || (req.headers['x-zone-id'] as string) || res.locals.tenant?.effectiveZoneId || userZone || '').trim();
 
-        // Strict visibility resolution
+        // Strict visibility resolution based on active organization scope
         let visible = false;
 
         if (targetUser) {
@@ -69,18 +69,21 @@ router.get('/', requireAuth, async (req, res) => {
         } else if (audience === 'group' && targetGroup) {
           visible = groupNames.has(targetGroup) || isHqAdmin;
         } else if (audience === 'all' || audience === 'broadcast') {
-          const notifZone = row.organizationId || (raw.zoneId as string) || (raw.zone_id as string);
-          if (!notifZone || notifZone === 'all' || notifZone === 'global' || isHqAdmin) {
+          const notifZone = (row.organizationId || (raw.zoneId as string) || (raw.zone_id as string) || '').trim();
+          if (!notifZone || notifZone === 'all' || notifZone === 'global') {
             visible = true;
-          } else if (userZone && notifZone) {
-            const uNorm = userZone.replace(/-/g, '').toLowerCase();
+          } else if (effectiveOrgId && notifZone) {
+            const uNorm = effectiveOrgId.replace(/-/g, '').toLowerCase();
             const nNorm = notifZone.replace(/-/g, '').toLowerCase();
-            if (uNorm === nNorm || userZone.toLowerCase() === notifZone.toLowerCase()) {
+            if (uNorm === nNorm || effectiveOrgId.toLowerCase() === notifZone.toLowerCase()) {
               visible = true;
             }
           }
         } else if (isAdmin) {
-          visible = true;
+          const notifZone = (row.organizationId || (raw.zoneId as string) || (raw.zone_id as string) || '').trim();
+          if (!notifZone || notifZone === 'all' || notifZone === 'global' || notifZone === effectiveOrgId) {
+            visible = true;
+          }
         }
 
         if (!visible) return null;
@@ -208,6 +211,7 @@ const createBroadcastHandler = async (req: any, res: any) => {
     };
 
     const priorityEnum = (priority ? String(priority).toUpperCase() : 'NORMAL') as any;
+    const effectiveOrg = targetZoneId || (req.headers['x-organization-id'] as string) || (req.headers['x-zone-id'] as string) || res.locals.tenant?.effectiveZoneId || null;
 
     const newRecord = await prisma.broadcastNotification.create({
       data: {
@@ -218,7 +222,7 @@ const createBroadcastHandler = async (req: any, res: any) => {
         type: type || 'info',
         category: category || 'general',
         priority: priorityEnum,
-        organizationId: targetZoneId || null,
+        organizationId: effectiveOrg,
         senderId: senderId || auth.userId,
         actionUrl: actionUrl || null,
         createdAt: now,
