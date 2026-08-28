@@ -101,12 +101,15 @@ router.get('/', requireAuth, async (req, res) => {
           || (raw.is_read === true && (!targetUser || targetUser === userId))
           || (raw.isRead === true && (!targetUser || targetUser === userId));
 
+        if (!message.trim() && !body.trim()) return null;
+        if (title.trim() === 'Notification' && !message.trim()) return null;
+
         return {
           ...merged,
           id: row.id,
           title,
-          message,
-          body,
+          message: message || body,
+          body: body || message,
           category,
           priority,
           senderName,
