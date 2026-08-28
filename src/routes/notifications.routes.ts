@@ -49,9 +49,9 @@ router.get('/', requireAuth, async (req, res) => {
         const targetGroup =
           (raw.target_group as string | undefined) || (raw.targetGroup as string | undefined);
 
-        const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
+        const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
         const isZoneAdmin = auth.role === 'zone_admin' || isHqAdmin;
-        const effectiveOrgId = ((req.headers['x-organization-id'] as string) || (req.headers['x-zone-id'] as string) || res.locals.tenant?.effectiveZoneId || userZone || '').trim();
+        const effectiveOrgId = ((req.headers['x-organization-id'] as string) || (req.headers['x-zone-id'] as string) || res.locals.tenant?.effectiveZoneId || auth.zoneId || '').trim();
 
         // Strict visibility resolution based on active organization scope
         let visible = false;
