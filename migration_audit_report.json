@@ -1,0 +1,1186 @@
+{
+  "auditedAt": "2026-08-28T16:24:54.348Z",
+  "tables": {
+    "zones": {
+      "count": 20,
+      "hqCount": 0,
+      "all": [
+        {
+          "id": "zone-001",
+          "name": "Your Loveworld Singers",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-002",
+          "name": "Loveworld Singers 24 Worship Band",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-004",
+          "name": "Loveworld Singers Teens Choir",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-005",
+          "name": "Presidential Mass Choir",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-007",
+          "name": "Loveworld Singers SA Zone 2",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-013",
+          "name": "Loveworld Singers India Zone",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-017",
+          "name": "Loveworld Singers USA Region 1 Zone 2",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-038",
+          "name": "Loveworld Singers South America NZ Pacific",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-044",
+          "name": "Loveworld Singers Lagos Zone 1",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-048",
+          "name": "Loveworld Singers Lagos Zone 5",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-052",
+          "name": "Loveworld Singers Lagos Sub Zone C",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-086",
+          "name": "Loveworld Singers CELVZ",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-087",
+          "name": "Loveworld Singers LGN",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-088",
+          "name": "Special Duty Zone",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-director",
+          "name": "The Director Zone",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-international",
+          "name": "Loveworld International Zonal Choir Representatives",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-national",
+          "name": "Loveworld National Zonal Choir Representatives",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-oftp",
+          "name": "OFTP Pastors Zone",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-orchestra",
+          "name": "Loveworld Singers Orchestra",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        },
+        {
+          "id": "zone-president",
+          "name": "The President Zone",
+          "code": null,
+          "is_hq": false,
+          "is_active": null
+        }
+      ]
+    },
+    "profiles": {
+      "nullZoneId": "706/745 (94.8% null)",
+      "nullEmail": "10/745 (1.3% null)",
+      "distinctRoles": [
+        "hq_admin",
+        "member",
+        "user",
+        "zone_coordinator"
+      ],
+      "withBothZoneAndSubgroup": 20,
+      "withZoneOnly": 19,
+      "withNeither": 704,
+      "orphanZoneIds": [],
+      "orphanSubgroupIds": []
+    },
+    "songs": {
+      "distinctScopes": [
+        "hq",
+        "subgroup",
+        "zone"
+      ],
+      "nullZoneId": "1389/3374 (41.2% null)",
+      "withPraiseNightId": 2482,
+      "orphanPraiseNightIds": [
+        {
+          "id": "0K2PPfGD1cWh8zHnvFJV",
+          "title": "THE TRUE REALITY",
+          "praise_night_id": ""
+        },
+        {
+          "id": "7pXQLt5mvkNYV0UpJnCu",
+          "title": "THE BEAUTY OF OUR LIVES",
+          "praise_night_id": ""
+        },
+        {
+          "id": "UrD5FjiK2ZhyV6b6A7BJ",
+          "title": "THE AIR OF YOUR PRESENCE",
+          "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+        },
+        {
+          "id": "9boP6TF08WEHN1AxhhQC",
+          "title": "DIVINITY",
+          "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+        },
+        {
+          "id": "b7CwDM7RvSiDxx4KEglX",
+          "title": "Your Day Of Salvation",
+          "praise_night_id": ""
+        },
+        {
+          "id": "B9I6mLPLx3DUJT5yphC8",
+          "title": "Your power and majesty",
+          "praise_night_id": ""
+        },
+        {
+          "id": "BaJvIC1BVzhKqwWrrpOP",
+          "title": "Your power and majesty",
+          "praise_night_id": ""
+        },
+        {
+          "id": "bpAOaN93iC1nXP3wtCOw",
+          "title": "YOUR WORD ALIVE",
+          "praise_night_id": ""
+        },
+        {
+          "id": "cCOvkWv50ew0iU58n7M8",
+          "title": "Your miraculous change has come",
+          "praise_night_id": ""
+        },
+        {
+          "id": "D0SFz5BvxETioQT1VLx0",
+          "title": "Your power and majesty",
+          "praise_night_id": ""
+        },
+        {
+          "id": "dB1ntB2reioexHKwHSu3",
+          "title": "The All powerfully name",
+          "praise_night_id": ""
+        },
+        {
+          "id": "dUzHMSZJK4MNaDtXhB6V",
+          "title": "THE HEALING POWER",
+          "praise_night_id": ""
+        },
+        {
+          "id": "dwFR6lmoFVDKb81fGkaA",
+          "title": "THE NAME",
+          "praise_night_id": ""
+        },
+        {
+          "id": "FJ3HKERSXjFH2AiwVi6M",
+          "title": "No price to pay",
+          "praise_night_id": ""
+        },
+        {
+          "id": "fk5e3M6KJwBoHwLTQDp0",
+          "title": "The Way The Truth The Life.",
+          "praise_night_id": ""
+        },
+        {
+          "id": "BOqzqX0XpGpIMqwXivPo",
+          "title": "Your miracle is sure",
+          "praise_night_id": ""
+        },
+        {
+          "id": "GkaFfpEnuZlle0sGUxeU",
+          "title": "The Almighty  Name",
+          "praise_night_id": ""
+        },
+        {
+          "id": "cTHc98ls3irSxYDCCJJb",
+          "title": "KING OF ETERNITY",
+          "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+        },
+        {
+          "id": "gVohvPmAddJNkjqzsFDo",
+          "title": "THE LIFE GIVER IS HERE",
+          "praise_night_id": ""
+        },
+        {
+          "id": "h6mfOOmUTAXr4C82c8F9",
+          "title": "You Are My Joy",
+          "praise_night_id": ""
+        }
+      ],
+      "withConductor": 1669,
+      "withLeadSinger": 3292,
+      "withDrummer": 1246,
+      "withLeadKeyboardist": 0,
+      "withLeadGuitarist": 0,
+      "withBassGuitarist": 0,
+      "withCategoriesJson": 2206,
+      "praiseNightSample": [
+        {
+          "id": "fDX6ST5CL8SVTxs2bQWy",
+          "title": "THE GREATEST LORD",
+          "praise_night_id": "cSVnGuJRBi1MisAYuxjM"
+        },
+        {
+          "id": "9gGK2lYhyY365O9jjo7f",
+          "title": "FAITHFUL AND JUST",
+          "praise_night_id": "RZbc4jSkVCcTyzRxSJhd"
+        },
+        {
+          "id": "dyzSsAPOYb22gj4hpWqu",
+          "title": "GOD OF HEAVEN AND EARTH",
+          "praise_night_id": "cSVnGuJRBi1MisAYuxjM"
+        },
+        {
+          "id": "0tVNZJn1sKmoEBldFcpl",
+          "title": "JESUS CALMS THE STORM",
+          "praise_night_id": "be9omJOzoGWS7WLjVs5f"
+        },
+        {
+          "id": "QTPD4KM1oWnc6kCvloqr",
+          "title": "IN THE PRESENCE OF THE LORD",
+          "praise_night_id": "wlYJvC2I1CUd87Ma4NWZ"
+        }
+      ]
+    },
+    "programs": {
+      "distinctScopes": [
+        "hq",
+        "subgroup",
+        "zone"
+      ],
+      "nullZoneId": "66/162 (40.7% null)",
+      "withSongsJson": 81,
+      "withSongIds": 162,
+      "sampleSongCounts": [
+        {
+          "id": "AKOnB9DGl1tQfLyWn6yc",
+          "name": "Gdop",
+          "songs_len": 0,
+          "song_ids_len": 4
+        },
+        {
+          "id": "NbcxWAWrAESzEosZ0Z9z",
+          "name": "TRUE PRAISE with TVC",
+          "songs_len": 0,
+          "song_ids_len": 1
+        },
+        {
+          "id": "Scc6ei4yE0DC0N3QiBXE",
+          "name": "APRIL GLOBAL COMMUNION SERVICE",
+          "songs_len": 0,
+          "song_ids_len": 0
+        },
+        {
+          "id": "jYkpmsgnEuHS9Gkjt7So",
+          "name": "Praize",
+          "songs_len": 0,
+          "song_ids_len": 0
+        },
+        {
+          "id": "PsnkLz1UoZW9NHk5Lxd9",
+          "name": "Test 1",
+          "songs_len": 0,
+          "song_ids_len": 0
+        }
+      ]
+    },
+    "playlists": {
+      "distinctScopes": [
+        "hq",
+        "user"
+      ],
+      "nullUserId": "46/184 (25.0% null)",
+      "withSongsJson": 184,
+      "withSongIds": 184,
+      "orphanUserIds": []
+    },
+    "chats": {
+      "nullCreatedBy": "45/91 (49.5% null)",
+      "withParticipantsJson": 91,
+      "withUnreadJson": 91,
+      "participantSample": [
+        {
+          "id": "18Cr6qKUkQWSz6jWuS3W3bcu2C63_qy1k5GN2DXcf0O4dBRRbBqZqziP2",
+          "type": "direct",
+          "participants_type": "array",
+          "participant_count": 2,
+          "first_participant": "qy1k5GN2DXcf0O4dBRRbBqZqziP2"
+        },
+        {
+          "id": "1oeERuK0ErRoNgVGm8P4yvHJ8762_IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+          "type": "direct",
+          "participants_type": "array",
+          "participant_count": 2,
+          "first_participant": "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+        },
+        {
+          "id": "3lE7IHtuMRVNYxoUyf2Jf9Fl2kX2_uTQgh6dISggmUlkGlD60k2LK5PK2",
+          "type": "direct",
+          "participants_type": "array",
+          "participant_count": 2,
+          "first_participant": "uTQgh6dISggmUlkGlD60k2LK5PK2"
+        },
+        {
+          "id": "4t6ZbclyYWcsaEzRSJiixz2427C2_h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+          "type": "direct",
+          "participants_type": "array",
+          "participant_count": 2,
+          "first_participant": "h7TSoUvnExa4oaUjJ1dlU7q96XT2"
+        },
+        {
+          "id": "4t6ZbclyYWcsaEzRSJiixz2427C2_IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+          "type": "direct",
+          "participants_type": "array",
+          "participant_count": 2,
+          "first_participant": "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+        }
+      ]
+    },
+    "notifications": {
+      "distinctTypes": [
+        "approved",
+        "church_approved",
+        "church_request",
+        "info",
+        "new_submission",
+        "rejected",
+        "replied",
+        "request_approved",
+        "subgroup_approved",
+        "subgroup_rehearsal",
+        "subgroup_rejected",
+        "subgroup_zone",
+        "success",
+        "zone"
+      ],
+      "nullZoneId": "1451/1612 (90.0% null)",
+      "broadcastCount": 4,
+      "targetedCount": 6,
+      "systemCount": 1602,
+      "withSenderId": 332,
+      "sample": [
+        {
+          "id": "notif_1787756227965_arx5",
+          "user_id": null,
+          "title": "Church Request Submitted",
+          "body": null,
+          "is_read": false,
+          "created_at": "2026-08-26T21:57:07.965Z",
+          "raw_data": {
+            "status": "pending",
+            "subgroupId": "sg_1787756226093_lce06"
+          },
+          "type": "church_request",
+          "message": "Your request to register \"task\" has been received and is pending admin approval.",
+          "zone_id": null,
+          "category": null,
+          "priority": null,
+          "sender_id": null,
+          "action_url": null,
+          "target_user_id": "9d501169-287e-45fa-bcee-96996c5919a6",
+          "target_audience": null
+        },
+        {
+          "id": "notif_1787756227662_rlci",
+          "user_id": null,
+          "title": "New Church Approval Request",
+          "body": null,
+          "is_read": false,
+          "created_at": "2026-08-26T21:57:07.662Z",
+          "raw_data": {
+            "link": "/admin?section=Churches",
+            "type": "church_request",
+            "subgroupId": "sg_1787756226093_lce06",
+            "requesterId": "9d501169-287e-45fa-bcee-96996c5919a6"
+          },
+          "type": "church_request",
+          "message": "Eric Stephen requested to register \"task\" in zone-001.",
+          "zone_id": "zone-001",
+          "category": null,
+          "priority": null,
+          "sender_id": null,
+          "action_url": null,
+          "target_user_id": null,
+          "target_audience": "hq_admin"
+        }
+      ]
+    },
+    "attendance": {
+      "nullUserId": "3/2128 (0.1% null)",
+      "nullRehearsalId": "2128/2128 (100.0% null)",
+      "nullZoneId": "3/2128 (0.1% null)",
+      "orphanUserIds": [
+        {
+          "id": "31yTccQAb9v3jY7fGJsM",
+          "user_id": "manual-57srgkeo"
+        },
+        {
+          "id": "5P46Wngnq4fLzOP0vMAb",
+          "user_id": "manual-8dufhmhh"
+        },
+        {
+          "id": "76ja8sCeYJSzwBrQ5dY0",
+          "user_id": "manual-wrixjssm"
+        },
+        {
+          "id": "8vJcE6TM84RpQsqBp2b9",
+          "user_id": "manual-97ik83oa"
+        },
+        {
+          "id": "A1dTKDBpcerChoUTr2tG",
+          "user_id": "manual-3p1txsxi"
+        },
+        {
+          "id": "AQF3U5m3jWxzpA9knuqK",
+          "user_id": "manual-cvyeccoj"
+        },
+        {
+          "id": "cYfsVLaQFysrNc0JEkkk",
+          "user_id": "manual-ynxwumic"
+        },
+        {
+          "id": "EkyrXzJy6xFwTvCzB3gb",
+          "user_id": "manual-ysaycn2z"
+        },
+        {
+          "id": "FfXgLu9cJfu5qHCEVkV3",
+          "user_id": "manual-c1rcyv9f"
+        },
+        {
+          "id": "fTqhyYk4XybOpM7TRToY",
+          "user_id": "manual-fq7x46vw"
+        }
+      ],
+      "orphanRehearsalIds": []
+    },
+    "subgroups": {
+      "coordinatorIdPopulated": 9,
+      "orphanZoneIds": [],
+      "orphanCoordinatorIds": []
+    },
+    "adminRequests": {
+      "statuses": [
+        "approved"
+      ],
+      "requestedRoles": [
+        "zone_admin"
+      ]
+    },
+    "app_settings": {
+      "count": 1,
+      "samples": [
+        {
+          "id": "version_control",
+          "raw_data": {
+            "downloadUrl": "",
+            "releaseNotes": "",
+            "latestVersion": "2.0.0",
+            "minRequiredVersion": "2.0.0"
+          }
+        }
+      ]
+    },
+    "settings": {
+      "count": 2,
+      "samples": [
+        {
+          "id": "geofence",
+          "key": null,
+          "value": null,
+          "updated_at": "2026-07-21T20:58:59.561Z",
+          "raw_data": {
+            "radius": 200,
+            "latitude": 6.762636,
+            "longitude": 3.428954,
+            "updatedAt": {
+              "_seconds": 1783614405,
+              "_nanoseconds": 653000000
+            }
+          }
+        },
+        {
+          "id": "geofence_hq",
+          "key": null,
+          "value": null,
+          "updated_at": "2026-07-21T20:58:59.561Z",
+          "raw_data": {
+            "id": "geofence_hq",
+            "radius": 200,
+            "zoneId": "zone-001",
+            "latitude": 6.758237,
+            "longitude": 3.431912,
+            "updatedAt": "2026-08-27T18:28:11.200Z",
+            "activeEventName": "HSLHS JULY REHEARSAL 2026"
+          }
+        }
+      ]
+    },
+    "system_metadata": {
+      "count": 1617,
+      "samples": [
+        {
+          "id": "hq_categories_metadata",
+          "raw_data": {
+            "type": "categories",
+            "zoneId": "zone-001",
+            "lastUpdated": {
+              "_seconds": 1778066761,
+              "_nanoseconds": 960000000
+            }
+          }
+        },
+        {
+          "id": "hq_page_categories_metadata",
+          "raw_data": {
+            "type": "page_categories",
+            "zoneId": "zone-001",
+            "lastUpdated": {
+              "_seconds": 1777394070,
+              "_nanoseconds": 226000000
+            }
+          }
+        }
+      ]
+    },
+    "activity_logs": {
+      "count": 54800,
+      "rawDataKeys": [
+        "id",
+        "ip",
+        "action",
+        "userId",
+        "zoneId",
+        "details",
+        "category",
+        "userName",
+        "createdAt",
+        "timestamp"
+      ]
+    },
+    "analytics_sessions": {
+      "count": 10294,
+      "rawDataKeys": [
+        "pages",
+        "browser",
+        "pageViews",
+        "sessionId",
+        "startTime",
+        "deviceType"
+      ]
+    },
+    "analytics_events": {
+      "count": 246300,
+      "rawDataKeys": [
+        "id",
+        "page",
+        "type",
+        "browser",
+        "metadata",
+        "timestamp",
+        "deviceType",
+        "featureName"
+      ]
+    },
+    "analytics_monthly": {
+      "count": 5,
+      "rawDataKeys": [
+        "year",
+        "month",
+        "cities",
+        "userIds",
+        "browsers",
+        "countries",
+        "createdAt",
+        "pageViews",
+        "updatedAt",
+        "totalEvents",
+        "uniqueUsers",
+        "totalSessions",
+        "mobileSessions",
+        "tabletSessions",
+        "totalPageViews",
+        "desktopSessions"
+      ]
+    },
+    "simplified_analytics": {
+      "count": 8,
+      "rawDataKeys": [
+        "id",
+        "year",
+        "month",
+        "cities",
+        "browsers",
+        "countries",
+        "createdAt",
+        "pageViews",
+        "updatedAt",
+        "totalLogins",
+        "uniqueUsers",
+        "totalSignups",
+        "songMinistries",
+        "featureEngagements",
+        "totalSongMinistries",
+        "totalFeatureEngagements"
+      ]
+    },
+    "audiolab_projects": {
+      "count": 52,
+      "rawDataKeys": [
+        "name",
+        "tempo",
+        "tracks",
+        "zoneId",
+        "ownerId",
+        "duration",
+        "createdAt",
+        "updatedAt",
+        "collaborators",
+        "timeSignature",
+        "referenceSongId"
+      ]
+    },
+    "audiolab_sessions": {
+      "count": 449,
+      "rawDataKeys": [
+        "mode",
+        "score",
+        "songId",
+        "streak",
+        "userId",
+        "endedAt",
+        "accuracy",
+        "duration",
+        "startedAt"
+      ]
+    },
+    "audiolab_progress": {
+      "count": 105,
+      "rawDataKeys": [
+        "xp",
+        "level",
+        "userId",
+        "updatedAt",
+        "averageScore",
+        "totalMinutes",
+        "weeklyTarget",
+        "currentStreak",
+        "longestStreak",
+        "totalSessions",
+        "weeklyProgress",
+        "averageAccuracy",
+        "lastPracticeDate"
+      ]
+    },
+    "songs_scope_dist": [
+      {
+        "v": "hq",
+        "n": "3300"
+      },
+      {
+        "v": "zone",
+        "n": "60"
+      },
+      {
+        "v": "subgroup",
+        "n": "14"
+      }
+    ],
+    "programs_scope_dist": [
+      {
+        "v": "hq",
+        "n": "97"
+      },
+      {
+        "v": "zone",
+        "n": "39"
+      },
+      {
+        "v": null,
+        "n": "20"
+      },
+      {
+        "v": "subgroup",
+        "n": "6"
+      }
+    ],
+    "playlists_scope_dist": [
+      {
+        "v": "user",
+        "n": "120"
+      },
+      {
+        "v": "hq",
+        "n": "64"
+      }
+    ]
+  },
+  "backfillPlans": {},
+  "orphans": {
+    "profiles_bad_zone": [],
+    "songs_bad_praise_night": [
+      {
+        "id": "0K2PPfGD1cWh8zHnvFJV",
+        "title": "THE TRUE REALITY",
+        "praise_night_id": ""
+      },
+      {
+        "id": "7pXQLt5mvkNYV0UpJnCu",
+        "title": "THE BEAUTY OF OUR LIVES",
+        "praise_night_id": ""
+      },
+      {
+        "id": "UrD5FjiK2ZhyV6b6A7BJ",
+        "title": "THE AIR OF YOUR PRESENCE",
+        "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+      },
+      {
+        "id": "9boP6TF08WEHN1AxhhQC",
+        "title": "DIVINITY",
+        "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+      },
+      {
+        "id": "b7CwDM7RvSiDxx4KEglX",
+        "title": "Your Day Of Salvation",
+        "praise_night_id": ""
+      },
+      {
+        "id": "B9I6mLPLx3DUJT5yphC8",
+        "title": "Your power and majesty",
+        "praise_night_id": ""
+      },
+      {
+        "id": "BaJvIC1BVzhKqwWrrpOP",
+        "title": "Your power and majesty",
+        "praise_night_id": ""
+      },
+      {
+        "id": "bpAOaN93iC1nXP3wtCOw",
+        "title": "YOUR WORD ALIVE",
+        "praise_night_id": ""
+      },
+      {
+        "id": "cCOvkWv50ew0iU58n7M8",
+        "title": "Your miraculous change has come",
+        "praise_night_id": ""
+      },
+      {
+        "id": "D0SFz5BvxETioQT1VLx0",
+        "title": "Your power and majesty",
+        "praise_night_id": ""
+      },
+      {
+        "id": "dB1ntB2reioexHKwHSu3",
+        "title": "The All powerfully name",
+        "praise_night_id": ""
+      },
+      {
+        "id": "dUzHMSZJK4MNaDtXhB6V",
+        "title": "THE HEALING POWER",
+        "praise_night_id": ""
+      },
+      {
+        "id": "dwFR6lmoFVDKb81fGkaA",
+        "title": "THE NAME",
+        "praise_night_id": ""
+      },
+      {
+        "id": "FJ3HKERSXjFH2AiwVi6M",
+        "title": "No price to pay",
+        "praise_night_id": ""
+      },
+      {
+        "id": "fk5e3M6KJwBoHwLTQDp0",
+        "title": "The Way The Truth The Life.",
+        "praise_night_id": ""
+      },
+      {
+        "id": "BOqzqX0XpGpIMqwXivPo",
+        "title": "Your miracle is sure",
+        "praise_night_id": ""
+      },
+      {
+        "id": "GkaFfpEnuZlle0sGUxeU",
+        "title": "The Almighty  Name",
+        "praise_night_id": ""
+      },
+      {
+        "id": "cTHc98ls3irSxYDCCJJb",
+        "title": "KING OF ETERNITY",
+        "praise_night_id": "aJpzwHEOCB5Q6FbEVQCz"
+      },
+      {
+        "id": "gVohvPmAddJNkjqzsFDo",
+        "title": "THE LIFE GIVER IS HERE",
+        "praise_night_id": ""
+      },
+      {
+        "id": "h6mfOOmUTAXr4C82c8F9",
+        "title": "You Are My Joy",
+        "praise_night_id": ""
+      }
+    ],
+    "attendance_bad_user": [
+      {
+        "id": "31yTccQAb9v3jY7fGJsM",
+        "user_id": "manual-57srgkeo"
+      },
+      {
+        "id": "5P46Wngnq4fLzOP0vMAb",
+        "user_id": "manual-8dufhmhh"
+      },
+      {
+        "id": "76ja8sCeYJSzwBrQ5dY0",
+        "user_id": "manual-wrixjssm"
+      },
+      {
+        "id": "8vJcE6TM84RpQsqBp2b9",
+        "user_id": "manual-97ik83oa"
+      },
+      {
+        "id": "A1dTKDBpcerChoUTr2tG",
+        "user_id": "manual-3p1txsxi"
+      },
+      {
+        "id": "AQF3U5m3jWxzpA9knuqK",
+        "user_id": "manual-cvyeccoj"
+      },
+      {
+        "id": "cYfsVLaQFysrNc0JEkkk",
+        "user_id": "manual-ynxwumic"
+      },
+      {
+        "id": "EkyrXzJy6xFwTvCzB3gb",
+        "user_id": "manual-ysaycn2z"
+      },
+      {
+        "id": "FfXgLu9cJfu5qHCEVkV3",
+        "user_id": "manual-c1rcyv9f"
+      },
+      {
+        "id": "fTqhyYk4XybOpM7TRToY",
+        "user_id": "manual-fq7x46vw"
+      }
+    ],
+    "attendance_bad_rehearsal": []
+  },
+  "warnings": [
+    "New table pre-exists: media_comments"
+  ],
+  "rowCounts": {
+    "zones": 20,
+    "subgroups": 11,
+    "profiles": 745,
+    "auth_credentials": 9,
+    "refresh_tokens": 35,
+    "songs": 3374,
+    "programs": 162,
+    "playlists": 184,
+    "categories": 122,
+    "media_assets": 7786,
+    "chats": 91,
+    "messages": 838,
+    "notifications": 1612,
+    "attendance": 2128,
+    "admin_requests": 2,
+    "submitted_songs": 202,
+    "support_tickets": 0,
+    "media_doodles": 26,
+    "watch_history": 328,
+    "song_history": 5131,
+    "user_song_notes": 18,
+    "activity_logs": 54800,
+    "analytics_sessions": 10294,
+    "analytics_events": 246300,
+    "analytics_monthly": 5,
+    "simplified_analytics": 8,
+    "audiolab_projects": 52,
+    "audiolab_sessions": 449,
+    "audiolab_progress": 105,
+    "user_sessions": 554,
+    "user_statuses": 2,
+    "presence": 552,
+    "calls": 42,
+    "app_settings": 1,
+    "settings": 2,
+    "system_metadata": 1617,
+    "achievement_templates": 6
+  },
+  "zoneIdIntegrity": {
+    "songs": {
+      "total": 3374,
+      "withZoneId": 1985,
+      "nullZoneId": 1389,
+      "orphanCount": 2,
+      "orphanSamples": [
+        {
+          "id": "ghTaNCkONgTEzCITVIJ4",
+          "zone_id": ""
+        },
+        {
+          "id": "u32sK6NmiOorX1cxpGFu",
+          "zone_id": ""
+        }
+      ],
+      "distinctZoneIds": [
+        "zone-international",
+        "",
+        "zone-001",
+        "zone-017",
+        "zone-004",
+        "zone-088",
+        "zone-orchestra",
+        "zone-005"
+      ]
+    },
+    "programs": {
+      "total": 162,
+      "withZoneId": 96,
+      "nullZoneId": 66,
+      "orphanCount": 0,
+      "orphanSamples": [],
+      "distinctZoneIds": [
+        "zone-017",
+        "zone-052",
+        "zone-004",
+        "zone-088",
+        "zone-orchestra",
+        "zone-001"
+      ]
+    },
+    "playlists": {
+      "total": 184,
+      "withZoneId": 0,
+      "nullZoneId": 184,
+      "orphanCount": 0,
+      "orphanSamples": [],
+      "distinctZoneIds": []
+    },
+    "media_assets": {
+      "total": 7786,
+      "withZoneId": 135,
+      "nullZoneId": 7651,
+      "orphanCount": 5,
+      "orphanSamples": [
+        {
+          "id": "2o4dnmaFgI48Nwv6qnnm",
+          "zone_id": ""
+        },
+        {
+          "id": "38G3oN1LUVkemrN9jyzZ",
+          "zone_id": ""
+        },
+        {
+          "id": "7va4uBOEAcmAKdSJXAXw",
+          "zone_id": ""
+        },
+        {
+          "id": "8H4xhPpinXTKO4fjGWZ4",
+          "zone_id": ""
+        },
+        {
+          "id": "8qFvQ84ftVmAGcYEgfPO",
+          "zone_id": ""
+        }
+      ],
+      "distinctZoneIds": [
+        "zone-052",
+        "zone-088",
+        "",
+        "zone-013"
+      ]
+    },
+    "categories": {
+      "total": 122,
+      "withZoneId": 7,
+      "nullZoneId": 115,
+      "orphanCount": 0,
+      "orphanSamples": [],
+      "distinctZoneIds": [
+        "zone-017",
+        "zone-052",
+        "zone-088"
+      ]
+    },
+    "notifications": {
+      "total": 1612,
+      "withZoneId": 161,
+      "nullZoneId": 1451,
+      "orphanCount": 1,
+      "orphanSamples": [
+        {
+          "id": "notif_1787777648166_l05le",
+          "zone_id": "ZONE001"
+        }
+      ],
+      "distinctZoneIds": [
+        "zone-001",
+        "zone-005",
+        "zone-013",
+        "zone-017",
+        "zone-international",
+        "ZONE001"
+      ]
+    },
+    "attendance": {
+      "total": 2128,
+      "withZoneId": 2125,
+      "nullZoneId": 3,
+      "orphanCount": 5,
+      "orphanSamples": [
+        {
+          "id": "0EgrocMHinSBxUiod67c",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "0EPfuys5PnaA3vRdc1pj",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "0H8Oe4HYedxPNejrCmci",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "0hVfRztum4iAuAM5MWc8",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "0KIPzVP22fHHWAaunpkA",
+          "zone_id": "unknown"
+        }
+      ],
+      "distinctZoneIds": [
+        "zone-international",
+        "Celvz",
+        "CELVZ",
+        "zone-001",
+        "zone-013",
+        "zone-004",
+        "unknown",
+        "zone-orchestra",
+        "zone-005"
+      ]
+    },
+    "admin_requests": {
+      "total": 2,
+      "withZoneId": 2,
+      "nullZoneId": 0,
+      "orphanCount": 0,
+      "orphanSamples": [],
+      "distinctZoneIds": [
+        "zone-001",
+        "zone-088"
+      ]
+    },
+    "submitted_songs": {
+      "total": 202,
+      "withZoneId": 193,
+      "nullZoneId": 9,
+      "orphanCount": 5,
+      "orphanSamples": [
+        {
+          "id": "c0fc9a6f-9820-46fb-a5fc-56526fccc968",
+          "zone_id": "ZONE001"
+        },
+        {
+          "id": "LKIH8pp7O4cgplHUowpO",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "fqq0xZrHP4uJOOFA91wD",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "GVJj3aB0BtXNGvgDkiuR",
+          "zone_id": "unknown"
+        },
+        {
+          "id": "QyfgYdqa3xFlLuPnpGXC",
+          "zone_id": "unknown"
+        }
+      ],
+      "distinctZoneIds": [
+        "zone-international",
+        "ZONE001",
+        "zone-001",
+        "zone-048",
+        "zone-088",
+        "zone-national",
+        "unknown",
+        "zone-005"
+      ]
+    },
+    "support_tickets": {
+      "total": 0,
+      "withZoneId": 0,
+      "nullZoneId": 0,
+      "orphanCount": 0,
+      "orphanSamples": [],
+      "distinctZoneIds": []
+    }
+  }
+}

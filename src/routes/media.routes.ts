@@ -209,7 +209,7 @@ router.get('/', requireAuth, async (req: any, res) => {
 // GET /media/categories - List media categories
 router.get('/categories', requireAuth, async (_req, res) => {
   try {
-    const rows = await prisma.category.findMany({ where: { type: 'media' } });
+    const rows = await prisma.category.findMany({ where: { type: 'MEDIA' } });
     const data = rows.map((r) => {
       const m = mergeRawRow(r);
       return {
@@ -223,7 +223,7 @@ router.get('/categories', requireAuth, async (_req, res) => {
     res.json({ success: true, count: data.length, data });
   } catch (err) {
     console.error('[media:categories:get]', err);
-    res.status(500).json({ success: false, error: 'Failed to fetch media categories' });
+    res.status(500).json({ success: false, error: 'Failed to fetch categories' });
   }
 });
 
@@ -260,9 +260,13 @@ router.post('/', requireAuth, async (req: any, res) => {
     const id = body.id || `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
 
+    const mediaType = (body.type ? String(body.type).toUpperCase() : 'AUDIO') as any;
+    const orgId = body.organizationId || body.zoneId || (req.tenant?.isHQAdmin ? 'zone-001' : req.tenant?.effectiveZoneId || null);
+
     const rawData = {
       ...body,
       id,
+      zoneId: orgId,
       createdAt: now,
       updatedAt: now,
     };
@@ -271,10 +275,9 @@ router.post('/', requireAuth, async (req: any, res) => {
       data: {
         id,
         title: body.title || 'Untitled Media',
-        type: body.type || 'audio',
+        type: mediaType,
         folder: body.folder || 'audio',
-        scope: body.scope || 'hq',
-        zoneId: body.zoneId || null,
+        organizationId: orgId,
         subgroupId: body.subgroupId || null,
         rawData,
       },
@@ -360,7 +363,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
     const tenant = (req as any).tenant;
     if (!isHQRole(role)) {
-      if (existing.zoneId && existing.zoneId !== tenant?.effectiveZoneId) {
+      if (existing.organizationId && existing.organizationId !== tenant?.effectiveZoneId) {
         res.status(403).json({ success: false, error: 'Forbidden' });
         return;
       }

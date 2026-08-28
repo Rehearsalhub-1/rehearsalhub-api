@@ -78,7 +78,7 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: any, res) => {
         name,
         date,
         category: 'schedule',
-        zoneId: zoneId !== 'global' ? zoneId : null,
+        organizationId: zoneId !== 'global' ? zoneId : null,
         createdAt: now,
         rawData,
       },

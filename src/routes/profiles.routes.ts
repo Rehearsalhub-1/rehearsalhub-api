@@ -464,16 +464,16 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   // If password is provided, hash and update in auth_credentials
   if (body.password) {
     const hashedPassword = await hashPassword(body.password);
-    const existingCred = await prisma.authCredential.findUnique({ where: { profileId: userId } });
+    const existingCred = await prisma.authCredential.findUnique({ where: { userId } });
     if (existingCred) {
       await prisma.authCredential.update({
-        where: { profileId: userId },
+        where: { userId },
         data: { passwordHash: hashedPassword, updatedAt: new Date() },
       });
     } else {
       await prisma.authCredential.create({
         data: {
-          profileId: userId,
+          userId,
           passwordHash: hashedPassword,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -492,14 +492,7 @@ router.patch('/:userId', requireAuth, async (req, res) => {
     updatedAt: new Date().toISOString(),
   };
 
-  if (isHqAdmin && body.role !== undefined) {
-    updateFields.role = body.role;
-  }
-  if (isHqAdmin && hasHq !== undefined) {
-    updateFields.hasHqAccess = hasHq;
-  }
-
-  const updated = await prisma.profile.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: updateFields,
   });
@@ -530,17 +523,17 @@ router.post('/:userId/password', requireAuth, async (req, res) => {
     }
 
     const hashedPassword = await hashPassword(targetPassword);
-    const existingCred = await prisma.authCredential.findUnique({ where: { profileId: userId } });
+    const existingCred = await prisma.authCredential.findUnique({ where: { userId } });
 
     if (existingCred) {
       await prisma.authCredential.update({
-        where: { profileId: userId },
+        where: { userId },
         data: { passwordHash: hashedPassword, updatedAt: new Date() },
       });
     } else {
       await prisma.authCredential.create({
         data: {
-          profileId: userId,
+          userId,
           passwordHash: hashedPassword,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -574,13 +567,12 @@ router.patch('/:userId/role', requireAuth, requireTenantAdmin, async (req, res) 
     }
 
     const hasHqAccess = role === 'hq_admin';
-    await prisma.profile.update({
-      where: { id: userId },
-      data: {
-        role,
-        hasHqAccess,
-        updatedAt: new Date().toISOString(),
-      },
+    const memberRole = role === 'hq_admin' ? 'HQ_ADMIN' : role === 'zone_admin' ? 'ZONE_ADMIN' : 'MEMBER';
+
+    await prisma.membership.upsert({
+      where: { userId_organizationId: { userId, organizationId: 'zone-001' } },
+      create: { userId, organizationId: 'zone-001', role: memberRole as any, hasHqAccess },
+      update: { role: memberRole as any, hasHqAccess },
     });
 
     res.json({ success: true, message: `Role updated to ${role}` });
@@ -599,30 +591,37 @@ router.post('/:userId/approve', requireAuth, requireTenantAdmin, async (req, res
       res.status(403).json({ success: false, error: 'Only HQ admins can approve join requests' });
       return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
     if (!existing) { res.status(404).json({ success: false, error: 'Profile not found' }); return; }
 
     const raw = asRaw(existing.rawData);
     const updatedRaw = { ...raw, pending_hq_approval: false, is_active: true, status: 'active', approved_by: auth.userId, approved_at: new Date().toISOString() };
-    await prisma.profile.update({
+    await prisma.user.update({
       where: { id: userId },
       data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
     });
 
+    await prisma.membership.upsert({
+      where: { userId_organizationId: { userId, organizationId: 'zone-001' } },
+      create: { userId, organizationId: 'zone-001', role: 'MEMBER', hasHqAccess: true },
+      update: { hasHqAccess: true },
+    });
+
     // Notify user their account is approved
     const notifId = crypto.randomUUID();
-    await prisma.notification.create({
+    await prisma.broadcastNotification.create({
       data: {
         id: notifId,
         type: 'join_request_approved',
         title: '🎉 Your HQ account has been approved',
+        body: 'Your request to join the HQ group has been approved by an admin. You can now log in to the Rehearsal Hub Portal.',
         message: 'Your request to join the HQ group has been approved by an admin. You can now log in to the Rehearsal Hub Portal.',
         category: 'join_request',
-        priority: 'high',
-        targetUserId: userId,
+        priority: 'HIGH',
+        organizationId: 'zone-001',
         senderId: auth.userId,
-        createdAt: new Date().toISOString(),
-        rawData: { type: 'join_request_approved', approvedBy: auth.userId, approvedAt: new Date().toISOString(), status: 'approved', zoneCode: raw.zone_code || null } as any,
+        createdAt: new Date(),
+        rawData: { type: 'join_request_approved', approvedBy: auth.userId, approvedAt: new Date().toISOString(), status: 'approved', zoneCode: raw.zone_code || null, targetUserId: userId } as any,
       },
     }).catch(() => {});
 
@@ -651,32 +650,35 @@ router.post('/:userId/reject', requireAuth, requireTenantAdmin, async (req, res)
       res.status(403).json({ success: false, error: 'Only HQ admins can reject join requests' });
       return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
     if (!existing) { res.status(404).json({ success: false, error: 'Profile not found' }); return; }
 
     const { reason } = req.body;
     const raw = asRaw(existing.rawData);
     const updatedRaw = { ...raw, pending_hq_approval: false, is_active: false, rejected: true, rejected_by: auth.userId, rejected_at: new Date().toISOString(), rejection_reason: reason || null };
-    await prisma.profile.update({
+    await prisma.user.update({
       where: { id: userId },
       data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
     });
 
     const notifId = crypto.randomUUID();
-    await prisma.notification.create({
+    await prisma.broadcastNotification.create({
       data: {
         id: notifId,
         type: 'join_request_rejected',
         title: 'HQ Join Request — Not Approved',
+        body: reason
+          ? `Your HQ join request was not approved. Reason: ${reason}`
+          : 'Your request to join the HQ group was not approved at this time. Please contact your zone admin.',
         message: reason
           ? `Your HQ join request was not approved. Reason: ${reason}`
           : 'Your request to join the HQ group was not approved at this time. Please contact your zone admin.',
         category: 'join_request',
-        priority: 'normal',
-        targetUserId: userId,
+        priority: 'NORMAL',
+        organizationId: 'zone-001',
         senderId: auth.userId,
-        createdAt: new Date().toISOString(),
-        rawData: { type: 'join_request_rejected', rejectedBy: auth.userId, rejectedAt: new Date().toISOString(), reason: reason || null, status: 'rejected' },
+        createdAt: new Date(),
+        rawData: { type: 'join_request_rejected', rejectedBy: auth.userId, rejectedAt: new Date().toISOString(), reason: reason || null, status: 'rejected', targetUserId: userId },
       },
     }).catch(() => {});
 

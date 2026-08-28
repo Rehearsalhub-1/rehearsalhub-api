@@ -147,7 +147,7 @@ router.get('/:ticketId/messages', requireAuth, async (req, res) => {
         id: m.id,
         ticketId: m.chatId,
         senderId: m.senderId,
-        senderName: m.senderName || raw.senderName || 'Support User',
+        senderName: (raw.senderName as string) || (m as any).senderName || 'Support User',
         senderType: raw.senderType || 'user',
         text: m.text || raw.text || '',
         message: m.text || raw.text || '',
@@ -193,17 +193,17 @@ router.post('/', requireAuth, async (req: any, res) => {
       createdAt: now.toISOString(),
     };
 
+    const priorityUpper = (priority ? String(priority).toUpperCase() : 'NORMAL') as any;
+
     await prisma.supportTicket.create({
       data: {
         id: ticketId,
         userId: auth.userId,
-        userName,
-        userEmail,
         subject: subject || 'Support Request',
         category,
-        status: 'open',
-        priority,
-        zoneId: auth.zoneId || null,
+        status: 'OPEN',
+        priority: priorityUpper,
+        organizationId: auth.zoneId || null,
         lastMessage: firstText,
         lastTimestamp: now,
         unreadByAdmin: 1,
@@ -219,9 +219,11 @@ router.post('/', requireAuth, async (req: any, res) => {
       update: {},
       create: {
         id: ticketId,
-        type: 'support',
-        createdBy: auth.userId,
-        participants: [auth.userId],
+        type: 'DIRECT',
+        createdById: auth.userId,
+        participants: {
+          create: [{ userId: auth.userId }],
+        },
       },
     });
 
@@ -230,8 +232,7 @@ router.post('/', requireAuth, async (req: any, res) => {
         id: messageId,
         chatId: ticketId,
         senderId: auth.userId,
-        senderName: userName,
-        type: 'support',
+        type: 'TEXT',
         text: firstText,
         rawData: { id: messageId, ticketId, senderId: auth.userId, senderName: userName, text: firstText, senderType: 'user', createdAt: now.toISOString() },
       },
@@ -289,9 +290,11 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
       update: {},
       create: {
         id: ticketId,
-        type: 'support',
-        createdBy: auth.userId,
-        participants: [auth.userId],
+        type: 'DIRECT',
+        createdById: auth.userId,
+        participants: {
+          create: [{ userId: auth.userId }],
+        },
       },
     });
 
@@ -300,8 +303,7 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
         id: messageId,
         chatId: ticketId,
         senderId: auth.userId,
-        senderName,
-        type: 'support',
+        type: 'TEXT',
         text,
         rawData: msgPayload,
       },
@@ -313,7 +315,7 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
         lastMessage: text,
         lastTimestamp: now,
         updatedAt: now,
-        status: isAdmin ? 'in_progress' : 'open',
+        status: isAdmin ? 'IN_PROGRESS' : 'OPEN',
       },
     });
 
@@ -347,7 +349,7 @@ router.patch('/:ticketId/status', requireAuth, async (req, res) => {
     await prisma.supportTicket.update({
       where: { id: ticketId },
       data: {
-        status,
+        status: String(status).toUpperCase() as any,
         updatedAt: new Date(),
       },
     });

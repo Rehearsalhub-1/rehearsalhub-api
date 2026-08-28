@@ -15,7 +15,7 @@ router.get('/me', requireAuth, async (_req, res) => {
     const sub = raw.subscription || {
       id: `sub_${profile.id}`,
       userId: profile.id,
-      status: profile.status === 'active' ? 'active' : 'inactive',
+      status: raw.status === 'active' ? 'active' : 'inactive',
       tier: 'premium',
       plan: 'monthly',
       expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
@@ -41,7 +41,7 @@ router.get('/', requireAuth, async (_req, res) => {
       const sub = rawP.subscription || {
         id: `sub_${p.id}`,
         userId: p.id,
-        status: p.status === 'active' ? 'active' : 'inactive',
+        status: rawP.status === 'active' ? 'active' : 'inactive',
         tier: 'premium',
         plan: 'monthly',
         expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
@@ -82,7 +82,7 @@ router.get('/:userId', requireAuth, async (req, res) => {
     const sub = raw.subscription || {
       id: `sub_${profile.id}`,
       userId: profile.id,
-      status: profile.status === 'active' ? 'active' : 'inactive',
+      status: raw.status === 'active' ? 'active' : 'inactive',
       tier: 'premium',
       plan: 'monthly',
       expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),

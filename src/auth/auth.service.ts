@@ -68,7 +68,7 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
   const zoneId = zoneIdFromProfile(profile);
   const rawRefresh = generateRefreshToken();
   const tokenHash = await bcrypt.hash(rawRefresh, 12);
-  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), profileId: profile.id, tokenHash, expiresAt: refreshExpiresAt() } });
+  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() } });
   const accessToken = signAccessToken({ sub: profile.id, role, zoneId: zoneId ?? undefined });
   return { accessToken, refreshToken: rawRefresh, user: { id: profile.id, email, role, zoneId, firstName: profile.firstName, lastName: profile.lastName } };
 }
@@ -120,37 +120,37 @@ export async function login(identifier: string, password: string): Promise<AuthT
 }
 
 export async function refresh(rawToken: string, profileId: string): Promise<{ accessToken: string; refreshToken: string }> {
-  const rows = await prisma.refreshToken.findMany({ where: { profileId } });
+  const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
   let matchedRow: (typeof rows)[number] | undefined;
   for (const row of rows) {
     if (await bcrypt.compare(rawToken, row.tokenHash)) { matchedRow = row; break; }
   }
 
   if (!matchedRow) {
-    await prisma.refreshToken.deleteMany({ where: { profileId } });
+    await prisma.refreshToken.deleteMany({ where: { userId: profileId } });
     throw new AuthError('Invalid or reused refresh token');
   }
   if (matchedRow.expiresAt <= new Date()) {
-    await prisma.refreshToken.deleteMany({ where: { profileId } });
+    await prisma.refreshToken.deleteMany({ where: { userId: profileId } });
     throw new AuthError('Refresh token expired');
   }
 
   await prisma.refreshToken.delete({ where: { id: matchedRow.id } });
 
-  const profile = await prisma.profile.findUnique({ where: { id: profileId } });
-  if (!profile) throw new AuthError('User not found');
+  const user = await prisma.user.findUnique({ where: { id: profileId } });
+  if (!user) throw new AuthError('User not found');
 
   const newRaw = generateRefreshToken();
   const newHash = await bcrypt.hash(newRaw, 12);
-  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), profileId: profile.id, tokenHash: newHash, expiresAt: refreshExpiresAt() } });
+  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), userId: user.id, tokenHash: newHash, expiresAt: refreshExpiresAt() } });
 
-  const accessToken = signAccessToken({ sub: profile.id, role: tokenRole(profile), zoneId: zoneIdFromProfile(profile) ?? undefined });
+  const accessToken = signAccessToken({ sub: user.id, role: tokenRole({ role: null, hasHqAccess: false }), zoneId: zoneIdFromProfile(user) ?? undefined });
   return { accessToken, refreshToken: newRaw };
 }
 
 export async function logout(jti: string, exp: number, profileId: string, rawRefreshToken: string): Promise<void> {
   revocationStore.revoke(jti, new Date(exp * 1000));
-  const rows = await prisma.refreshToken.findMany({ where: { profileId } });
+  const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
   for (const row of rows) {
     if (await bcrypt.compare(rawRefreshToken, row.tokenHash)) {
       await prisma.refreshToken.delete({ where: { id: row.id } });
@@ -159,27 +159,115 @@ export async function logout(jti: string, exp: number, profileId: string, rawRef
   }
 }
 
-export type MeResult = AuthUser & { memberships: { zoneMembers: Array<Record<string, unknown>>; hqMembers: Array<Record<string, unknown>> } };
+export type MeResult = AuthUser & {
+  memberships: Array<{
+    id: string;
+    userId: string;
+    organizationId: string;
+    subgroupId: string | null;
+    role: string;
+    status: string;
+    hasHqAccess: boolean;
+    organization: {
+      id: string;
+      name: string | null;
+      code: string | null;
+      country: string | null;
+      region: string | null;
+      isHq: boolean;
+      invitationCode: string | null;
+    };
+    subgroup: {
+      id: string;
+      name: string;
+      type: string | null;
+      status: string | null;
+    } | null;
+  }>;
+  legacyMemberships?: {
+    zoneMembers: Array<Record<string, unknown>>;
+    hqMembers: Array<Record<string, unknown>>;
+  };
+};
 
 export async function getMe(profileId: string): Promise<MeResult> {
-  const profile = await prisma.profile.findUnique({ where: { id: profileId } });
-  if (!profile) throw new AuthError('User not found', 404);
+  const user = await prisma.user.findUnique({
+    where: { id: profileId },
+    include: {
+      memberships: {
+        include: {
+          organization: true,
+          subgroup: true,
+        },
+      },
+    },
+  });
+  if (!user) throw new AuthError('User not found', 404);
 
-  const zoneId = zoneIdFromProfile(profile);
-  const zoneMembers = zoneId ? [{ id: `zm_${profile.id}`, userId: profile.id, zoneId, role: profile.role || 'member', status: profile.status || 'active' }] : [];
-  const hqMembers = profile.hasHqAccess ? [{ id: `hqm_${profile.id}`, userId: profile.id, hqGroupId: 'hq', role: profile.role || 'member', status: profile.status || 'active', userEmail: profile.email, userName: profile.name }] : [];
+  const canonicalMemberships = user.memberships.map((m) => ({
+    id: m.id,
+    userId: user.id,
+    organizationId: m.organizationId,
+    subgroupId: m.subgroupId,
+    role: m.role,
+    status: m.status,
+    hasHqAccess: m.hasHqAccess,
+    organization: {
+      id: m.organization.id,
+      name: m.organization.name,
+      code: m.organization.code,
+      country: m.organization.country,
+      region: m.organization.region,
+      isHq: m.organization.isHq,
+      invitationCode: m.organization.invitationCode,
+    },
+    subgroup: m.subgroup
+      ? {
+          id: m.subgroup.id,
+          name: m.subgroup.name,
+          type: m.subgroup.type,
+          status: m.subgroup.status,
+        }
+      : null,
+  }));
+
+  const zoneMembers = user.memberships
+    .filter((m) => !m.organization.isHq)
+    .map((m) => ({
+      id: m.id,
+      userId: user.id,
+      zoneId: m.organizationId,
+      zoneName: m.organization.name,
+      subgroupId: m.subgroupId,
+      subgroupName: m.subgroup?.name,
+      role: m.role.toLowerCase(),
+      status: m.status.toLowerCase(),
+    }));
+
+  const hqMembers = user.memberships
+    .filter((m) => m.organization.isHq || m.hasHqAccess)
+    .map((m) => ({
+      id: m.id,
+      userId: user.id,
+      hqGroupId: m.organizationId,
+      role: m.role.toLowerCase(),
+      status: m.status.toLowerCase(),
+      userEmail: user.email,
+      userName: user.name,
+    }));
+
+  const primaryRole = user.memberships[0]?.role.toLowerCase() || 'member';
+  const primaryZoneId = user.memberships[0]?.organizationId || null;
 
   return {
-    id: profile.id,
-    email: (profile.email || '').toLowerCase(),
-    role: tokenRole(profile),
-    zoneId,
-    firstName: profile.firstName,
-    lastName: profile.lastName,
-    memberships: {
-      zoneMembers,
-      hqMembers,
-    },
+    id: user.id,
+    email: user.email || '',
+    role: primaryRole,
+    zoneId: primaryZoneId,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    memberships: canonicalMemberships,
+    legacyMemberships: { zoneMembers, hqMembers },
   };
 }
 

@@ -22,7 +22,7 @@ router.get('/', async (_req: Request, res: Response) => {
         OR: [
           { isMinistered: true },
           { category: 'Ministered Songs' },
-          { scope: 'hq' },
+          { organizationId: 'zone-001' },
         ],
       },
       orderBy: { title: 'asc' },
@@ -102,7 +102,7 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
         leadKeyboardist: body.leadKeyboardist || body.lead_keyboardist || null,
         categories: Array.isArray(body.categories) ? body.categories : (body.category ? [body.category] : []),
         isMinistered: true,
-        scope: 'hq',
+        organizationId: 'zone-001',
         rawData: { ...body, id: songId, createdAt: now.toISOString() },
       },
     });

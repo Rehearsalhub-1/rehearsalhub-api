@@ -40,12 +40,10 @@ router.get('/', requireAuth, async (req, res) => {
         if (dismissedBy[userId]) return null;
 
         const audience =
-          (row.targetAudience as string | undefined) ||
           (raw.target_audience as string | undefined) ||
           (raw.targetAudience as string | undefined) ||
           'all';
         const targetUser =
-          row.targetUserId ||
           (raw.target_user_id as string | undefined) ||
           (raw.targetUserId as string | undefined);
         const targetGroup =
@@ -71,7 +69,7 @@ router.get('/', requireAuth, async (req, res) => {
         } else if (audience === 'group' && targetGroup) {
           visible = groupNames.has(targetGroup) || isHqAdmin;
         } else if (audience === 'all' || audience === 'broadcast') {
-          const notifZone = row.zoneId || (raw.zoneId as string) || (raw.zone_id as string);
+          const notifZone = row.organizationId || (raw.zoneId as string) || (raw.zone_id as string);
           if (!notifZone || notifZone === 'all' || notifZone === 'global' || isHqAdmin) {
             visible = true;
           } else if (userZone && notifZone) {
@@ -209,24 +207,34 @@ const createBroadcastHandler = async (req: any, res: any) => {
       is_read: false,
     };
 
-    const newRecord = await prisma.notification.create({
+    const priorityEnum = (priority ? String(priority).toUpperCase() : 'NORMAL') as any;
+
+    const newRecord = await prisma.broadcastNotification.create({
       data: {
         id,
         title: notifTitle,
+        body: notifMessage,
         message: notifMessage,
         type: type || 'info',
         category: category || 'general',
-        priority: priority || 'normal',
-        targetAudience: targetAudience || 'all',
-        targetUserId: targetUserId || null,
-        zoneId: targetZoneId || null,
+        priority: priorityEnum,
+        organizationId: targetZoneId || null,
         senderId: senderId || auth.userId,
         actionUrl: actionUrl || null,
-        isRead: false,
         createdAt: now,
         rawData,
       },
     });
+
+    if (targetUserId) {
+      await prisma.notificationDelivery.create({
+        data: {
+          notificationId: id,
+          userId: targetUserId,
+          isRead: false,
+        },
+      }).catch(() => {});
+    }
 
     broadcast('notifications', 'all', { notificationId: id });
 
@@ -255,7 +263,13 @@ router.patch('/:id', requireAuth, async (req, res) => {
     // 1. Read receipt toggle
     if (is_read !== undefined) {
       try {
-        const notifRecord = await prisma.notification.findUnique({ where: { id: notifId } });
+        await prisma.notificationDelivery.upsert({
+          where: { notificationId_userId: { notificationId: notifId, userId } },
+          create: { notificationId: notifId, userId, isRead: Boolean(is_read), readAt: is_read ? new Date() : null },
+          update: { isRead: Boolean(is_read), readAt: is_read ? new Date() : null },
+        });
+
+        const notifRecord = await prisma.broadcastNotification.findUnique({ where: { id: notifId } });
         if (notifRecord) {
           const raw = (notifRecord.rawData && typeof notifRecord.rawData === 'object') ? { ...(notifRecord.rawData as any) } : {};
           const readBy = { ...(raw.readBy || {}) };
@@ -265,13 +279,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
             delete readBy[userId];
           }
           raw.readBy = readBy;
-          if (notifRecord.targetUserId === userId || raw.target_user_id === userId || raw.targetUserId === userId) {
-            raw.is_read = is_read;
-            raw.isRead = is_read;
-          }
-          await prisma.notification.update({
+          await prisma.broadcastNotification.update({
             where: { id: notifId },
-            data: { isRead: Boolean(is_read), rawData: raw },
+            data: { rawData: raw },
           });
         }
       } catch {
@@ -375,9 +385,9 @@ router.put('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
 router.patch('/read-all', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    await prisma.notification.updateMany({
-      where: { targetUserId: userId },
-      data: { isRead: true },
+    await prisma.notificationDelivery.updateMany({
+      where: { userId },
+      data: { isRead: true, readAt: new Date() },
     });
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (err) {
@@ -389,9 +399,9 @@ router.patch('/read-all', requireAuth, async (req, res) => {
 router.post('/read-all', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    await prisma.notification.updateMany({
-      where: { targetUserId: userId },
-      data: { isRead: true },
+    await prisma.notificationDelivery.updateMany({
+      where: { userId },
+      data: { isRead: true, readAt: new Date() },
     });
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (err) {
@@ -410,15 +420,21 @@ router.post('/mark-read', requireAuth, async (req, res) => {
       return;
     }
 
-    const notif = await prisma.notification.findUnique({ where: { id: notifId } });
+    await prisma.notificationDelivery.upsert({
+      where: { notificationId_userId: { notificationId: notifId, userId } },
+      create: { notificationId: notifId, userId, isRead: true, readAt: new Date() },
+      update: { isRead: true, readAt: new Date() },
+    });
+
+    const notif = await prisma.broadcastNotification.findUnique({ where: { id: notifId } });
     if (notif) {
       const raw = (notif.rawData && typeof notif.rawData === 'object') ? { ...(notif.rawData as any) } : {};
       const readBy = { ...(raw.readBy || {}) };
       readBy[userId] = new Date().toISOString();
       raw.readBy = readBy;
-      await prisma.notification.update({
+      await prisma.broadcastNotification.update({
         where: { id: notifId },
-        data: { isRead: true, rawData: raw },
+        data: { rawData: raw },
       });
     }
 
@@ -433,9 +449,9 @@ router.post('/mark-read', requireAuth, async (req, res) => {
 router.post('/mark-all-read', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    await prisma.notification.updateMany({
-      where: { targetUserId: userId },
-      data: { isRead: true },
+    await prisma.notificationDelivery.updateMany({
+      where: { userId },
+      data: { isRead: true, readAt: new Date() },
     });
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (err) {
@@ -517,15 +533,15 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 
     // Mark as read / dismissed on notification record
-    const notif = await prisma.notification.findUnique({ where: { id } });
+    const notif = await prisma.broadcastNotification.findUnique({ where: { id } });
     if (notif) {
       const raw = (notif.rawData && typeof notif.rawData === 'object') ? { ...(notif.rawData as any) } : {};
       const dismissedBy = { ...(raw.dismissedBy || {}) };
       dismissedBy[userId] = new Date().toISOString();
       raw.dismissedBy = dismissedBy;
-      await prisma.notification.update({
+      await prisma.broadcastNotification.update({
         where: { id },
-        data: { isRead: true, rawData: raw },
+        data: { rawData: raw },
       });
     }
 

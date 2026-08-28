@@ -126,7 +126,7 @@ const handleCheckIn = async (req: any, res: any) => {
       const existingRaw = (alreadyRecorded.rawData && typeof alreadyRecorded.rawData === 'object')
         ? alreadyRecorded.rawData as Record<string, any>
         : {};
-      const recordedBy = alreadyRecorded.recordedByAdminId || existingRaw.recordedBy || alreadyRecorded.userId;
+      const recordedBy = (alreadyRecorded as any).recordedById || (alreadyRecorded as any).recordedByAdminId || existingRaw.recordedBy || alreadyRecorded.userId;
       if (!req.tenant?.isHQAdmin && recordedBy !== auth.userId && alreadyRecorded.userId !== auth.userId) {
         res.status(403).json({ success: false, error: 'Forbidden' });
         return;
@@ -152,7 +152,7 @@ const handleCheckIn = async (req: any, res: any) => {
       }
       targetUserId = qrProfile.id;
     }
-    const userProfile = await prisma.profile.findUnique({ where: { id: targetUserId } });
+    const userProfile = await prisma.user.findUnique({ where: { id: targetUserId } });
     if (!userProfile) {
       res.status(404).json({ success: false, error: 'Singer profile was not found.' });
       return;
@@ -163,30 +163,31 @@ const handleCheckIn = async (req: any, res: any) => {
     if (!req.tenant?.isHQAdmin && requestedZone && req.tenant?.effectiveZoneId && requestedZone !== req.tenant.effectiveZoneId) {
       res.status(403).json({
         success: false,
-        error: 'Forbidden: Cannot record attendance outside your assigned tenant zone.',
+        error: 'Forbidden: You cannot record attendance for a zone outside your scope.',
       });
       return;
     }
 
-    const fullName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ') || (rawProfile.first_name ? `${rawProfile.first_name} ${rawProfile.last_name || ''}` : '') || req.body.userName || auth.email;
-    const zoneId = req.tenant?.effectiveZoneId || auth.zoneId || rawProfile.zone_code || rawProfile.zoneId || 'general';
-    const eventName = req.body.eventName || 'Rehearsal';
+    const zoneId = requestedZone || req.tenant?.effectiveZoneId || auth.zoneId || (userProfile as any).zoneId || 'general';
+    const eventName = req.body.eventName?.trim() || req.body.event_name?.trim() || 'Rehearsal';
+    const fullName = [userProfile.firstName || rawProfile.first_name, userProfile.lastName || rawProfile.last_name].filter(Boolean).join(' ') || userProfile.name || rawProfile.name || 'Singer';
 
     const rawData = {
       id,
       userId: targetUserId,
-      user_id: targetUserId,
       userName: fullName,
       user_name: fullName,
       eventName,
       event_name: eventName,
       status: 'present',
       zoneId,
-      zone_id: zoneId,
-      checkInTime: now,
-      check_in_time: now,
+      zone_code: zoneId,
       dateString,
       date_string: dateString,
+      checkInTime: now,
+      check_in_time: now,
+      voicePart: userProfile.rawData && typeof userProfile.rawData === 'object' ? (userProfile.rawData as any).voicePart || null : null,
+      voice_part: userProfile.rawData && typeof userProfile.rawData === 'object' ? (userProfile.rawData as any).voice_part || null : null,
       latitude: req.body.latitude || null,
       longitude: req.body.longitude || null,
       recordedBy: auth.userId,
@@ -197,12 +198,11 @@ const handleCheckIn = async (req: any, res: any) => {
       data: {
         id,
         userId: targetUserId,
-        userName: fullName,
         eventName,
         status: 'present',
-        zoneId,
-        checkInTime: now,
-        recordedByAdminId: auth.userId,
+        organizationId: zoneId,
+        checkInTime: new Date(now),
+        recordedById: auth.userId,
         rawData,
       },
     });
@@ -300,12 +300,11 @@ router.post('/manual', requireAuth, requireTenantAdmin, async (req: any, res) =>
       data: {
         id,
         userId: rawData.userId,
-        userName,
         eventName,
         status,
-        zoneId,
-        checkInTime: status === 'present' ? now : null,
-        recordedByAdminId: auth.userId,
+        organizationId: zoneId,
+        checkInTime: status === 'present' ? new Date(now) : null,
+        recordedById: auth.userId,
         rawData,
       },
     });
@@ -329,8 +328,8 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: any, res) => {
     }
 
     const raw = (existing.rawData as Record<string, any>) || {};
-    const updatedEvent = eventName || event_name || raw.eventName || existing.eventName;
-    const updatedUser = userName || user_name || raw.userName || existing.userName;
+    const updatedEvent = eventName || event_name || raw.eventName || (existing as any).eventName;
+    const updatedUser = userName || user_name || raw.userName || (existing as any).userName;
     const updatedStatus = status !== undefined ? status : (raw.status || existing.status);
     const updatedCheckIn = checkInTime || check_in_time || raw.checkInTime || existing.checkInTime;
     const updatedCheckOut = checkOutTime !== undefined ? checkOutTime : (check_out_time !== undefined ? check_out_time : (raw.checkOutTime || null));
@@ -356,7 +355,6 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: any, res) => {
       where: { id },
       data: {
         eventName: updatedEvent,
-        userName: updatedUser,
         status: updatedStatus,
         rawData: updatedRaw,
       },

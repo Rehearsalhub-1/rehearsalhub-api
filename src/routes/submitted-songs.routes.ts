@@ -52,16 +52,21 @@ async function createSubmissionNotification({
       created_at: now, createdAt: now, sentAt: now, is_read: false,
     };
 
-    const record = await prisma.notification.create({
+    const priorityEnum = (priority ? String(priority).toUpperCase() : 'NORMAL') as any;
+
+    const record = await prisma.broadcastNotification.create({
       data: {
-        id, title, message, type, category, priority,
-        targetAudience: targetAudience || (targetUserId ? 'user' : 'all'),
-        targetUserId: targetUserId || null,
-        zoneId: zoneId || null,
+        id,
+        title,
+        body: message,
+        message,
+        type: type || 'info',
+        category: category || 'song_submission',
+        priority: priorityEnum,
+        organizationId: zoneId || 'zone-001',
         senderId: senderId || null,
         actionUrl: '/pages/submit-song',
-        isRead: false,
-        createdAt: now,
+        createdAt: new Date(),
         rawData,
       },
     });
@@ -260,7 +265,7 @@ router.post('/', requireAuth, async (req: any, res) => {
       data: {
         id, userId,
         title: submissionRaw.title,
-        status: 'pending',
+        status: 'PENDING',
         zoneId: userZone,
         submittedBy: fullName,
         submittedByEmail: userEmail,
@@ -303,7 +308,11 @@ router.patch('/:id', requireAuth, async (req: any, res) => {
 
     const updated = await prisma.submittedSong.update({
       where: { id },
-      data: { title: title || existing.title, status: status || existing.status, rawData: updatedRaw },
+      data: {
+        title: title || existing.title,
+        status: (status ? String(status).toUpperCase() : existing.status) as any,
+        rawData: updatedRaw,
+      },
     });
 
     res.json({ success: true, message: 'Submission updated', data: shapeSubmission(updated) });
@@ -323,7 +332,7 @@ router.post('/:id/approve', requireAuth, requireTenantAdmin, async (req: any, re
     const raw = (existing.rawData as Record<string, any>) || {};
     await prisma.submittedSong.update({
       where: { id },
-      data: { status: 'approved', rawData: { ...raw, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: res.locals.auth.userId } },
+      data: { status: 'APPROVED', rawData: { ...raw, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: res.locals.auth.userId } },
     });
 
     const songTitle = existing.title || raw.title || 'Submitted Song';
@@ -356,7 +365,7 @@ router.post('/:id/reject', requireAuth, requireTenantAdmin, async (req: any, res
     const rejectNote = notes || reason || raw.rejectNotes;
     await prisma.submittedSong.update({
       where: { id },
-      data: { status: 'rejected', rawData: { ...raw, status: 'rejected', rejectNotes: rejectNote, rejectedAt: new Date().toISOString(), rejectedBy: res.locals.auth.userId } },
+      data: { status: 'REJECTED', rawData: { ...raw, status: 'rejected', rejectNotes: rejectNote, rejectedAt: new Date().toISOString(), rejectedBy: res.locals.auth.userId } },
     });
 
     const songTitle = existing.title || raw.title || 'Submitted Song';

@@ -12,12 +12,21 @@ router.get('/me', requireAuth, async (req, res) => {
     const rows = await prisma.playlist.findMany({
       where: {
         userId,
-        type: 'favorites',
+        OR: [
+          { title: { contains: 'favorite', mode: 'insensitive' } },
+          { id: { contains: 'favorite' } },
+        ],
+      },
+      include: {
+        items: true,
       },
     });
 
     const songs = new Set<string>();
     for (const row of rows) {
+      if (row.items && row.items.length > 0) {
+        for (const it of row.items) songs.add(it.songId);
+      }
       const merged = mergeRawRow(row);
       const fromSongIds = asStringArray(merged.songIds ?? merged.songs ?? row.songIds ?? row.songs);
       if (fromSongIds.length > 0) {

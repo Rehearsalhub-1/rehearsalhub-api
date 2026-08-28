@@ -47,9 +47,9 @@ router.put('/:id', requireAuth, async (req, res) => {
     const mergedData = { ...(existing ? mergeRawRow(existing) : {}), ...bodyData, id, updatedAt: now };
 
     if (existing) {
-      await prisma.setting.update({ where: { id }, data: { rawData: mergedData } });
+      await prisma.setting.update({ where: { id }, data: { key: id, value: mergedData } });
     } else {
-      await prisma.setting.create({ data: { id, rawData: mergedData } });
+      await prisma.setting.create({ data: { id, key: id, value: mergedData } });
     }
     res.json({ success: true, data: mergedData });
   } catch (err) {
@@ -73,9 +73,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const mergedData = { ...(existing ? mergeRawRow(existing) : {}), ...bodyData, id, updatedAt: now };
 
     if (existing) {
-      await prisma.setting.update({ where: { id }, data: { rawData: mergedData } });
+      await prisma.setting.update({ where: { id }, data: { key: id, value: mergedData } });
     } else {
-      await prisma.setting.create({ data: { id, rawData: mergedData } });
+      await prisma.setting.create({ data: { id, key: id, value: mergedData } });
     }
     res.json({ success: true, data: mergedData });
   } catch (err) {

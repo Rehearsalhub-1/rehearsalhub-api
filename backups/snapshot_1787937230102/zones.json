@@ -1,0 +1,639 @@
+[
+  {
+    "id": "zone-002",
+    "name": "Loveworld Singers 24 Worship Band",
+    "invitation_code": "ZONE002",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-002",
+      "name": "Loveworld Singers 24 Worship Band",
+      "slug": "lws-24-worship",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1764760831,
+        "_nanoseconds": 514000000
+      },
+      "updatedAt": {
+        "_seconds": 1764760831,
+        "_nanoseconds": 514000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONE002",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN002",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-004",
+    "name": "Loveworld Singers Teens Choir",
+    "invitation_code": "ZONE004",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-004",
+      "name": "Loveworld Singers Teens Choir",
+      "slug": "lws-teens",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1767097430,
+        "_nanoseconds": 689000000
+      },
+      "updatedAt": {
+        "_seconds": 1767097430,
+        "_nanoseconds": 689000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONE004",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN004",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-005",
+    "name": "Presidential Mass Choir",
+    "invitation_code": "ZONE005",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-005",
+      "name": "Presidential Mass Choir",
+      "slug": "presidential-mass-choir",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1767483892,
+        "_nanoseconds": 65000000
+      },
+      "updatedAt": {
+        "_seconds": 1767483892,
+        "_nanoseconds": 65000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONE005",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN005",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-007",
+    "name": "Loveworld Singers SA Zone 2",
+    "invitation_code": "ZONE007",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-007",
+      "name": "Loveworld Singers SA Zone 2",
+      "slug": "lws-sa-zone-2",
+      "region": "South Africa",
+      "createdAt": {
+        "_seconds": 1766507817,
+        "_nanoseconds": 982000000
+      },
+      "updatedAt": {
+        "_seconds": 1771247791,
+        "_nanoseconds": 85000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#3B82F6",
+      "memberCount": 0,
+      "coordinatorId": "qhTdu6mvIla4OsvnNUdAiMhsWDY2",
+      "invitationCode": "ZONE007",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN007",
+    "country": null,
+    "region": "South Africa",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-001",
+    "name": "Your Loveworld Singers",
+    "invitation_code": "ZONE001",
+    "is_hq": true,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-001",
+      "name": "Your Loveworld Singers",
+      "slug": "your-loveworld-singers",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1769019657,
+        "_nanoseconds": 162000000
+      },
+      "updatedAt": {
+        "_seconds": 1769019657,
+        "_nanoseconds": 162000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONE001",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN001",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-013",
+    "name": "Loveworld Singers India Zone",
+    "invitation_code": "ZONE013",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-013",
+      "name": "Loveworld Singers India Zone",
+      "slug": "lws-india",
+      "region": "India",
+      "createdAt": {
+        "_seconds": 1763995581,
+        "_nanoseconds": 275000000
+      },
+      "updatedAt": "2026-07-17T12:20:35.035Z",
+      "maxMembers": 20,
+      "themeColor": "#F59E0B",
+      "memberCount": 3,
+      "coordinatorId": "NRI5xlj5kqMiITjRpwbB8l6U5Dx2",
+      "invitationCode": "ZONE013",
+      "coordinatorName": "chad wick",
+      "coordinatorEmail": "kiddiesbackup@gmail.com",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN013",
+    "country": null,
+    "region": "India",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-017",
+    "name": "Loveworld Singers USA Region 1 Zone 2",
+    "invitation_code": "ZONE017",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-017",
+      "name": "Loveworld Singers USA Region 1 Zone 2",
+      "slug": "lws-usa-r1-z2",
+      "region": "USA",
+      "createdAt": {
+        "_seconds": 1771593178,
+        "_nanoseconds": 69000000
+      },
+      "updatedAt": {
+        "_seconds": 1771593575,
+        "_nanoseconds": 777000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#EC4899",
+      "memberCount": 1,
+      "coordinatorId": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+      "invitationCode": "ZONE017",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "easstephen345@gmail.com",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN017",
+    "country": null,
+    "region": "USA",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-038",
+    "name": "Loveworld Singers South America NZ Pacific",
+    "invitation_code": null,
+    "is_hq": false,
+    "created_at": "2026-08-17T20:54:24.656Z",
+    "raw_data": {
+      "id": "zone-038",
+      "name": "Loveworld Singers South America NZ Pacific",
+      "slug": "lws-sa-pacific",
+      "region": "South America",
+      "createdAt": "2026-08-03T11:05:16.876Z",
+      "updatedAt": "2026-08-03T11:05:19.654Z",
+      "maxMembers": 20,
+      "themeColor": "#FB923C",
+      "memberCount": 1,
+      "coordinatorId": "fjKn6C6OjZdnQSW1udz7oLzDYBk2",
+      "invitationCode": "ZONE038",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN038",
+    "country": null,
+    "region": "South America",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-044",
+    "name": "Loveworld Singers Lagos Zone 1",
+    "invitation_code": "ZONE044",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-044",
+      "name": "Loveworld Singers Lagos Zone 1",
+      "slug": "lws-lagos-z1",
+      "region": "Nigeria",
+      "createdAt": "2026-07-07T17:16:51.043Z",
+      "updatedAt": "2026-08-14T05:01:40.469Z",
+      "maxMembers": 20,
+      "themeColor": "#10B981",
+      "memberCount": 3,
+      "coordinatorId": "rwJqYgNRhDa4wGpNkrc6EsDt0Zx2",
+      "invitationCode": "ZONE044",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN044",
+    "country": null,
+    "region": "Nigeria",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-048",
+    "name": "Loveworld Singers Lagos Zone 5",
+    "invitation_code": "ZONE048",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-048",
+      "name": "Loveworld Singers Lagos Zone 5",
+      "slug": "lws-lagos-z5",
+      "region": "Nigeria",
+      "createdAt": {
+        "_seconds": 1764684667,
+        "_nanoseconds": 431000000
+      },
+      "updatedAt": {
+        "_seconds": 1764684668,
+        "_nanoseconds": 99000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#10B981",
+      "memberCount": 1,
+      "coordinatorId": "WQiy6QMiSVUWdBbVo7gvKgO7SjB2",
+      "invitationCode": "ZONE048",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN048",
+    "country": null,
+    "region": "Nigeria",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-052",
+    "name": "Loveworld Singers Lagos Sub Zone C",
+    "invitation_code": "ZONE052",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-052",
+      "name": "Loveworld Singers Lagos Sub Zone C",
+      "slug": "lws-lagos-szc",
+      "region": "Nigeria",
+      "createdAt": {
+        "_seconds": 1763944530,
+        "_nanoseconds": 898000000
+      },
+      "updatedAt": {
+        "_seconds": 1785961892,
+        "_nanoseconds": 104000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#10B981",
+      "memberCount": 3,
+      "coordinatorId": "wN9J1Zy0rTbYVi2okOkwQvlYf0T2",
+      "invitationCode": "ZONE052",
+      "coordinatorName": "chukwudi williams",
+      "coordinatorEmail": "mkvunknown@gmail.com",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN052",
+    "country": null,
+    "region": "Nigeria",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-086",
+    "name": "Loveworld Singers CELVZ",
+    "invitation_code": "ZONE086",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-086",
+      "name": "Loveworld Singers CELVZ",
+      "slug": "lws-celvz",
+      "region": "Special",
+      "createdAt": {
+        "_seconds": 1764897971,
+        "_nanoseconds": 206000000
+      },
+      "updatedAt": {
+        "_seconds": 1764897971,
+        "_nanoseconds": 840000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#7C3AED",
+      "memberCount": 1,
+      "coordinatorId": "KSRvi60XXYRzmU8yvtPeG9CobhM2",
+      "invitationCode": "ZONE086",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN086",
+    "country": null,
+    "region": "Special",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-087",
+    "name": "Loveworld Singers LGN",
+    "invitation_code": "ZONE087",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-087",
+      "name": "Loveworld Singers LGN",
+      "slug": "lws-lgn",
+      "region": "Special",
+      "createdAt": "2026-06-08T13:08:58.552Z",
+      "updatedAt": "2026-06-08T16:55:52.991Z",
+      "maxMembers": 20,
+      "themeColor": "#7C3AED",
+      "memberCount": 0,
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "invitationCode": "ZONE087",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN087",
+    "country": null,
+    "region": "Special",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-088",
+    "name": "Special Duty Zone",
+    "invitation_code": "ZONE088",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-088",
+      "name": "Special Duty Zone",
+      "slug": "special-duty-zone",
+      "region": "Special",
+      "createdAt": {
+        "_seconds": 1773748755,
+        "_nanoseconds": 772000000
+      },
+      "updatedAt": {
+        "_seconds": 1781873593,
+        "_nanoseconds": 75000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#7C3AED",
+      "memberCount": 14,
+      "coordinatorId": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "invitationCode": "ZONE088",
+      "coordinatorName": "Ephraim Udoji",
+      "coordinatorEmail": "ephraimloveworld1@gmail.com",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZN088",
+    "country": null,
+    "region": "Special",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-director",
+    "name": "The Director Zone",
+    "invitation_code": "ZONEDIR",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-director",
+      "name": "The Director Zone",
+      "slug": "director-zone",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1764604141,
+        "_nanoseconds": 929000000
+      },
+      "updatedAt": {
+        "_seconds": 1764604141,
+        "_nanoseconds": 929000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONEDIR",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNDIRECTOR",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-international",
+    "name": "Loveworld International Zonal Choir Representatives",
+    "invitation_code": "ZONEINT",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-international",
+      "name": "Loveworld International Zonal Choir Representatives",
+      "slug": "international-zone",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1766497309,
+        "_nanoseconds": 330000000
+      },
+      "updatedAt": {
+        "_seconds": 1766497309,
+        "_nanoseconds": 330000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONEINT",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNINTERNATIONAL",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-national",
+    "name": "Loveworld National Zonal Choir Representatives",
+    "invitation_code": "ZONENAT",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-national",
+      "name": "Loveworld National Zonal Choir Representatives",
+      "slug": "national-zone",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1766394112,
+        "_nanoseconds": 631000000
+      },
+      "updatedAt": {
+        "_seconds": 1766394112,
+        "_nanoseconds": 631000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONENAT",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNNATIONAL",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-oftp",
+    "name": "OFTP Pastors Zone",
+    "invitation_code": "ZONEOFTP",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-oftp",
+      "name": "OFTP Pastors Zone",
+      "slug": "oftp-zone",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1764604346,
+        "_nanoseconds": 297000000
+      },
+      "updatedAt": {
+        "_seconds": 1764604346,
+        "_nanoseconds": 297000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONEOFTP",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNOFTP",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-orchestra",
+    "name": "Loveworld Singers Orchestra",
+    "invitation_code": "ZONEORCH",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-orchestra",
+      "name": "Loveworld Singers Orchestra",
+      "slug": "lws-orchestra",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1768905122,
+        "_nanoseconds": 366000000
+      },
+      "updatedAt": {
+        "_seconds": 1768905122,
+        "_nanoseconds": 366000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONEORCH",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNORCHESTRA",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  },
+  {
+    "id": "zone-president",
+    "name": "The President Zone",
+    "invitation_code": "ZONEPRES",
+    "is_hq": false,
+    "created_at": "2026-07-21T00:37:21.779Z",
+    "raw_data": {
+      "id": "zone-president",
+      "name": "The President Zone",
+      "slug": "president-zone",
+      "region": "Headquarters",
+      "createdAt": {
+        "_seconds": 1764603623,
+        "_nanoseconds": 943000000
+      },
+      "updatedAt": {
+        "_seconds": 1764603623,
+        "_nanoseconds": 943000000
+      },
+      "maxMembers": 20,
+      "themeColor": "#9333EA",
+      "memberCount": 0,
+      "invitationCode": "ZONEPRES",
+      "subscriptionTier": "free",
+      "subscriptionStatus": "active"
+    },
+    "code": "ZNPRESIDENT",
+    "country": null,
+    "region": "Headquarters",
+    "is_active": null,
+    "updated_at": null
+  }
+]

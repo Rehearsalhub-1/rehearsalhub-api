@@ -37,7 +37,7 @@ router.post('/webhook', async (req, res) => {
       const userId = data.metadata?.userId;
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
-      const profile = await prisma.profile.findUnique({ where: { id: userId } });
+      const profile = await prisma.user.findUnique({ where: { id: userId } });
       if (profile) {
         const prevRaw = (profile.rawData && typeof profile.rawData === 'object') ? (profile.rawData as Record<string, any>) : {};
         const updatedSub = {
@@ -47,7 +47,7 @@ router.post('/webhook', async (req, res) => {
           status: 'active',
           expiresAt: expiresAt.toISOString(),
         };
-        await prisma.profile.update({
+        await prisma.user.update({
           where: { id: userId },
           data: { rawData: { ...prevRaw, subscription: updatedSub } },
         });

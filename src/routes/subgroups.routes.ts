@@ -305,16 +305,13 @@ router.post('/', requireAuth, async (req, res) => {
       data: {
         id: subgroupId,
         name: name.trim(),
-        zoneId: zoneId || 'global',
+        organizationId: zoneId || 'zone-001',
         type,
         status: finalStatus,
-        coordinatorId: coordinatorId || userId,
-        coordinatorName: coordinatorName.trim() || auth.email || 'Coordinator',
-        createdBy: userId,
         rawData,
       },
     });
-    res.json({ success: true, data: shapeSubgroup({ id: subgroupId, name: name.trim(), zoneId: zoneId || 'global', type, status: finalStatus, coordinatorId: coordinatorId || userId, coordinatorName: coordinatorName.trim() || auth.email || 'Coordinator', createdBy: userId, rawData }) });
+    res.json({ success: true, data: shapeSubgroup({ id: subgroupId, name: name.trim(), organizationId: zoneId || 'zone-001', type, status: finalStatus, coordinatorId: coordinatorId || userId, coordinatorName: coordinatorName.trim() || auth.email || 'Coordinator', createdBy: userId, rawData }) });
   } catch (err: any) {
     console.error('[subgroups/ POST]', err);
     res.status(500).json({ success: false, error: 'Failed to fetch subgroups' });
@@ -336,7 +333,7 @@ const handleCreateSubgroup = async (req: any, res: any) => {
       coordinatorName = '',
       coordinatorEmail = '',
       coordinatorId = userId,
-      zoneId = auth.zoneId || 'global',
+      zoneId = auth.zoneId || 'zone-001',
       estimatedMembers = 10,
       memberIds = [userId],
       status: requestedStatus,
@@ -349,6 +346,7 @@ const handleCreateSubgroup = async (req: any, res: any) => {
 
     const finalStatus = (isHqAdmin || isZoneAdmin) ? (requestedStatus || 'active') : 'pending';
     const subgroupId = `sg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const effectiveOrgId = zoneId && zoneId !== 'global' ? zoneId : 'zone-001';
 
     const rawData = {
       id: subgroupId,
@@ -358,7 +356,7 @@ const handleCreateSubgroup = async (req: any, res: any) => {
       coordinatorName: coordinatorName.trim() || auth.email || 'Coordinator',
       coordinatorEmail: coordinatorEmail.trim() || auth.email || '',
       coordinatorId: coordinatorId || userId,
-      zoneId: zoneId || 'global',
+      zoneId: effectiveOrgId,
       estimatedMembers: Number(estimatedMembers) || 10,
       memberIds: Array.isArray(memberIds) && memberIds.length > 0 ? memberIds : [userId],
       status: finalStatus,
@@ -370,27 +368,24 @@ const handleCreateSubgroup = async (req: any, res: any) => {
       data: {
         id: subgroupId,
         name: name.trim(),
-        zoneId: zoneId || 'global',
+        organizationId: effectiveOrgId,
         type,
         status: finalStatus,
-        coordinatorId: coordinatorId || userId,
-        coordinatorName: coordinatorName.trim() || auth.email || 'Coordinator',
-        createdBy: userId,
         rawData,
       },
     });
 
     if (finalStatus === 'pending') {
       const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      await prisma.notification.create({
+      await prisma.broadcastNotification.create({
         data: {
           id: notifId,
           title: 'New Church Approval Request',
+          body: `${rawData.coordinatorName} requested to register "${name.trim()}" in ${zoneId}.`,
           message: `${rawData.coordinatorName} requested to register "${name.trim()}" in ${zoneId}.`,
           type: 'church_request',
-          targetAudience: 'hq_admin',
-          zoneId: zoneId || 'global',
-          createdAt: new Date().toISOString(),
+          organizationId: effectiveOrgId,
+          createdAt: new Date(),
           rawData: {
             subgroupId,
             requesterId: userId,
@@ -401,17 +396,19 @@ const handleCreateSubgroup = async (req: any, res: any) => {
       }).catch(err => console.error('[subgroups] Admin notif error:', err));
 
       const userNotifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      await prisma.notification.create({
+      await prisma.broadcastNotification.create({
         data: {
           id: userNotifId,
           title: 'Church Request Submitted',
+          body: `Your request to register "${name.trim()}" has been received and is pending admin approval.`,
           message: `Your request to register "${name.trim()}" has been received and is pending admin approval.`,
           type: 'church_request',
-          targetUserId: userId,
-          createdAt: new Date().toISOString(),
+          organizationId: effectiveOrgId,
+          createdAt: new Date(),
           rawData: {
             subgroupId,
             status: 'pending',
+            targetUserId: userId,
           },
         },
       }).catch(err => console.error('[subgroups] User notif error:', err));
@@ -467,15 +464,16 @@ router.post('/:id/approve', requireAuth, requireTenantAdmin, async (req, res) =>
     const targetUser = raw.coordinatorId || raw.createdBy;
     if (targetUser) {
       const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      await prisma.notification.create({
+      await prisma.broadcastNotification.create({
         data: {
           id: notifId,
           title: 'Church Approved 🎉',
+          body: `Your church "${row.name || raw.name}" has been approved by admin!`,
           message: `Your church "${row.name || raw.name}" has been approved by admin!`,
           type: 'church_approved',
-          targetUserId: targetUser,
-          createdAt: new Date().toISOString(),
-          rawData: { subgroupId: id, status: 'active' },
+          organizationId: row.organizationId,
+          createdAt: new Date(),
+          rawData: { subgroupId: id, status: 'active', targetUserId: targetUser },
         },
       }).catch(err => console.error('[subgroups/approve] notif error:', err));
     }
@@ -514,15 +512,16 @@ router.post('/:id/reject', requireAuth, requireTenantAdmin, async (req, res) => 
     const targetUser = raw.coordinatorId || raw.createdBy;
     if (targetUser) {
       const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      await prisma.notification.create({
+      await prisma.broadcastNotification.create({
         data: {
           id: notifId,
           title: 'Church Request Update',
+          body: `Your request for "${row.name || raw.name}" was not approved: ${reason || 'Declined by admin'}`,
           message: `Your request for "${row.name || raw.name}" was not approved: ${reason || 'Declined by admin'}`,
           type: 'church_rejected',
-          targetUserId: targetUser,
-          createdAt: new Date().toISOString(),
-          rawData: { subgroupId: id, status: 'rejected', reason },
+          organizationId: row.organizationId,
+          createdAt: new Date(),
+          rawData: { subgroupId: id, status: 'rejected', reason, targetUserId: targetUser },
         },
       }).catch(err => console.error('[subgroups/reject] notif error:', err));
     }
@@ -545,7 +544,7 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     const raw = (row.rawData && typeof row.rawData === 'object' && !Array.isArray(row.rawData)
       ? row.rawData : {}) as Record<string, any>;
 
-    const isCoordinator = raw.coordinatorId === auth.userId || raw.coordinator_id === auth.userId || row.coordinatorId === auth.userId;
+    const isCoordinator = raw.coordinatorId === auth.userId || raw.coordinator_id === auth.userId;
     const isAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'zone_admin';
     if (!isCoordinator && !isAdmin) { res.status(403).json({ success: false, error: 'Forbidden' }); return; }
 
@@ -576,7 +575,7 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     if (!row) { res.status(404).json({ success: false, error: 'Not found' }); return; }
 
     const raw = (row.rawData && typeof row.rawData === 'object' ? row.rawData : {}) as Record<string, any>;
-    const isCoordinator = raw.coordinatorId === auth.userId || row.coordinatorId === auth.userId;
+    const isCoordinator = raw.coordinatorId === auth.userId;
     const isAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
     if (!isCoordinator && !isAdmin) { res.status(403).json({ success: false, error: 'Forbidden' }); return; }
 
@@ -601,21 +600,21 @@ router.get('/:id/members', requireAuth, async (req, res) => {
     const raw = (subgroup.rawData && typeof subgroup.rawData === 'object' ? subgroup.rawData : {}) as Record<string, any>;
     const userIds: string[] = Array.isArray(raw.memberIds) ? raw.memberIds : Array.isArray(raw.member_ids) ? raw.member_ids : [];
 
-    const profileRows = await prisma.profile.findMany({
+    const memberships = await prisma.membership.findMany({
       where: {
         OR: [
           { subgroupId: parsed.data },
-          { churchId: parsed.data },
-          { id: { in: userIds } },
-        ]
-      }
+          { userId: { in: userIds } },
+        ],
+      },
+      include: { user: true },
     });
 
-    const data = profileRows.map(p => ({
-      userId: p.id,
-      role: p.role || 'member',
-      status: 'active',
-      profile: p,
+    const data = memberships.map(m => ({
+      userId: m.userId,
+      role: m.role,
+      status: m.status,
+      profile: m.user,
     }));
 
     res.json({ success: true, data });
@@ -644,13 +643,14 @@ router.post('/members', requireAuth, requireTenantAdmin, async (req, res) => {
     if (!sg) { res.status(404).json({ success: false, error: 'Subgroup not found' }); return; }
 
     const raw = (sg.rawData && typeof sg.rawData === 'object' ? sg.rawData : {}) as Record<string, any>;
-    const isCoordinator = raw.coordinatorId === auth.userId || raw.coordinator_id === auth.userId || sg.coordinatorId === auth.userId;
+    const isCoordinator = raw.coordinatorId === auth.userId || raw.coordinator_id === auth.userId;
     const isAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'zone_admin';
     if (!isCoordinator && !isAdmin) { res.status(403).json({ success: false, error: 'Only coordinators can add members' }); return; }
 
-    await prisma.profile.update({
-      where: { id: userId },
-      data: { subgroupId: subGroupId, churchId: subGroupId },
+    await prisma.membership.upsert({
+      where: { userId_organizationId: { userId, organizationId: sg.organizationId } },
+      create: { userId, organizationId: sg.organizationId, subgroupId: subGroupId, role: 'MEMBER' },
+      update: { subgroupId: subGroupId },
     });
 
     const memberIds: string[] = Array.isArray(raw.memberIds) ? raw.memberIds : [];
@@ -659,21 +659,22 @@ router.post('/members', requireAuth, requireTenantAdmin, async (req, res) => {
       await prisma.subgroup.update({ where: { id: subGroupId }, data: { rawData: raw } });
     }
 
-    const coordinatorProfile = await prisma.profile.findUnique({ where: { id: auth.userId } });
-    const coordinatorName = coordinatorProfile
-      ? [coordinatorProfile.firstName, coordinatorProfile.lastName].filter(Boolean).join(' ') || 'Your coordinator'
+    const coordinatorUser = await prisma.user.findUnique({ where: { id: auth.userId } });
+    const coordinatorName = coordinatorUser
+      ? [coordinatorUser.firstName, coordinatorUser.lastName].filter(Boolean).join(' ') || 'Your coordinator'
       : 'Your coordinator';
 
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    await prisma.notification.create({
+    await prisma.broadcastNotification.create({
       data: {
         id: notifId,
         title: 'Added to Subgroup 🎵',
+        body: `${coordinatorName} added you to "${sg.name || raw.name || 'a subgroup'}". You now have access to its rehearsal songs and setlists.`,
         message: `${coordinatorName} added you to "${sg.name || raw.name || 'a subgroup'}". You now have access to its rehearsal songs and setlists.`,
         type: 'subgroup_added',
-        targetUserId: userId,
+        organizationId: sg.organizationId,
         createdAt: new Date(),
-        rawData: { subgroupId: subGroupId, subgroupName: sg.name || raw.name, addedBy: auth.userId },
+        rawData: { subgroupId: subGroupId, subgroupName: sg.name || raw.name, addedBy: auth.userId, targetUserId: userId },
       },
     }).catch(err => console.error('[subgroups/members] notif error:', err));
 
@@ -695,13 +696,13 @@ router.delete('/members', requireAuth, async (req, res) => {
     if (!sg) { res.status(404).json({ success: false, error: 'Subgroup not found' }); return; }
 
     const raw = (sg.rawData && typeof sg.rawData === 'object' ? sg.rawData : {}) as Record<string, any>;
-    const isCoordinator = raw.coordinatorId === auth.userId || sg.coordinatorId === auth.userId;
+    const isCoordinator = raw.coordinatorId === auth.userId || raw.coordinator_id === auth.userId;
     const isAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'zone_admin';
     const isSelf = auth.userId === userId;
     if (!isCoordinator && !isAdmin && !isSelf) { res.status(403).json({ success: false, error: 'Forbidden' }); return; }
 
-    await prisma.profile.updateMany({
-      where: { id: userId, subgroupId: subGroupId },
+    await prisma.membership.updateMany({
+      where: { userId, subgroupId: subGroupId },
       data: { subgroupId: null },
     });
 
@@ -844,10 +845,9 @@ router.post('/songs/import', requireAuth, requireTenantAdmin, async (req, res) =
           title: String((mData as any).title || 'Untitled Song').trim(),
           key: String((mData as any).key || ''),
           tempo: String((mData as any).tempo || ''),
-          zoneId: zoneId || (mData as any).zoneId || '',
+          organizationId: zoneId || (mData as any).zoneId || 'zone-001',
           subgroupId: subGroupId,
-          scope: 'subgroup',
-          status: 'active',
+          status: 'ACTIVE',
           rawData,
         },
       });
@@ -857,6 +857,11 @@ router.post('/songs/import', requireAuth, requireTenantAdmin, async (req, res) =
     }
 
     if (praiseNightId && insertedIds.length > 0) {
+      for (const sId of insertedIds) {
+        await prisma.programSong.create({
+          data: { programId: praiseNightId, songId: sId },
+        }).catch(() => {});
+      }
       const pn = await prisma.program.findUnique({ where: { id: praiseNightId } });
       if (pn) {
         const rawPn = (pn.rawData && typeof pn.rawData === 'object' ? pn.rawData : {}) as Record<string, any>;
@@ -920,10 +925,9 @@ router.post('/songs', requireAuth, requireTenantAdmin, async (req, res) => {
         title: title.trim(),
         key: key || '',
         tempo: tempo || '',
-        zoneId: zoneId || '',
+        organizationId: zoneId || 'zone-001',
         subgroupId: subGroupId,
-        scope: 'subgroup',
-        status: 'active',
+        status: 'ACTIVE',
         rawData,
       },
     });

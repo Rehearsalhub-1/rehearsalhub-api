@@ -146,6 +146,7 @@ app.use('/auth', authRouter);
 
 // Protected user API routes
 app.use('/profiles', profilesRouter);
+app.use('/organizations', zonesRouter);
 app.use('/zones', zonesRouter);
 app.use('/members', membersRouter);
 app.use('/schedule', scheduleRouter);

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "req_088_1",
+    "user_id": "user_088",
+    "user_email": "user088@test.com",
+    "user_name": "Singer 088",
+    "zone_id": "zone-088",
+    "zone_code": "zone-088",
+    "requested_role": "zone_admin",
+    "status": "approved",
+    "reason": null,
+    "reviewed_by": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+    "reviewed_at": "2026-08-28T01:26:00.166Z",
+    "created_at": "2026-08-27T03:42:23.718Z",
+    "updated_at": "2026-08-28T01:26:00.166Z",
+    "raw_data": null
+  },
+  {
+    "id": "req_001_1",
+    "user_id": "user_001",
+    "user_email": "user001@test.com",
+    "user_name": "Singer 001",
+    "zone_id": "zone-001",
+    "zone_code": "zone-001",
+    "requested_role": "zone_admin",
+    "status": "approved",
+    "reason": null,
+    "reviewed_by": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+    "reviewed_at": "2026-08-28T01:26:09.853Z",
+    "created_at": "2026-08-27T03:42:23.718Z",
+    "updated_at": "2026-08-28T01:26:09.853Z",
+    "raw_data": null
+  }
+]

@@ -14,7 +14,7 @@ const getMinisteredSongsHandler = async (_req: any, res: any) => {
         OR: [
           { isMinistered: true },
           { category: 'Ministered Songs' },
-          { scope: 'hq' },
+          { organizationId: 'zone-001' },
         ],
       },
       orderBy: { title: 'asc' },
@@ -210,7 +210,7 @@ router.get('/zone', requireAuth, async (req, res) => {
   try {
     const { zoneId } = req.query;
     const songs = await prisma.song.findMany({
-      where: zoneId ? { zoneId: zoneId as string } : undefined,
+      where: zoneId ? { organizationId: zoneId as string } : undefined,
     });
     res.json({ success: true, count: songs.length, data: songs.map(mergeRawRow) });
   } catch (err) {
@@ -250,7 +250,7 @@ router.get('/subgroup', requireAuth, async (req, res) => {
         },
       });
     } else if (zoneId) {
-      songs = await prisma.song.findMany({ where: { zoneId: zoneId as string } });
+      songs = await prisma.song.findMany({ where: { organizationId: zoneId as string } });
     } else {
       songs = await prisma.song.findMany();
     }
@@ -285,7 +285,7 @@ router.get('/zone-praise-nights', requireAuth, async (req, res) => {
       rows = await prisma.program.findMany({
         where: {
           OR: [
-            { zoneId: zoneId as string },
+            { organizationId: zoneId as string },
             { rawData: { path: ['zoneId'], equals: zoneId as string } },
             { rawData: { path: ['zone_id'], equals: zoneId as string } },
           ],
@@ -602,15 +602,14 @@ const updateSongHandler = async (req: any, res: any) => {
     if (body.status !== undefined) updateFields.status = body.status;
     if (body.isActive !== undefined) updateFields.isActive = Boolean(body.isActive);
     if (body.categories !== undefined) updateFields.categories = body.categories;
-    if (body.praiseNightId !== undefined) updateFields.praiseNightId = body.praiseNightId;
-    if (body.zoneId !== undefined) updateFields.zoneId = body.zoneId;
+    if (body.organizationId !== undefined || body.zoneId !== undefined) updateFields.organizationId = body.organizationId || body.zoneId;
 
     await prisma.song.update({ where: { id: songId }, data: updateFields });
 
     const mergedSong = mergeRawRow({ ...existing, ...updateFields, rawData: updatedRaw } as any);
     broadcast('song', songId, mergedSong);
     broadcast('song', 'all', mergedSong);
-    const pId = updateFields.praiseNightId || existing?.praiseNightId;
+    const pId = body.praiseNightId || body.programId || (existing?.rawData as any)?.praiseNightId;
     if (pId) {
       broadcast('songs', String(pId), mergedSong);
     }
@@ -658,10 +657,14 @@ const toggleActiveHandler = async (req: any, res: any) => {
     const { isActive, praiseNightId } = req.body;
 
     if (isActive && praiseNightId) {
-      await prisma.song.updateMany({
-        where: { praiseNightId },
-        data: { isActive: false, updatedAt: new Date() },
-      });
+      const progSongs = await prisma.programSong.findMany({ where: { programId: praiseNightId } });
+      const songIds = progSongs.map(ps => ps.songId);
+      if (songIds.length > 0) {
+        await prisma.song.updateMany({
+          where: { id: { in: songIds } },
+          data: { isActive: false, updatedAt: new Date() },
+        });
+      }
     }
 
     await prisma.song.update({
@@ -808,8 +811,8 @@ router.post('/praise-night/:id/duplicate', requireAuth, requireTenantAdmin, asyn
     }
 
     const newSongId = `song_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const effectiveTargetProgramId = targetProgramId || targetPraiseNightId || existing.praiseNightId;
-    const effectiveZoneId = zoneId || existing.zoneId;
+    const effectiveTargetProgramId = targetProgramId || targetPraiseNightId || (existing.rawData as any)?.praiseNightId;
+    const effectiveZoneId = zoneId || existing.organizationId;
 
     const rawData = (existing.rawData as Record<string, any>) || {};
     const newRawData = {
@@ -832,22 +835,30 @@ router.post('/praise-night/:id/duplicate', requireAuth, requireTenantAdmin, asyn
       category: existing.category,
       audioFile: existing.audioFile,
       audioUrls: existing.audioUrls,
+      organizationId: effectiveZoneId,
       conductor: existing.conductor,
       leadSinger: existing.leadSinger,
       drummer: existing.drummer,
       leadKeyboardist: existing.leadKeyboardist,
       bassGuitarist: existing.bassGuitarist,
       solfas: existing.solfas,
-      zoneId: effectiveZoneId,
-      praiseNightId: effectiveTargetProgramId,
       status: existing.status || 'active',
       isActive: existing.isActive !== false,
       categories: existing.categories,
       rawData: newRawData,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
     };
 
     const created = await prisma.song.create({ data: duplicateData });
+
+    if (effectiveTargetProgramId) {
+      await prisma.programSong.create({
+        data: {
+          programId: effectiveTargetProgramId,
+          songId: newSongId,
+        },
+      }).catch(() => {});
+    }
 
     res.status(201).json({
       success: true,
@@ -1008,12 +1019,19 @@ router.post('/import-from-ministered', requireAuth, requireTenantAdmin, async (r
           lyrics: m.lyrics || '',
           audioFile: m.audioFile || '',
           audioUrls: m.audioUrls || {},
-          praiseNightId: praiseId,
-          scope: isHq ? 'hq' : 'zone',
-          zoneId: isHq ? 'hq' : zoneId,
+          organizationId: isHq ? 'zone-001' : (zoneId || 'zone-001'),
           rawData: raw,
         },
       });
+
+      if (praiseId) {
+        await prisma.programSong.create({
+          data: {
+            programId: praiseId,
+            songId: newId,
+          },
+        }).catch(() => {});
+      }
       importedCount++;
     }
 

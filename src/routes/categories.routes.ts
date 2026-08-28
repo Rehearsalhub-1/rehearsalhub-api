@@ -31,7 +31,7 @@ router.get('/', requireAuth, async (req: any, res) => {
 // GET /categories/page
 router.get('/page', requireAuth, async (_req, res) => {
   try {
-    const rows = await prisma.category.findMany({ where: { type: 'page' } });
+    const rows = await prisma.category.findMany({ where: { type: 'PAGE' } });
     res.json({ success: true, data: rows.map(mergeRawRow) });
   } catch (err) {
     console.error('[categories/page]', err);
@@ -50,8 +50,8 @@ router.get('/zone-page', requireAuth, async (req: any, res) => {
 
     const rows = await prisma.category.findMany({
       where: {
-        type: 'page',
-        ...(effectiveZoneId ? { zoneId: effectiveZoneId } : {}),
+        type: 'PAGE',
+        ...(effectiveZoneId ? { organizationId: effectiveZoneId } : {}),
       },
     });
 
@@ -82,9 +82,8 @@ router.post('/', requireAuth, requireTenantAdmin, async (req, res) => {
         id,
         name: name.trim(),
         color: color || '#9333ea',
-        scope: zoneId && zoneId !== 'global' ? 'zone' : 'hq',
-        zoneId: zoneId || null,
-        type: 'program',
+        organizationId: zoneId && zoneId !== 'global' ? zoneId : null,
+        type: 'PROGRAM',
         rawData,
       },
     });
@@ -149,9 +148,8 @@ router.post('/page', requireAuth, requireTenantAdmin, async (req, res) => {
       data: {
         id: pageCatId,
         name: body.name || 'Page Category',
-        scope: zoneId ? 'zone' : 'hq',
-        zoneId: zoneId || null,
-        type: 'page',
+        organizationId: zoneId || null,
+        type: 'PAGE',
         rawData,
       },
     });
@@ -222,10 +220,9 @@ router.post('/page/order', requireAuth, requireTenantAdmin, async (req, res) => 
             data: {
               id: String(itemId),
               name: item.name || 'Category',
-              type: 'page',
+              type: 'PAGE',
               order: i,
-              scope: zoneId ? 'zone' : 'hq',
-              zoneId: zoneId || null,
+              organizationId: zoneId || null,
               rawData,
             },
           });

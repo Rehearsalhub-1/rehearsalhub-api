@@ -25,9 +25,9 @@ router.post('/daily-reminders', async (req, res) => {
 
   try {
     const targetDate = isoDateAfter(1);
-    const [eventRows, profileRows] = await Promise.all([
+    const [eventRows, userRows] = await Promise.all([
       prisma.program.findMany(),
-      prisma.profile.findMany(),
+      prisma.user.findMany(),
     ]);
 
     const events = eventRows
@@ -36,40 +36,34 @@ router.post('/daily-reminders', async (req, res) => {
     const records: any[] = [];
 
     for (const event of events) {
-      const eventZone = String(event.zoneId || event.zone_id || '').toLowerCase();
-      const recipients = profileRows.filter((profile) => {
+      const eventZone = String(event.organizationId || event.zoneId || event.zone_id || '').toLowerCase();
+      const recipients = userRows.filter((user) => {
         if (!eventZone || eventZone === 'global' || eventZone === 'all') return true;
-        const raw = rawObject(profile.rawData);
+        const raw = rawObject(user.rawData);
         const profileZone = String(raw.zoneId || raw.zone_id || raw.zoneCode || raw.zone_code || '').toLowerCase();
         return profileZone === eventZone || profileZone.replace(/-/g, '') === eventZone.replace(/-/g, '');
       });
 
-      for (const profile of recipients) {
-        const id = `reminder_${crypto.createHash('sha256').update(`${event.id}:${profile.id}:${targetDate}`).digest('hex').slice(0, 32)}`;
+      for (const u of recipients) {
+        const id = `reminder_${crypto.createHash('sha256').update(`${event.id}:${u.id}:${targetDate}`).digest('hex').slice(0, 32)}`;
         const title = `Reminder: ${event.title || event.name || 'Upcoming event'}`;
         const message = `You have ${event.title || event.name || 'an upcoming event'} on ${targetDate}.`;
         records.push({
           id,
-          type: 'reminder',
           title,
+          body: message,
           message,
-          zoneId: eventZone || null,
-          isRead: false,
-          category: 'reminder',
-          priority: 'normal',
+          organizationId: eventZone || null,
           senderId: 'system',
-          actionUrl: `/calendar?date=${targetDate}`,
-          createdAt: new Date().toISOString(),
-          targetUserId: profile.id,
-          targetAudience: 'user',
-          rawData: { id, eventId: event.id, reminderDate: targetDate, generatedBy: 'daily-reminders' },
+          createdAt: new Date(),
+          rawData: { id, eventId: event.id, reminderDate: targetDate, generatedBy: 'daily-reminders', targetUserId: u.id },
         });
       }
     }
 
     if (records.length > 0) {
       for (const record of records) {
-        await prisma.notification.upsert({
+        await prisma.broadcastNotification.upsert({
           where: { id: record.id },
           update: {},
           create: record,

@@ -159,11 +159,14 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
           return;
         }
         if (chatResources.has(msg.resource) && msg.id !== 'all') {
-          const chat = await prisma.chat.findUnique({ where: { id: msg.id } });
-          const participants = Array.isArray(chat?.participants) ? (chat!.participants as string[]).map(String) : [];
+          const chat = await prisma.chat.findUnique({
+            where: { id: msg.id },
+            include: { participants: true },
+          });
+          const participants = Array.isArray(chat?.participants) ? chat!.participants.map(p => p.userId) : [];
           const rawChat = chat?.rawData && typeof chat.rawData === 'object' ? chat.rawData as Record<string, any> : {};
           const rawParticipants = Array.isArray(rawChat.participants) ? rawChat.participants.map(String) : [];
-          if (!chat || (chat.createdBy !== socket.userId && !participants.includes(socket.userId) && !rawParticipants.includes(socket.userId))) {
+          if (!chat || (chat.createdById !== socket.userId && !participants.includes(socket.userId) && !rawParticipants.includes(socket.userId))) {
             socket.send(JSON.stringify({ type: 'error', error: 'Forbidden subscription' }));
             return;
           }

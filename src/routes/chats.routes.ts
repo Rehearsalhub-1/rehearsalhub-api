@@ -152,7 +152,7 @@ async function hydrateChats(chatRows: any[]) {
   const profileMap = new Map<string, { name: string; avatar?: string; email?: string; username?: string }>();
   if (allParticipantIds.size > 0) {
     const idArray = Array.from(allParticipantIds);
-    const pRows = await prisma.profile.findMany({ where: { id: { in: idArray } } });
+    const pRows = await prisma.user.findMany({ where: { id: { in: idArray } } });
     for (const p of pRows) {
       const rawP = (p.rawData && typeof p.rawData === 'object') ? (p.rawData as Record<string, any>) : {};
       const firstName = p.firstName || rawP.first_name || rawP.firstName || '';
@@ -212,7 +212,10 @@ router.get('/', requireAuth, async (req, res) => {
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
     const showAll = isHqAdmin && req.query.all === 'true';
 
-    const allRows = await prisma.chat.findMany({ take: 500 });
+    const allRows = await prisma.chat.findMany({
+      include: { participants: true },
+      take: 500,
+    });
 
     let rows: any[] = [];
     if (showAll) {
@@ -220,20 +223,14 @@ router.get('/', requireAuth, async (req, res) => {
     } else {
       rows = allRows.filter((r) => {
         const raw = (r.rawData && typeof r.rawData === 'object') ? (r.rawData as Record<string, any>) : {};
-        const participants = Array.isArray(r.participants)
-          ? r.participants
+        const pList = Array.isArray(r.participants)
+          ? r.participants.map((p: any) => typeof p === 'string' ? p : p.userId)
           : Array.isArray(raw.participants)
             ? raw.participants
-            : Array.isArray(raw.memberIds)
-              ? raw.memberIds
-              : typeof r.participants === 'object' && r.participants !== null
-                ? Object.keys(r.participants)
-                : typeof raw.participants === 'object' && raw.participants !== null
-                  ? Object.keys(raw.participants)
-                  : [];
+            : [];
         return (
-          participants.map(String).includes(userId) ||
-          r.createdBy === userId ||
+          pList.includes(userId) ||
+          r.createdById === userId ||
           raw.createdBy === userId ||
           raw.created_by === userId
         );
@@ -289,16 +286,18 @@ router.post('/', requireAuth, async (req, res) => {
     const id = requestedId || crypto.randomUUID();
     const effectiveZoneId = zone_id || (req.tenant?.effectiveZoneId ?? null);
 
-    const existing = await prisma.chat.findUnique({ where: { id } });
+    const existing = await prisma.chat.findUnique({
+      where: { id },
+      include: { participants: true },
+    });
     if (existing) {
-      const prevParticipants = Array.isArray(existing.participants) ? existing.participants as string[] : [];
+      const prevParticipants = Array.isArray(existing.participants) ? (existing.participants as any[]).map(p => typeof p === 'string' ? p : p.userId) : [];
       const mergedParticipants = Array.from(new Set([...prevParticipants, ...participants]));
       const prevRaw = (existing.rawData && typeof existing.rawData === 'object') ? (existing.rawData as Record<string, any>) : {};
 
       const updated = await prisma.chat.update({
         where: { id },
         data: {
-          participants: mergedParticipants,
           rawData: {
             ...prevRaw,
             participants: mergedParticipants,
@@ -306,7 +305,18 @@ router.post('/', requireAuth, async (req, res) => {
             updatedAt: new Date().toISOString(),
           },
         },
+        include: { participants: true },
       });
+
+      for (const pId of mergedParticipants) {
+        if (!prevParticipants.includes(pId)) {
+          await prisma.chatParticipant.upsert({
+            where: { chatId_userId: { chatId: id, userId: pId } },
+            create: { chatId: id, userId: pId, unreadCount: 0 },
+            update: {},
+          });
+        }
+      }
 
       const [hydrated] = await hydrateChats([updated]);
       broadcast('chat', updated.id, hydrated);
@@ -325,16 +335,23 @@ router.post('/', requireAuth, async (req, res) => {
       updatedAt: now,
     };
 
+    const chatType = String(type).toUpperCase() === 'GROUP' ? 'GROUP' : String(type).toUpperCase() === 'ANNOUNCEMENT' ? 'ANNOUNCEMENT' : 'DIRECT';
+
     const chat = await prisma.chat.create({
       data: {
         id,
-        type,
-        createdBy: auth.userId,
-        participants,
-        participantDetails: {},
-        unreadCount: {},
+        type: chatType as any,
+        createdById: auth.userId,
+        organizationId: effectiveZoneId || null,
         rawData,
+        participants: {
+          create: participants.map((pId: string) => ({
+            userId: pId,
+            unreadCount: 0,
+          })),
+        },
       },
+      include: { participants: true },
     });
 
     const [hydrated] = await hydrateChats([chat]);
@@ -383,9 +400,9 @@ router.patch('/:chatId', requireAuth, async (req, res) => {
       ? member_ids
       : Array.isArray(participants)
         ? participants
-        : existing.participants;
+        : null;
 
-    if ((Array.isArray(member_ids) || Array.isArray(participants) || admins !== undefined) && existing.createdBy !== res.locals.auth.userId) {
+    if ((Array.isArray(member_ids) || Array.isArray(participants) || admins !== undefined) && existing.createdById !== res.locals.auth.userId) {
       res.status(403).json({ success: false, error: 'Only the chat creator can change members or administrators' });
       return;
     }
@@ -408,10 +425,20 @@ router.patch('/:chatId', requireAuth, async (req, res) => {
     const updated = await prisma.chat.update({
       where: { id: chatId },
       data: {
-        ...(nextParticipants ? { participants: nextParticipants } : {}),
         rawData: nextRaw,
       },
+      include: { participants: true },
     });
+
+    if (nextParticipants && Array.isArray(nextParticipants)) {
+      for (const pId of nextParticipants) {
+        await prisma.chatParticipant.upsert({
+          where: { chatId_userId: { chatId, userId: pId } },
+          create: { chatId, userId: pId, unreadCount: 0 },
+          update: {},
+        });
+      }
+    }
 
     const [hydrated] = await hydrateChats([updated]);
     broadcast('chat', chatId, hydrated);
@@ -431,10 +458,11 @@ router.delete('/:chatId', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Chat not found' });
       return;
     }
-    if (chat.createdBy !== res.locals.auth.userId) {
+    if (chat.createdById !== res.locals.auth.userId) {
       res.status(403).json({ success: false, error: 'Only the chat creator can delete this chat' });
       return;
     }
+    await prisma.chatParticipant.deleteMany({ where: { chatId } });
     await prisma.message.deleteMany({ where: { chatId } });
     await prisma.chat.delete({ where: { id: chatId } });
     broadcast('chat_deleted', chatId, { id: chatId });
@@ -551,17 +579,10 @@ router.get('/:chatId/messages', requireAuth, async (req, res) => {
     const currentUserId = auth?.userId as string;
     if (currentUserId && chatId) {
       try {
-        const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
-        if (existingChat) {
-          const unread = (typeof existingChat.unreadCount === 'object' && existingChat.unreadCount !== null)
-            ? { ...(existingChat.unreadCount as Record<string, number>) }
-            : {};
-          if (unread[currentUserId] && unread[currentUserId] > 0) {
-            unread[currentUserId] = 0;
-            await prisma.chat.update({ where: { id: chatId }, data: { unreadCount: unread } });
-            broadcast('chat_read', chatId, { chatId, userId: currentUserId });
-          }
-        }
+        await prisma.chatParticipant.updateMany({
+          where: { chatId, userId: currentUserId },
+          data: { unreadCount: 0 },
+        });
 
         await prisma.message.updateMany({
           where: {
@@ -571,6 +592,7 @@ router.get('/:chatId/messages', requireAuth, async (req, res) => {
           },
           data: { status: 'read' },
         });
+        broadcast('chat_read', chatId, { chatId, userId: currentUserId });
       } catch (readErr) {
         console.warn('[chats/:id/messages] Error clearing unread status:', readErr);
       }
@@ -599,13 +621,11 @@ router.post('/:chatId/read', requireAuth, async (req: any, res) => {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
-    if (existingChat) {
-      const unread = (typeof existingChat.unreadCount === 'object' && existingChat.unreadCount !== null)
-        ? { ...(existingChat.unreadCount as Record<string, number>) }
-        : {};
-      unread[currentUserId] = 0;
-      await prisma.chat.update({ where: { id: chatId }, data: { unreadCount: unread } });
-    }
+
+    await prisma.chatParticipant.updateMany({
+      where: { chatId, userId: currentUserId },
+      data: { unreadCount: 0 },
+    });
 
     await prisma.message.updateMany({
       where: {
@@ -755,33 +775,30 @@ router.post('/:chatId/messages', requireAuth, async (req: any, res) => {
         id,
         chatId,
         senderId: auth.userId,
-        senderName,
         text,
-        type: req.body.type || 'text',
+        type: (req.body.type ? String(req.body.type).toUpperCase() : 'TEXT') as any,
         reactions: req.body.reactions || {},
         rawData,
       },
     });
 
     // Update last message & increment unreadCount for other participants
+    await prisma.chatParticipant.updateMany({
+      where: {
+        chatId,
+        userId: { not: auth.userId },
+      },
+      data: {
+        unreadCount: { increment: 1 },
+      },
+    });
+
     const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
     if (existingChat) {
       const chatRaw = (existingChat.rawData && typeof existingChat.rawData === 'object') ? (existingChat.rawData as Record<string, any>) : {};
-      const currentUnread = (typeof existingChat.unreadCount === 'object' && existingChat.unreadCount !== null)
-        ? { ...(existingChat.unreadCount as Record<string, number>) }
-        : {};
-
-      const participants = Array.isArray(existingChat.participants) ? existingChat.participants as string[] : [];
-      participants.forEach((pId: string) => {
-        if (pId !== auth.userId) {
-          currentUnread[pId] = (currentUnread[pId] || 0) + 1;
-        }
-      });
-
       await prisma.chat.update({
         where: { id: chatId },
         data: {
-          unreadCount: currentUnread,
           rawData: { ...chatRaw, lastMessage: text || 'Media attachment', lastTimestamp: now, updatedAt: now },
         },
       });

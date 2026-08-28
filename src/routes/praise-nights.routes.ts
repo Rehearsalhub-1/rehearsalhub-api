@@ -163,9 +163,9 @@ router.get('/zone/all', requireAuth, async (req, res) => {
     const rows = await prisma.program.findMany({
       where: zoneId ? {
         OR: [
-          { zoneId },
-          { rawData: { path: ['zoneId'], equals: zoneId } },
-          { scope: 'hq' },
+          { organizationId: zoneId },
+          { organization: { isHq: true } },
+          { organizationId: 'zone-001' },
         ]
       } : undefined
     });
@@ -187,7 +187,7 @@ router.get('/zone/all', requireAuth, async (req, res) => {
 // POST /programs or /praise-nights — Create program
 router.post('/', requireAuth, requireTenantAdmin, async (req, res) => {
   try {
-    const { name, date, zoneId, scope, category, status, location, bannerImage, songs, songIds } = req.body;
+    const { name, date, zoneId, category, status, location, bannerImage, songs, songIds } = req.body;
     const programId = req.body.id || `prog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const effectiveCategory = category || (status === 'ongoing' ? 'ongoing' : status === 'archive' ? 'archive' : 'pre-rehearsal');
     const effectiveStatus = status || effectiveCategory;
@@ -198,8 +198,7 @@ router.post('/', requireAuth, requireTenantAdmin, async (req, res) => {
         id: programId,
         name: name || 'Program',
         date: date || new Date().toISOString(),
-        scope: scope || (subGroupId ? 'subgroup' : (zoneId && zoneId !== 'zone-001') ? 'zone' : 'hq'),
-        zoneId: zoneId || 'zone-001',
+        organizationId: zoneId || (req.tenant?.isHQAdmin ? 'zone-001' : req.tenant?.effectiveZoneId || 'zone-001'),
         subgroupId: subGroupId,
         category: effectiveCategory,
         status: effectiveStatus,
@@ -287,14 +286,13 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req, res) 
     }
 
     const newId = `prog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const effectiveZoneId = targetZoneId || source.zoneId || 'zone-001';
+    const effectiveZoneId = targetZoneId || source.organizationId || 'zone-001';
 
     const duplicateData = {
       id: newId,
       name: newName || `${source.name} (Copy)`,
       date: newDate || new Date().toISOString(),
-      scope: source.scope || 'zone',
-      zoneId: effectiveZoneId,
+      organizationId: effectiveZoneId,
       category: 'pre-rehearsal',
       status: 'pre-rehearsal',
       isActive: false,

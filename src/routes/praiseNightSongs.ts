@@ -8,12 +8,15 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { praiseNightId, zoneId } = req.query;
     const where: any = {};
-    if (praiseNightId) where.praiseNightId = praiseNightId as string;
-    else if (zoneId) where.zoneId = zoneId as string;
+    if (praiseNightId) {
+      where.programSongs = { some: { programId: praiseNightId as string } };
+    } else if (zoneId) {
+      where.organizationId = zoneId as string;
+    }
 
     const rows = await prisma.song.findMany({
       where,
-      select: { id: true, title: true, key: true, tempo: true, category: true, writer: true, conductor: true, leadSinger: true, drummer: true, audioFile: true, audioUrls: true, lyrics: true, categories: true, status: true, isActive: true, zoneId: true, praiseNightId: true, createdAt: true, updatedAt: true },
+      select: { id: true, title: true, key: true, tempo: true, category: true, writer: true, conductor: true, leadSinger: true, drummer: true, audioFile: true, audioUrls: true, lyrics: true, categories: true, status: true, isActive: true, organizationId: true, rawData: true, createdAt: true, updatedAt: true },
     });
 
     res.json({ success: true, count: rows.length, data: rows });

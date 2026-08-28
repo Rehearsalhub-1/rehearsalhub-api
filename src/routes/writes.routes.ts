@@ -61,8 +61,10 @@ writesRouter.patch('/subscriptions/:userId', requireAuth, async (req, res) => {
 
 // ── Chats & Messages ──────────────────────────────────────────────────────────
 
-function chatMemberIds(chat: { participants: unknown; rawData?: unknown }): string[] {
-  if (Array.isArray(chat.participants)) return chat.participants as string[];
+function chatMemberIds(chat: { participants?: unknown; rawData?: unknown }): string[] {
+  if (Array.isArray(chat.participants)) {
+    return (chat.participants as any[]).map(p => typeof p === 'string' ? p : p.userId);
+  }
   const raw = chat.rawData && typeof chat.rawData === 'object' ? (chat.rawData as Record<string, unknown>) : {};
   if (Array.isArray(raw.participants)) return raw.participants as string[];
   if (Array.isArray(raw.memberIds)) return raw.memberIds as string[];
@@ -85,20 +87,24 @@ writesRouter.post('/chats', requireAuth, async (req, res) => {
     ? parsed.data.member_ids
     : [...parsed.data.member_ids, auth.userId];
 
+  const typeUpper = (parsed.data.type === 'direct' ? 'DIRECT' : parsed.data.type === 'announcement' ? 'ANNOUNCEMENT' : 'GROUP') as any;
+
   const chat = await prisma.chat.create({
     data: {
       id: crypto.randomUUID(),
-      type: parsed.data.type,
-      createdBy: auth.userId,
-      participants,
-      participantDetails: {},
-      unreadCount: {},
+      type: typeUpper,
+      createdById: auth.userId,
+      organizationId: parsed.data.zone_id || null,
+      participants: {
+        create: participants.map(uid => ({ userId: uid })),
+      },
       rawData: {
         name: parsed.data.name,
         zoneId: parsed.data.zone_id,
         participants,
       },
     },
+    include: { participants: true },
   });
 
   broadcast('chat', chat.id, chat);
@@ -118,7 +124,10 @@ writesRouter.patch('/chats/:chatId', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
-  const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+  const chat = await prisma.chat.findUnique({
+    where: { id: chatId },
+    include: { participants: true },
+  });
   if (!chat) { notFound(res); return; }
   if (!chatMemberIds(chat).includes(auth.userId)) { forbidden(res); return; }
 
@@ -131,12 +140,22 @@ writesRouter.patch('/chats/:chatId', requireAuth, async (req, res) => {
     ...(parsed.data.last_message_at !== undefined ? { lastMessageAt: parsed.data.last_message_at } : {}),
   };
 
+  if (parsed.data.member_ids !== undefined) {
+    for (const uid of parsed.data.member_ids) {
+      await prisma.chatParticipant.upsert({
+        where: { chatId_userId: { chatId, userId: uid } },
+        create: { chatId, userId: uid },
+        update: {},
+      }).catch(() => {});
+    }
+  }
+
   const updated = await prisma.chat.update({
     where: { id: chatId },
     data: {
-      ...(parsed.data.member_ids !== undefined ? { participants: parsed.data.member_ids } : {}),
       rawData: nextRaw,
     },
+    include: { participants: true },
   });
 
   broadcast('chat', chatId, updated);
@@ -157,7 +176,10 @@ writesRouter.patch('/chats/:chatId/messages/:msgId', requireAuth, async (req, re
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
-  const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+  const chat = await prisma.chat.findUnique({
+    where: { id: chatId },
+    include: { participants: true },
+  });
   if (!chat) { notFound(res); return; }
   if (!chatMemberIds(chat).includes(auth.userId)) { forbidden(res); return; }
 
@@ -194,7 +216,10 @@ writesRouter.delete('/chats/:chatId/messages/:msgId', requireAuth, async (req, r
   const { chatId, msgId } = req.params;
   const auth = res.locals.auth;
 
-  const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+  const chat = await prisma.chat.findUnique({
+    where: { id: chatId },
+    include: { participants: true },
+  });
   if (!chat) { notFound(res); return; }
   if (!chatMemberIds(chat).includes(auth.userId)) { forbidden(res); return; }
 
@@ -318,15 +343,18 @@ writesRouter.post('/members/zone-join', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
+  const orgId = parsed.data.zone_id || 'zone-001';
   if (parsed.data.is_hq) {
-    await prisma.profile.update({
-      where: { id: auth.userId },
-      data: { hasHqAccess: true },
+    await prisma.membership.upsert({
+      where: { userId_organizationId: { userId: auth.userId, organizationId: 'zone-001' } },
+      create: { userId: auth.userId, organizationId: 'zone-001', role: 'MEMBER', hasHqAccess: true },
+      update: { hasHqAccess: true },
     });
   } else {
-    await prisma.profile.update({
-      where: { id: auth.userId },
-      data: { zoneId: parsed.data.zone_id },
+    await prisma.membership.upsert({
+      where: { userId_organizationId: { userId: auth.userId, organizationId: orgId } },
+      create: { userId: auth.userId, organizationId: orgId, role: 'MEMBER' },
+      update: { status: 'ACTIVE' },
     });
   }
 

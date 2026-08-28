@@ -86,7 +86,15 @@ router.post('/', requireAuth, async (req: any, res) => {
       createdAt: now,
     };
 
-    await prisma.activityLog.create({ data: { id, rawData: logData } });
+    await prisma.analyticsEvent.create({
+      data: {
+        id,
+        userId: auth.userId,
+        organizationId: logData.zoneId,
+        type: 'activity_log',
+        payload: logData,
+      },
+    });
     res.status(201).json({ success: true, message: 'Activity logged', data: logData });
   } catch (err) {
     console.error('[activity-logs:post]', err);

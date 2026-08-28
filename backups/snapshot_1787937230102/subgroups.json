@@ -1,0 +1,419 @@
+[
+  {
+    "id": "2KQUBEl1N5IrXacVLfzt",
+    "zone_id": "zone-international",
+    "name": "Christ Embassy Harare CBD",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "Christ Embassy Harare CBD",
+      "type": "church",
+      "status": "pending",
+      "zoneId": "zone-international",
+      "createdAt": "2026-07-16T09:28:58.772Z",
+      "memberIds": [
+        "bfGV6q0gpieGKE9GVWGKh4b63af2"
+      ],
+      "description": "Taking Gods' divine presence",
+      "coordinatorId": "bfGV6q0gpieGKE9GVWGKh4b63af2",
+      "coordinatorName": "Unknown",
+      "coordinatorEmail": "",
+      "estimatedMembers": 10
+    },
+    "description": "Taking Gods' divine presence",
+    "updated_at": null,
+    "type": "church",
+    "status": "pending",
+    "coordinator_id": "bfGV6q0gpieGKE9GVWGKh4b63af2",
+    "coordinator_name": "Unknown",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "bfu4lfCqmOKBOkqRXZDZ",
+    "zone_id": "zone-001",
+    "name": "Teens",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "Teens",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": {
+        "_seconds": 1776075794,
+        "_nanoseconds": 88000000
+      },
+      "memberIds": [
+        "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+        "N34G7wVDGOYo3gXQiIryeyktOQk1",
+        "IodoMeh1qhVe48t9N60ePw0HApA2",
+        "jxForVQrdubTChuO5NNinV7lPt03",
+        "KRPWLUkxWrXikYMG6aSaR6r6uWD3",
+        "V2wXQzOnuPRK90gJxUJB5K0lihN2",
+        "0D6ffcQifnQx9M3A48joPFlvHxv1",
+        "X6096ZEyknaAhflXDC12BCJydQ72",
+        "cB2x09GkVWZRPLPqud6BuNUDakq1",
+        "2WILzcTJT8MxpEfUCEgTVJoTxnK2",
+        "PYhbFe37CBcymt3Y5qnYjVK5zMt2",
+        "doVLQFQVNQV0DUUlLdUbtJFqlOv1",
+        "GNf2Aedm7vNwzSpMDW4h0K5lkIO2",
+        "MkdB8Zp0VSW9x6QZXy5ZyRhchbu2",
+        "ACJQhvWroUPCZ16kTUPcG9j9xhr1",
+        "RR0n4GtLq1TitiuTK6X5lEC9R1K2"
+      ],
+      "updatedAt": {
+        "_seconds": 1782750556,
+        "_nanoseconds": 190000000
+      },
+      "approvedAt": {
+        "_seconds": 1776075842,
+        "_nanoseconds": 47000000
+      },
+      "approvedBy": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "activatedAt": {
+        "_seconds": 1776075842,
+        "_nanoseconds": 47000000
+      },
+      "description": "Choir",
+      "coordinatorId": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "approvedByName": "Ephraim Udoji",
+      "coordinatorName": "Ephraim Udoji",
+      "coordinatorEmail": "ephraimloveworld1@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "Choir",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+    "coordinator_name": "Ephraim Udoji",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "eq2iqdrHpkwB8yiBNk2K",
+    "zone_id": "zone-001",
+    "name": "Test 1",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "Test 1",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": {
+        "_seconds": 1775141703,
+        "_nanoseconds": 280000000
+      },
+      "memberIds": [
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+        "ksk7ioTWYDNt2teRQyIZclYTxBW2"
+      ],
+      "updatedAt": {
+        "_seconds": 1780497437,
+        "_nanoseconds": 859000000
+      },
+      "approvedAt": {
+        "_seconds": 1775141803,
+        "_nanoseconds": 928000000
+      },
+      "approvedBy": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "activatedAt": {
+        "_seconds": 1775141803,
+        "_nanoseconds": 928000000
+      },
+      "description": "hello",
+      "coordinatorId": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "approvedByName": "ERIC STEPHEN",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "takeshopstores@gmail.com",
+      "estimatedMembers": 12
+    },
+    "description": "hello",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+    "coordinator_name": "ERIC STEPHEN",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "hoPWNhBlYemNopJzTXBm",
+    "zone_id": "zone-001",
+    "name": "JULY HSLHS PRE-REHEARSALS",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "JULY HSLHS PRE-REHEARSALS",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-06-08T09:35:38.313Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+      ],
+      "approvedAt": "2026-06-08T09:35:56.189Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-06-08T09:35:56.189Z",
+      "description": "JULY HSLHS PRE-REHEARSALS",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "irech style",
+      "coordinatorName": "irech style",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "JULY HSLHS PRE-REHEARSALS",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+    "coordinator_name": "irech style",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "mVyJV9ELhmtjeBqqYos9",
+    "zone_id": "zone-013",
+    "name": "cape twon 2",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "cape twon 2",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-013",
+      "createdAt": {
+        "_seconds": 1774964868,
+        "_nanoseconds": 739000000
+      },
+      "memberIds": [
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+      ],
+      "approvedAt": "2026-05-17T09:51:08.835Z",
+      "approvedBy": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "activatedAt": "2026-05-17T09:51:08.835Z",
+      "description": "hello",
+      "coordinatorId": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "approvedByName": "ERIC STEPHEN",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "takeshopstores@gmail.com",
+      "estimatedMembers": 13
+    },
+    "description": "hello",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+    "coordinator_name": "ERIC STEPHEN",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "QEy4OKNMSDJAUyLTc185",
+    "zone_id": "zone-001",
+    "name": "HQ",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "HQ",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-06-08T09:34:01.770Z",
+      "memberIds": [
+        "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+        "HN0bMxfXDxhA8SDAFY1OZfksQBq2"
+      ],
+      "updatedAt": {
+        "_seconds": 1780927008,
+        "_nanoseconds": 336000000
+      },
+      "approvedAt": "2026-06-08T09:35:52.270Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-06-08T09:35:52.270Z",
+      "description": "HQ",
+      "coordinatorId": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "approvedByName": "irech style",
+      "coordinatorName": "Ephraim Udoji",
+      "coordinatorEmail": "ephraimloveworld1@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "HQ",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+    "coordinator_name": "Ephraim Udoji",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "w7nhIWekLN3svMEFoYay",
+    "zone_id": "zone-017",
+    "name": "usa region 1",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "usa region 1",
+      "type": "church",
+      "status": "rejected",
+      "zoneId": "zone-017",
+      "createdAt": {
+        "_seconds": 1774965992,
+        "_nanoseconds": 436000000
+      },
+      "memberIds": [
+        "7USGTFO7lzV3qT9mWVmMIvjYbkC3"
+      ],
+      "rejectedAt": {
+        "_seconds": 1774966026,
+        "_nanoseconds": 575000000
+      },
+      "rejectedBy": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+      "description": "hello",
+      "coordinatorId": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+      "coordinatorName": "ERIC STEPHEN",
+      "rejectionReason": "sorry",
+      "coordinatorEmail": "easstephen345@gmail.com",
+      "estimatedMembers": 14
+    },
+    "description": "hello",
+    "updated_at": null,
+    "type": "church",
+    "status": "rejected",
+    "coordinator_id": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+    "coordinator_name": "ERIC STEPHEN",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "Zcp4dDBwNg9sy1Fl57dD",
+    "zone_id": "zone-005",
+    "name": "Christ embassy",
+    "created_at": "2026-07-21T23:16:28.394Z",
+    "raw_data": {
+      "name": "Christ embassy",
+      "type": "campus",
+      "status": "active",
+      "zoneId": "zone-005",
+      "createdAt": {
+        "_seconds": 1775304090,
+        "_nanoseconds": 770000000
+      },
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+      ],
+      "approvedAt": {
+        "_seconds": 1775304121,
+        "_nanoseconds": 867000000
+      },
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": {
+        "_seconds": 1775304121,
+        "_nanoseconds": 867000000
+      },
+      "description": "Cell",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "irech style",
+      "coordinatorName": "irech style",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "Cell",
+    "updated_at": null,
+    "type": "campus",
+    "status": "active",
+    "coordinator_id": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+    "coordinator_name": "irech style",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "sg_1787414930351_dsiid",
+    "zone_id": "zone-001",
+    "name": "hello",
+    "created_at": "2026-08-22T23:08:50.674Z",
+    "raw_data": {
+      "id": "sg_1787414930351_dsiid",
+      "name": "hello",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-08-22T16:08:50.351Z",
+      "createdBy": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "memberIds": [
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+      ],
+      "description": "worship",
+      "coordinatorId": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "takeshopstores@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "worship",
+    "updated_at": null,
+    "type": "church",
+    "status": "active",
+    "coordinator_id": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+    "coordinator_name": "ERIC STEPHEN",
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "sg_1787756226093_lce06",
+    "zone_id": "zone-001",
+    "name": "task",
+    "created_at": "2026-08-26T21:57:07.424Z",
+    "raw_data": {
+      "id": "sg_1787756226093_lce06",
+      "name": "task",
+      "type": "campus",
+      "status": "pending",
+      "zoneId": "zone-001",
+      "createdAt": "2026-08-26T14:57:06.093Z",
+      "createdBy": "9d501169-287e-45fa-bcee-96996c5919a6",
+      "memberIds": [
+        "9d501169-287e-45fa-bcee-96996c5919a6"
+      ],
+      "description": "",
+      "coordinatorId": "9d501169-287e-45fa-bcee-96996c5919a6",
+      "coordinatorName": "Eric Stephen",
+      "coordinatorEmail": "eracissebeauty@gmail.com",
+      "estimatedMembers": 10
+    },
+    "description": "",
+    "updated_at": null,
+    "type": "subgroup",
+    "status": "active",
+    "coordinator_id": null,
+    "coordinator_name": null,
+    "estimated_members": 0,
+    "created_by": null
+  },
+  {
+    "id": "sg_1787756371904_ckvsi",
+    "zone_id": "zone-001",
+    "name": "task2",
+    "created_at": "2026-08-26T21:59:31.987Z",
+    "raw_data": {
+      "id": "sg_1787756371904_ckvsi",
+      "name": "task2",
+      "type": "other",
+      "status": "pending",
+      "zoneId": "zone-001",
+      "createdAt": "2026-08-26T14:59:31.904Z",
+      "createdBy": "9d501169-287e-45fa-bcee-96996c5919a6",
+      "memberIds": [
+        "9d501169-287e-45fa-bcee-96996c5919a6"
+      ],
+      "description": "",
+      "coordinatorId": "9d501169-287e-45fa-bcee-96996c5919a6",
+      "coordinatorName": "Eric Stephen",
+      "coordinatorEmail": "eracissebeauty@gmail.com",
+      "estimatedMembers": 500
+    },
+    "description": "",
+    "updated_at": null,
+    "type": "subgroup",
+    "status": "active",
+    "coordinator_id": null,
+    "coordinator_name": null,
+    "estimated_members": 0,
+    "created_by": null
+  }
+]

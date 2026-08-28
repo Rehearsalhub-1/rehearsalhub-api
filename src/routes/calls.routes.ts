@@ -72,7 +72,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const profileMap: Record<string, { name: string; avatar: string | null }> = {};
     if (userIds.length > 0) {
-      const userProfiles = await prisma.profile.findMany({ where: { id: { in: userIds } } });
+      const userProfiles = await prisma.user.findMany({ where: { id: { in: userIds } } });
       for (const p of userProfiles) {
         const raw = (p.rawData && typeof p.rawData === 'object') ? (p.rawData as any) : {};
         const name = [p.firstName, p.lastName].filter(Boolean).join(' ') || raw.name || raw.displayName || p.email || 'Member';
@@ -136,7 +136,7 @@ router.post('/', requireAuth, async (req, res) => {
       res.status(400).json({ success: false, error: 'receiver_id is required' });
       return;
     }
-    const receiver = await prisma.profile.findUnique({ where: { id: targetReceiverId } });
+    const receiver = await prisma.user.findUnique({ where: { id: targetReceiverId } });
     if (!receiver) {
       res.status(404).json({ success: false, error: 'Receiver not found' });
       return;
