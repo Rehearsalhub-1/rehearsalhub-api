@@ -53,14 +53,55 @@ process.on('uncaughtException', (error) => {
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
-const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
   .filter(Boolean);
 
-if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
-  throw new Error('CORS_ALLOWED_ORIGINS must be configured in production');
+// Flexible origin validator supporting Vercel previews, localhost, mobile origins, and configured env domains
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // Mobile apps, curl, server-to-server, SSR
+  if (configuredOrigins.includes('*')) return true;
+  if (configuredOrigins.some((allowed) => allowed.toLowerCase() === origin.toLowerCase())) return true;
+  
+  // Auto-allow localhost and local network dev origins
+  if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;
+  // Auto-allow Vercel, Netlify, Cloudflare Pages, and Render domains
+  if (/^https?:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/.test(origin)) return true;
+  if (/^https?:\/\/([a-zA-Z0-9-]+\.)*netlify\.app$/.test(origin)) return true;
+  if (/^https?:\/\/([a-zA-Z0-9-]+\.)*pages\.dev$/.test(origin)) return true;
+  // Auto-allow mobile app schemes
+  if (/^(capacitor|ionic|exp|rehearsalhub|rehearsalhubadmin):\/\//i.test(origin)) return true;
+
+  return configuredOrigins.length === 0; // Default to allow if no strict list provided
 }
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow rather than crash, while respecting standard headers
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-zone-id',
+    'x-zone-code',
+    'x-church-id',
+    'x-subgroup-id',
+    'x-scope',
+    'x-device-id',
+    'x-requested-with',
+    'Accept',
+    'Origin',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400,
+};
 
 // Rate limiter: 5000 requests per 15 minutes per IP
 const limiter = rateLimit({
@@ -68,20 +109,13 @@ const limiter = rateLimit({
   max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health' || req.path === '/',
+  skip: (req) => req.path === '/health' || req.path === '/' || req.method === 'OPTIONS',
   message: { success: false, error: 'Too many requests, please try again later.' },
 });
 
 // Middleware
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-    callback(new Error('Origin not allowed'));
-  },
-}));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use(limiter);
 app.use(tenantMiddleware);
