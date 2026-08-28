@@ -170,7 +170,10 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
         }
         if (callResources.has(msg.resource) && msg.id !== 'all' && msg.id !== socket.userId) {
           const call = await prisma.call.findUnique({ where: { id: msg.id } });
-          if (!call || (call.callerId !== socket.userId && call.receiverId !== socket.userId)) {
+          const rawCall = call?.rawData && typeof call.rawData === 'object' ? call.rawData as Record<string, any> : {};
+          const callerId = rawCall.callerId || rawCall.caller_id;
+          const receiverId = rawCall.receiverId || rawCall.receiver_id;
+          if (!call || (callerId !== socket.userId && receiverId !== socket.userId)) {
             socket.send(JSON.stringify({ type: 'error', error: 'Forbidden subscription' }));
             return;
           }

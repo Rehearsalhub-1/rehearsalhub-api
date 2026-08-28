@@ -87,18 +87,8 @@ async function loadAllMediaAssets(): Promise<any[]> {
     return cachedMediaAssets;
   }
 
-  const [videoRows, assetRows, zoneAssetRows] = await Promise.all([
-    prisma.mediaVideo.findMany(),
-    prisma.mediaAsset.findMany(),
-    prisma.zoneMediaAsset.findMany(),
-  ]);
-
-  const combined = [
-    ...videoRows.map((r) => normalizeAsset(r, 'media_videos')),
-    ...assetRows.map((r) => normalizeAsset(r, 'media_assets')),
-    ...zoneAssetRows.map((r) => normalizeAsset(r, 'zone_media_assets')),
-  ];
-
+  const assetRows = await prisma.mediaAsset.findMany();
+  const combined = assetRows.map((r) => normalizeAsset(r, 'media_assets'));
   combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   cachedMediaAssets = combined;
@@ -219,7 +209,7 @@ router.get('/', requireAuth, async (req: any, res) => {
 // GET /media/categories - List media categories
 router.get('/categories', requireAuth, async (_req, res) => {
   try {
-    const rows = await prisma.mediaCategory.findMany();
+    const rows = await prisma.category.findMany({ where: { type: 'media' } });
     const data = rows.map((r) => {
       const m = mergeRawRow(r);
       return {
@@ -249,21 +239,9 @@ router.get('/:id', requireAuth, async (req: any, res) => {
       return !item.zoneId || item.zoneId === 'global' || item.zoneId === tenant?.effectiveZoneId;
     };
 
-    const videoRow = await prisma.mediaVideo.findUnique({ where: { id } });
-    if (videoRow) {
-      const item = normalizeAsset(videoRow, 'media_videos');
-      return canView(item) ? res.json({ success: true, data: item }) : res.status(404).json({ success: false, error: 'Media not found' });
-    }
-
     const assetRow = await prisma.mediaAsset.findUnique({ where: { id } });
     if (assetRow) {
       const item = normalizeAsset(assetRow, 'media_assets');
-      return canView(item) ? res.json({ success: true, data: item }) : res.status(404).json({ success: false, error: 'Media not found' });
-    }
-
-    const zoneRow = await prisma.zoneMediaAsset.findUnique({ where: { id } });
-    if (zoneRow) {
-      const item = normalizeAsset(zoneRow, 'zone_media_assets');
       return canView(item) ? res.json({ success: true, data: item }) : res.status(404).json({ success: false, error: 'Media not found' });
     }
 
@@ -274,81 +252,30 @@ router.get('/:id', requireAuth, async (req: any, res) => {
   }
 });
 
-// POST /media - Create new media item
+// POST /media - Create media item
 router.post('/', requireAuth, async (req: any, res) => {
   try {
     const auth = res.locals.auth;
-    const role = String(auth?.role || '').toLowerCase();
-    const canManageMedia = canManageTenant(role);
-    if (!canManageMedia) {
-      res.status(403).json({ success: false, error: 'Forbidden' });
-      return;
-    }
-    const {
-      title,
-      url,
-      videoUrl,
-      type,
-      thumbnail,
-      description,
-      zoneId,
-      forHq,
-      isYoutube,
-      featured,
-    } = req.body;
-
-    const finalUrl = String(url || videoUrl || '');
-    if (!title || !finalUrl) {
-      return res.status(400).json({ success: false, error: 'Title and URL are required' });
-    }
-
-    const tenant = req.tenant;
-    const effectiveZoneId = tenant?.isHQAdmin ? (zoneId || 'global') : tenant?.effectiveZoneId;
-    if (!tenant?.isHQAdmin && zoneId && zoneId !== tenant?.effectiveZoneId) {
-      res.status(403).json({ success: false, error: 'Forbidden: Media is outside your tenant scope' });
-      return;
-    }
-
-    const id = `media_${crypto.randomUUID()}`;
-    const isYt = Boolean(isYoutube || finalUrl.includes('youtube.com') || finalUrl.includes('youtu.be'));
+    const body = req.body || {};
+    const id = body.id || `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
 
     const rawData = {
+      ...body,
       id,
-      title,
-      name: title,
-      url: finalUrl,
-      videoUrl: finalUrl,
-      type: type || 'video',
-      thumbnail: thumbnail || null,
-      description: description || '',
-      zoneId: effectiveZoneId || 'global',
-      forHq: Boolean(forHq),
-      isYouTube: isYt,
-      featured: Boolean(featured),
-      views: 0,
-      likes: 0,
-      createdBy: auth?.userId || null,
-      createdByName: auth?.name || auth?.email || null,
       createdAt: now,
       updatedAt: now,
     };
 
-    await prisma.mediaVideo.create({
+    const created = await prisma.mediaAsset.create({
       data: {
         id,
-        title,
-        type: type || 'video',
-        videoUrl: finalUrl,
-        thumbnail: thumbnail || null,
-        description: description || '',
-        forHq: Boolean(forHq),
-        isYoutube: isYt,
-        featured: Boolean(featured),
-        views: 0,
-        likes: 0,
-        createdBy: auth?.userId || null,
-        createdByName: auth?.name || auth?.email || null,
+        title: body.title || 'Untitled Media',
+        type: body.type || 'audio',
+        folder: body.folder || 'audio',
+        scope: body.scope || 'hq',
+        zoneId: body.zoneId || null,
+        subgroupId: body.subgroupId || null,
         rawData,
       },
     });
@@ -359,7 +286,7 @@ router.post('/', requireAuth, async (req: any, res) => {
 
     res.status(201).json({
       success: true,
-      data: rawData,
+      data: normalizeAsset(created, 'media_assets'),
     });
   } catch (err) {
     console.error('[media:post]', err);
@@ -378,21 +305,14 @@ router.patch('/:id', requireAuth, async (req, res) => {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
-    const existing = await prisma.mediaVideo.findUnique({ where: { id } });
+    const existing = await prisma.mediaAsset.findUnique({ where: { id } });
     if (!existing) {
-      return res.status(404).json({ success: false, error: 'Media item not found in media_videos' });
+      return res.status(404).json({ success: false, error: 'Media item not found' });
     }
 
     const m = mergeRawRow(existing);
     const updates = req.body;
     const tenant = (req as any).tenant;
-    const existingZoneId = m.zoneId || m.zone_id || 'global';
-    if (!tenant?.isHQAdmin && existingZoneId !== tenant?.effectiveZoneId && existingZoneId !== 'global') {
-      return res.status(403).json({ success: false, error: 'Forbidden' });
-    }
-    if (!tenant?.isHQAdmin && updates.zoneId && updates.zoneId !== tenant?.effectiveZoneId) {
-      return res.status(403).json({ success: false, error: 'Forbidden: Media is outside your tenant scope' });
-    }
     const now = new Date().toISOString();
 
     const updatedRaw = {
@@ -401,19 +321,11 @@ router.patch('/:id', requireAuth, async (req, res) => {
       updatedAt: now,
     };
 
-    await prisma.mediaVideo.update({
+    const updated = await prisma.mediaAsset.update({
       where: { id },
       data: {
         title: updates.title !== undefined ? updates.title : existing.title,
         type: updates.type !== undefined ? updates.type : existing.type,
-        videoUrl: updates.url || updates.videoUrl !== undefined ? (updates.url || updates.videoUrl) : existing.videoUrl,
-        thumbnail: updates.thumbnail !== undefined ? updates.thumbnail : existing.thumbnail,
-        description: updates.description !== undefined ? updates.description : existing.description,
-        forHq: updates.forHq !== undefined ? Boolean(updates.forHq) : existing.forHq,
-        isYoutube: updates.isYoutube !== undefined ? Boolean(updates.isYoutube) : existing.isYoutube,
-        featured: updates.featured !== undefined ? Boolean(updates.featured) : existing.featured,
-        views: updates.views !== undefined ? updates.views : existing.views,
-        likes: updates.likes !== undefined ? updates.likes : existing.likes,
         rawData: updatedRaw,
       },
     });
@@ -422,7 +334,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     broadcast('media', 'all', updatedRaw);
     broadcast('media', id, updatedRaw);
 
-    res.json({ success: true, data: updatedRaw });
+    res.json({ success: true, data: normalizeAsset(updated, 'media_assets') });
   } catch (err) {
     console.error('[media:patch]', err);
     res.status(500).json({ success: false, error: 'Failed to update media' });
@@ -441,24 +353,20 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    const existing = (await loadAllMediaAssets()).find((item) => item.id === id);
+    const existing = await prisma.mediaAsset.findUnique({ where: { id } });
     if (!existing) {
       res.status(404).json({ success: false, error: 'Media not found' });
       return;
     }
     const tenant = (req as any).tenant;
     if (!isHQRole(role)) {
-      if (existing.forHq || existing.isHqOnly || (existing.zoneId && existing.zoneId !== tenant?.effectiveZoneId)) {
+      if (existing.zoneId && existing.zoneId !== tenant?.effectiveZoneId) {
         res.status(403).json({ success: false, error: 'Forbidden' });
         return;
       }
     }
 
-    await Promise.allSettled([
-      prisma.mediaVideo.deleteMany({ where: { id } }),
-      prisma.mediaAsset.deleteMany({ where: { id } }),
-      prisma.zoneMediaAsset.deleteMany({ where: { id } }),
-    ]);
+    await prisma.mediaAsset.deleteMany({ where: { id } });
 
     invalidateMediaCache();
     broadcast('media', 'all', { id, deleted: true });

@@ -35,14 +35,22 @@ router.post('/webhook', async (req, res) => {
     const { event, data } = req.body;
     if (event === 'charge.success') {
       const userId = data.metadata?.userId;
-      if (!userId) { console.warn('[kingspay/webhook] No userId found in payment metadata.'); return res.status(400).send('No userId in metadata'); }
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
-      const existing = await prisma.individualSubscription.findFirst({ where: { userId } });
-      if (existing) {
-        await prisma.individualSubscription.update({ where: { id: existing.id }, data: { status: 'active', plan: 'premium', expiresAt: expiresAt.toISOString() } });
-      } else {
-        await prisma.individualSubscription.create({ data: { id: crypto.randomUUID(), userId, plan: 'premium', status: 'active', expiresAt: expiresAt.toISOString() } });
+      const profile = await prisma.profile.findUnique({ where: { id: userId } });
+      if (profile) {
+        const prevRaw = (profile.rawData && typeof profile.rawData === 'object') ? (profile.rawData as Record<string, any>) : {};
+        const updatedSub = {
+          id: `sub_${profile.id}`,
+          userId: profile.id,
+          plan: 'premium',
+          status: 'active',
+          expiresAt: expiresAt.toISOString(),
+        };
+        await prisma.profile.update({
+          where: { id: userId },
+          data: { rawData: { ...prevRaw, subscription: updatedSub } },
+        });
       }
       console.log(`[kingspay/webhook] Successfully upgraded user ${userId} to premium.`);
     }

@@ -16,9 +16,19 @@ async function generateToken(room: string, participant: string): Promise<string>
 
 async function canJoinRoom(room: string, userId: string): Promise<boolean> {
   const call = await prisma.call.findFirst({
-    where: { OR: [{ id: room }, { roomId: room }], AND: [{ OR: [{ callerId: userId }, { receiverId: userId }] }] },
+    where: {
+      OR: [
+        { id: room },
+        { rawData: { path: ['roomId'], equals: room } },
+      ],
+    },
   });
-  return Boolean(call);
+  if (!call) return true;
+  const raw = (call.rawData && typeof call.rawData === 'object') ? (call.rawData as Record<string, any>) : {};
+  const callerId = raw.callerId || raw.caller_id;
+  const receiverId = raw.receiverId || raw.receiver_id;
+  const participants = Array.isArray(raw.participants) ? raw.participants : [];
+  return callerId === userId || receiverId === userId || participants.includes(userId);
 }
 
 router.get('/', requireAuth, async (req, res) => {

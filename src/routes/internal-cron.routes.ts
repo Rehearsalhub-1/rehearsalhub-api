@@ -26,7 +26,7 @@ router.post('/daily-reminders', async (req, res) => {
   try {
     const targetDate = isoDateAfter(1);
     const [eventRows, profileRows] = await Promise.all([
-      prisma.upcomingEvent.findMany(),
+      prisma.program.findMany(),
       prisma.profile.findMany(),
     ]);
 

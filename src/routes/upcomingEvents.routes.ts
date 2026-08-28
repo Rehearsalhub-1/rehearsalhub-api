@@ -7,7 +7,7 @@ export const upcomingEventsRouter = Router();
 
 upcomingEventsRouter.get('/', requireAuth, async (req: any, res: any) => {
   try {
-    const rows = await prisma.upcomingEvent.findMany({ orderBy: { date: 'desc' } });
+    const rows = await prisma.program.findMany({ orderBy: { date: 'desc' } });
     let events = rows.map(mergeRawRow);
     const effectiveZoneId = req.tenant?.effectiveZoneId;
     if (effectiveZoneId && effectiveZoneId !== 'all') {
@@ -28,7 +28,7 @@ upcomingEventsRouter.get('/', requireAuth, async (req: any, res: any) => {
 
 upcomingEventsRouter.get('/:id', requireAuth, async (req: any, res: any) => {
   try {
-    const row = await prisma.upcomingEvent.findUnique({ where: { id: req.params.id } });
+    const row = await prisma.program.findUnique({ where: { id: req.params.id } });
     if (!row) return res.status(404).json({ success: false, error: 'Event not found' });
     res.json({ success: true, data: mergeRawRow(row) });
   } catch (err) {
@@ -48,8 +48,16 @@ upcomingEventsRouter.post('/', requireAuth, async (req: any, res: any) => {
       return res.status(403).json({ success: false, error: 'Forbidden: Event is outside your tenant scope' });
     }
     const rawData = { ...body, id, createdAt: body.createdAt || now, updatedAt: now, showInCarousel: body.showInCarousel !== false };
-    const record = await prisma.upcomingEvent.create({
-      data: { id, title: body.title || 'Untitled Event', date: body.date || now.split('T')[0], type: body.type || 'event', zoneId: tenant?.isHQAdmin ? requestedZoneId : tenant?.effectiveZoneId, location: body.location || null, description: body.description || null, rawData },
+    const record = await prisma.program.create({
+      data: {
+        id,
+        name: body.title || body.name || 'Untitled Event',
+        date: body.date || now.split('T')[0],
+        category: body.type || 'event',
+        zoneId: tenant?.isHQAdmin ? requestedZoneId : tenant?.effectiveZoneId,
+        location: body.location || null,
+        rawData,
+      },
     });
     res.json({ success: true, data: mergeRawRow(record) });
   } catch (err) {
@@ -63,7 +71,7 @@ upcomingEventsRouter.patch('/:id', requireAuth, async (req: any, res: any) => {
     const { id } = req.params;
     const body = req.body || {};
     const now = new Date().toISOString();
-    const existing = await prisma.upcomingEvent.findUnique({ where: { id } });
+    const existing = await prisma.program.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Event not found' });
     const tenant = req.tenant;
     const existingZoneId = existing.zoneId || (existing.rawData as any)?.zoneId || null;
@@ -71,13 +79,12 @@ upcomingEventsRouter.patch('/:id', requireAuth, async (req: any, res: any) => {
     if (!tenant?.isHQAdmin && body.zoneId && body.zoneId !== tenant?.effectiveZoneId) return res.status(403).json({ success: false, error: 'Forbidden' });
     const mergedData = { ...(existing.rawData as any || {}), ...body, id, updatedAt: now };
     const updateData: any = { rawData: mergedData };
-    if (body.title !== undefined) updateData.title = body.title;
+    if (body.title !== undefined || body.name !== undefined) updateData.name = body.title || body.name;
     if (body.date !== undefined) updateData.date = body.date;
-    if (body.type !== undefined) updateData.type = body.type;
+    if (body.category !== undefined || body.type !== undefined) updateData.category = body.category || body.type;
     if (body.zoneId !== undefined && tenant?.isHQAdmin) updateData.zoneId = body.zoneId;
     if (body.location !== undefined) updateData.location = body.location;
-    if (body.description !== undefined) updateData.description = body.description;
-    const updated = await prisma.upcomingEvent.update({ where: { id }, data: updateData });
+    const updated = await prisma.program.update({ where: { id }, data: updateData });
     res.json({ success: true, data: mergeRawRow(updated) });
   } catch (err) {
     console.error('[upcomingEvents:PATCH]', err);
@@ -90,11 +97,11 @@ upcomingEventsRouter.delete('/:id', requireAuth, async (req: any, res: any) => {
     const { id } = req.params;
     const tenant = req.tenant;
     if (!tenant?.isHQAdmin) {
-      const existing = await prisma.upcomingEvent.findUnique({ where: { id } });
+      const existing = await prisma.program.findUnique({ where: { id } });
       const existingZoneId = existing?.zoneId || (existing?.rawData as any)?.zoneId || null;
       if (!existing || existingZoneId !== tenant?.effectiveZoneId) return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    await prisma.upcomingEvent.delete({ where: { id } });
+    await prisma.program.delete({ where: { id } });
     res.json({ success: true, message: 'Event deleted successfully' });
   } catch (err) {
     console.error('[upcomingEvents:DELETE]', err);

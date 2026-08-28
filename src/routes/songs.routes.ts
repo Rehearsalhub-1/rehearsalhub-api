@@ -9,7 +9,14 @@ const router = Router();
 // GET /songs/master & /songs/ministered — ministered songs library
 const getMinisteredSongsHandler = async (_req: any, res: any) => {
   try {
-    const rows = await prisma.ministeredSong.findMany({
+    const rows = await prisma.song.findMany({
+      where: {
+        OR: [
+          { isMinistered: true },
+          { category: 'Ministered Songs' },
+          { scope: 'hq' },
+        ],
+      },
       orderBy: { title: 'asc' },
     });
     const merged = rows.map((r) => {
@@ -24,7 +31,7 @@ const getMinisteredSongsHandler = async (_req: any, res: any) => {
         audioUrl: audioFile,
         audioUrls: r.audioUrls || raw.audioUrls || m.audioUrls || { full: audioFile },
         lyrics: r.lyrics || raw.lyrics || m.lyrics || '',
-        solfa: r.solfa || raw.solfas || raw.solfa || m.solfa || '',
+        solfa: r.solfas || raw.solfas || raw.solfa || m.solfa || '',
         leadSinger: (r as any).leadSinger || raw.leadSinger || raw.lead_singer || m.leadSinger || 'Loveworld Singers',
         writer: (r as any).writer || raw.writer || m.writer || '',
         category: r.category || raw.category || m.category || 'Praise Night',
@@ -44,7 +51,7 @@ router.get('/ministered', requireAuth, getMinisteredSongsHandler);
 
 const getMinisteredSongByIdHandler = async (req: any, res: any) => {
   try {
-    const song = await prisma.ministeredSong.findUnique({ where: { id: req.params.id } });
+    const song = await prisma.song.findUnique({ where: { id: req.params.id } });
     if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
@@ -62,7 +69,7 @@ const getMinisteredSongByIdHandler = async (req: any, res: any) => {
         audioUrl: audioFile,
         audioUrls: song.audioUrls || raw.audioUrls || m.audioUrls || { full: audioFile },
         lyrics: song.lyrics || raw.lyrics || m.lyrics || '',
-        solfa: song.solfa || raw.solfas || raw.solfa || m.solfa || '',
+        solfa: song.solfas || raw.solfas || raw.solfa || m.solfa || '',
         leadSinger: (song as any).leadSinger || raw.leadSinger || raw.lead_singer || m.leadSinger || 'Loveworld Singers',
         writer: (song as any).writer || raw.writer || m.writer || '',
         category: song.category || raw.category || m.category || 'Praise Night',
@@ -82,40 +89,27 @@ router.get('/ministered/:id', requireAuth, getMinisteredSongByIdHandler);
 // GET /songs/praise-night & GET /songs — Main Repertoire
 const getSongsHandler = async (req: any, res: any) => {
   try {
-    const { praiseNightId, programId, zoneId } = req.query;
+    const { praiseNightId, programId, zoneId, subGroupId, churchId } = req.query;
     const targetProgramId = (programId || praiseNightId) as string | undefined;
+    const targetChurchId = (subGroupId || churchId) as string | undefined;
 
     let rows: any[] = [];
     if (targetProgramId) {
-      const [mainRows, zRows] = await Promise.all([
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM songs
-           WHERE praise_night_id = $1
-              OR raw_data->>'praiseNightId' = $1
-              OR raw_data->>'programId' = $1
-              OR lower(raw_data->>'praise_night_id') = $2`,
-          targetProgramId,
-          targetProgramId.toLowerCase(),
-        ),
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM zone_songs
-           WHERE raw_data->>'praiseNightId' = $1
-              OR raw_data->>'programId' = $1
-              OR lower(raw_data->>'praise_night_id') = $2`,
-          targetProgramId,
-          targetProgramId.toLowerCase(),
-        ),
-      ]);
-      const mergedZ = zRows.map(mergeRawRow);
-      rows = [...mainRows, ...mergedZ].sort((a, b) =>
-        String(a.title || '').localeCompare(String(b.title || ''))
+      const mainRows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM songs
+         WHERE praise_night_id = $1
+            OR raw_data->>'praiseNightId' = $1
+            OR raw_data->>'programId' = $1
+            OR lower(raw_data->>'praise_night_id') = $2
+         ORDER BY title ASC`,
+        targetProgramId,
+        targetProgramId.toLowerCase(),
       );
+      rows = mainRows;
 
       // Fallback: check if the program itself has embedded songs
       if (rows.length === 0) {
-        const prog = await prisma.program.findUnique({ where: { id: targetProgramId } });
-        const zProg = !prog ? await prisma.zoneProgram.findUnique({ where: { id: targetProgramId } }) : null;
-        const p = prog || zProg;
+        const p = await prisma.program.findUnique({ where: { id: targetProgramId } });
         if (p) {
           const raw = mergeRawRow(p);
           if (Array.isArray(raw.songs) && raw.songs.length > 0) {
@@ -123,73 +117,57 @@ const getSongsHandler = async (req: any, res: any) => {
           }
         }
       }
+    } else if (targetChurchId) {
+      const churchSongs = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM songs
+         WHERE subgroup_id = $1
+            OR raw_data->>'subGroupId' = $1
+            OR raw_data->>'churchId' = $1
+         ORDER BY title ASC`,
+        targetChurchId,
+      );
+      rows = churchSongs;
     } else if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
       const cleanZone = (zoneId as string).toLowerCase().trim();
       const withoutHyphen = cleanZone.replace(/[\s-_]/g, '');
       const withHyphen = cleanZone.includes('-') ? cleanZone : cleanZone.replace(/^zone(\d+)$/, 'zone-$1');
 
-      // Find programs belonging to this zone to extract embedded songs & program IDs
-      const [zProgs, progs] = await Promise.all([
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM zone_programs
-           WHERE lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-              OR lower(COALESCE(zone_id, '')) = $3
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1`,
-          withoutHyphen,
-          cleanZone,
-          withHyphen,
-        ),
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM programs
-           WHERE lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-              OR lower(COALESCE(zone_id, '')) = $3
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1`,
-          withoutHyphen,
-          cleanZone,
-          withHyphen,
-        ),
-      ]);
+      // Find programs belonging to this zone to extract embedded songs
+      const progs = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM programs
+         WHERE lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
+            OR lower(COALESCE(zone_id, '')) = $2
+            OR lower(COALESCE(zone_id, '')) = $3
+            OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
+            OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1`,
+        withoutHyphen,
+        cleanZone,
+        withHyphen,
+      );
 
       const embeddedSongs: any[] = [];
-      [...zProgs, ...progs].forEach((p: any) => {
+      progs.forEach((p: any) => {
         const merged = mergeRawRow(p);
         if (Array.isArray(merged.songs)) {
           merged.songs.forEach((s: any) => embeddedSongs.push(s));
         }
       });
 
-      const [mainRows, zRows] = await Promise.all([
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM songs
-           WHERE lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-              OR lower(COALESCE(zone_id, '')) = $3
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_id', ''), '-', ''), ' ', '')) = $1`,
-          withoutHyphen,
-          cleanZone,
-          withHyphen,
-        ),
-        prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM zone_songs
-           WHERE lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-              OR lower(COALESCE(zone_id, '')) = $3
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1
-              OR lower(replace(replace(COALESCE(raw_data->>'zone_id', ''), '-', ''), ' ', '')) = $1`,
-          withoutHyphen,
-          cleanZone,
-          withHyphen,
-        ),
-      ]);
+      const mainRows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM songs
+         WHERE scope = 'hq'
+            OR lower(replace(replace(COALESCE(zone_id, ''), '-', ''), ' ', '')) = $1
+            OR lower(COALESCE(zone_id, '')) = $2
+            OR lower(COALESCE(zone_id, '')) = $3
+            OR lower(replace(replace(COALESCE(raw_data->>'zone_code', ''), '-', ''), ' ', '')) = $1
+            OR lower(replace(replace(COALESCE(raw_data->>'zoneId', ''), '-', ''), ' ', '')) = $1
+            OR lower(replace(replace(COALESCE(raw_data->>'zone_id', ''), '-', ''), ' ', '')) = $1`,
+        withoutHyphen,
+        cleanZone,
+        withHyphen,
+      );
 
-      const allMerged = [...mainRows, ...zRows.map(mergeRawRow), ...embeddedSongs];
+      const allMerged = [...mainRows, ...embeddedSongs];
       const seen = new Set<string>();
       rows = allMerged.filter((s: any) => {
         const key = String(s.id || s.title || '');
@@ -203,7 +181,7 @@ const getSongsHandler = async (req: any, res: any) => {
       rows = await prisma.song.findMany({ orderBy: { title: 'asc' } });
     }
 
-    res.json({ success: true, count: rows.length, data: rows });
+    res.json({ success: true, count: rows.length, data: rows.map(mergeRawRow) });
   } catch (err) {
     console.error('[songs/praise-night]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -219,7 +197,7 @@ const getSongByIdHandler = async (req: any, res: any) => {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
     }
-    res.json({ success: true, data: song });
+    res.json({ success: true, data: mergeRawRow(song) });
   } catch (err) {
     console.error('[songs/praise-night/:id]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -231,7 +209,7 @@ router.get('/praise-night/:id', requireAuth, getSongByIdHandler);
 router.get('/zone', requireAuth, async (req, res) => {
   try {
     const { zoneId } = req.query;
-    const songs = await prisma.zoneSong.findMany({
+    const songs = await prisma.song.findMany({
       where: zoneId ? { zoneId: zoneId as string } : undefined,
     });
     res.json({ success: true, count: songs.length, data: songs.map(mergeRawRow) });
@@ -244,7 +222,7 @@ router.get('/zone', requireAuth, async (req, res) => {
 /** GET /songs/zone/:id — existing Supabase zone_songs */
 router.get('/zone/:id', requireAuth, async (req, res) => {
   try {
-    const song = await prisma.zoneSong.findUnique({ where: { id: req.params.id } });
+    const song = await prisma.song.findUnique({ where: { id: req.params.id } });
     if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
@@ -262,14 +240,19 @@ router.get('/subgroup', requireAuth, async (req, res) => {
     const { subGroupId, zoneId } = req.query;
     let songs: any[];
     if (subGroupId) {
-      songs = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM subgroup_songs WHERE raw_data->>'subGroupId' = $1 OR raw_data->>'sub_group_id' = $1`,
-        subGroupId as string,
-      );
+      songs = await prisma.song.findMany({
+        where: {
+          OR: [
+            { subgroupId: subGroupId as string },
+            { rawData: { path: ['subGroupId'], equals: subGroupId as string } },
+            { rawData: { path: ['sub_group_id'], equals: subGroupId as string } },
+          ],
+        },
+      });
     } else if (zoneId) {
-      songs = await prisma.subgroupSong.findMany({ where: { zoneId: zoneId as string } });
+      songs = await prisma.song.findMany({ where: { zoneId: zoneId as string } });
     } else {
-      songs = await prisma.subgroupSong.findMany();
+      songs = await prisma.song.findMany();
     }
     res.json({ success: true, count: songs.length, data: songs.map(mergeRawRow) });
   } catch (err) {
@@ -281,7 +264,7 @@ router.get('/subgroup', requireAuth, async (req, res) => {
 /** GET /songs/subgroup/:id — existing Supabase subgroup_songs */
 router.get('/subgroup/:id', requireAuth, async (req, res) => {
   try {
-    const song = await prisma.subgroupSong.findUnique({ where: { id: req.params.id } });
+    const song = await prisma.song.findUnique({ where: { id: req.params.id } });
     if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
@@ -299,12 +282,17 @@ router.get('/zone-praise-nights', requireAuth, async (req, res) => {
     const { zoneId } = req.query;
     let rows: any[];
     if (zoneId) {
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM zone_programs WHERE raw_data->>'zoneId' = $1 OR raw_data->>'zone_id' = $1`,
-        zoneId as string,
-      );
+      rows = await prisma.program.findMany({
+        where: {
+          OR: [
+            { zoneId: zoneId as string },
+            { rawData: { path: ['zoneId'], equals: zoneId as string } },
+            { rawData: { path: ['zone_id'], equals: zoneId as string } },
+          ],
+        },
+      });
     } else {
-      rows = await prisma.zoneProgram.findMany();
+      rows = await prisma.program.findMany();
     }
     res.json({ success: true, count: rows.length, data: rows.map(mergeRawRow) });
   } catch (err) {
@@ -316,7 +304,7 @@ router.get('/zone-praise-nights', requireAuth, async (req, res) => {
 /** GET /songs/zone-praise-nights/:id */
 router.get('/zone-praise-nights/:id', requireAuth, async (req, res) => {
   try {
-    const row = await prisma.zoneProgram.findUnique({ where: { id: req.params.id } });
+    const row = await prisma.program.findUnique({ where: { id: req.params.id } });
     if (!row) {
       res.status(404).json({ success: false, error: 'Not found' });
       return;
@@ -332,8 +320,14 @@ router.get('/zone-praise-nights/:id', requireAuth, async (req, res) => {
 router.get('/subgroup-praise-nights', requireAuth, async (req, res) => {
   try {
     const { subGroupId } = req.query;
-    const rows = await prisma.subgroupProgram.findMany({
-      where: subGroupId ? { subGroupId: subGroupId as string } : undefined,
+    const rows = await prisma.program.findMany({
+      where: subGroupId ? {
+        OR: [
+          { subgroupId: subGroupId as string },
+          { rawData: { path: ['subGroupId'], equals: subGroupId as string } },
+          { rawData: { path: ['sub_group_id'], equals: subGroupId as string } },
+        ]
+      } : undefined,
     });
     res.json({ success: true, count: rows.length, data: rows.map(mergeRawRow) });
   } catch (err) {
@@ -345,7 +339,7 @@ router.get('/subgroup-praise-nights', requireAuth, async (req, res) => {
 /** GET /songs/subgroup-praise-nights/:id */
 router.get('/subgroup-praise-nights/:id', requireAuth, async (req, res) => {
   try {
-    const row = await prisma.subgroupProgram.findUnique({ where: { id: req.params.id } });
+    const row = await prisma.program.findUnique({ where: { id: req.params.id } });
     if (!row) {
       res.status(404).json({ success: false, error: 'Not found' });
       return;
@@ -364,11 +358,11 @@ router.get('/notes/:songId', requireAuth, async (req: any, res: any) => {
     const userId = res.locals.auth?.userId;
     if (!userId) { res.status(401).json({ success: false, error: 'Unauthorized' }); return; }
 
-    const own = await prisma.userSongNote.findFirst({
-      where: { songId, userId },
-    });
+    const noteId = `note_${userId}_${songId}`;
+    const own = await prisma.userSongNote.findUnique({ where: { id: noteId } });
     if (own) {
-      res.json({ success: true, data: { notes: own.notes, id: own.id } });
+      const raw = (own.rawData && typeof own.rawData === 'object') ? own.rawData as Record<string, any> : {};
+      res.json({ success: true, data: { notes: raw.notes || '', id: own.id } });
     } else {
       res.json({ success: true, data: null });
     }
@@ -431,11 +425,7 @@ router.get('/history', requireAuth, async (req, res) => {
     const merged = rows.map(mergeRawRow);
 
     if (merged.length === 0 && sid) {
-      const song = await prisma.song.findUnique({ where: { id: sid } });
-      const mSong = !song ? await prisma.ministeredSong.findUnique({ where: { id: sid } }) : null;
-      const zSong = !song && !mSong ? await prisma.zoneSong.findUnique({ where: { id: sid } }) : null;
-      const sgSong = !song && !mSong && !zSong ? await prisma.subgroupSong.findUnique({ where: { id: sid } }) : null;
-      const foundSong = song || mSong || zSong || sgSong;
+      const foundSong = await prisma.song.findUnique({ where: { id: sid } });
 
       if (foundSong) {
         let history = (foundSong as any).rawData?.history || (foundSong as any).raw_data?.history;
@@ -525,12 +515,11 @@ router.delete('/history/:id', requireAuth, async (req: any, res: any) => {
 // Helper for song creation
 const createSongHandler = async (req: any, res: any) => {
   try {
+    const auth = res.locals.auth;
     const body = req.body || {};
-    const songId = body.id || `song_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const zoneId = body.zoneId || body.zone_id;
-    const praiseNightId = body.praiseNightId || body.praise_night_id || body.programId || body.program_id;
-
-    const isZoneSpecific = zoneId && zoneId !== 'zone-001' && !zoneId.toLowerCase().includes('hq') && zoneId !== 'ZONE001';
+    const songId = body.id || `song_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const zoneId = body.zoneId || auth.effectiveZoneId || auth.zoneId || null;
+    const praiseNightId = body.praiseNightId || body.programId || null;
 
     const songRow: any = {
       id: songId,
@@ -554,22 +543,6 @@ const createSongHandler = async (req: any, res: any) => {
       updatedAt: new Date(),
       rawData: { ...body, id: songId, zoneId, praiseNightId },
     };
-
-    if (isZoneSpecific) {
-      await prisma.zoneSong.create({
-        data: {
-          id: songId,
-          title: songRow.title,
-          key: songRow.key,
-          tempo: songRow.tempo,
-          zoneId: songRow.zoneId,
-          status: songRow.status,
-          audioFile: songRow.audioFile,
-          category: body.category || '',
-          rawData: songRow.rawData,
-        },
-      });
-    }
 
     await prisma.song.upsert({
       where: { id: songId },
@@ -601,14 +574,13 @@ const updateSongHandler = async (req: any, res: any) => {
     const body = req.body || {};
 
     const existing = await prisma.song.findUnique({ where: { id: songId } });
-    const zExisting = !existing ? await prisma.zoneSong.findUnique({ where: { id: songId } }) : null;
 
-    if (!existing && !zExisting) {
+    if (!existing) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
     }
 
-    const prevRaw = ((existing?.rawData || zExisting?.rawData || {}) as Record<string, unknown>);
+    const prevRaw = (existing?.rawData || {}) as Record<string, unknown>;
     const updatedRaw = { ...prevRaw, ...body };
 
     const updateFields: Record<string, any> = {
@@ -633,17 +605,12 @@ const updateSongHandler = async (req: any, res: any) => {
     if (body.praiseNightId !== undefined) updateFields.praiseNightId = body.praiseNightId;
     if (body.zoneId !== undefined) updateFields.zoneId = body.zoneId;
 
-    if (existing) {
-      await prisma.song.update({ where: { id: songId }, data: updateFields });
-    }
-    if (zExisting) {
-      await prisma.zoneSong.update({ where: { id: songId }, data: updateFields });
-    }
+    await prisma.song.update({ where: { id: songId }, data: updateFields });
 
-    const mergedSong = mergeRawRow({ ...(existing || zExisting), ...updateFields, rawData: updatedRaw } as any);
+    const mergedSong = mergeRawRow({ ...existing, ...updateFields, rawData: updatedRaw } as any);
     broadcast('song', songId, mergedSong);
     broadcast('song', 'all', mergedSong);
-    const pId = updateFields.praiseNightId || existing?.praiseNightId || (zExisting?.rawData as any)?.praiseNightId;
+    const pId = updateFields.praiseNightId || existing?.praiseNightId;
     if (pId) {
       broadcast('songs', String(pId), mergedSong);
     }
@@ -669,10 +636,7 @@ const toggleStatusHandler = async (req: any, res: any) => {
       return;
     }
 
-    await Promise.allSettled([
-      prisma.song.update({ where: { id: songId }, data: { status, updatedAt: new Date() } }),
-      prisma.zoneSong.update({ where: { id: songId }, data: { status } }),
-    ]);
+    await prisma.song.update({ where: { id: songId }, data: { status, updatedAt: new Date() } });
 
     broadcast('song', songId, { id: songId, status });
     broadcast('song', 'all', { id: songId, status });
@@ -723,11 +687,7 @@ const deleteSongHandler = async (req: any, res: any) => {
   try {
     const songId = req.params.id;
 
-    await Promise.allSettled([
-      prisma.song.deleteMany({ where: { id: songId } }),
-      prisma.zoneSong.deleteMany({ where: { id: songId } }),
-      prisma.subgroupSong.deleteMany({ where: { id: songId } }),
-    ]);
+    await prisma.song.deleteMany({ where: { id: songId } });
 
     broadcast('song', songId, { id: songId, deleted: true });
     broadcast('song', 'all', { id: songId, deleted: true });
@@ -771,10 +731,12 @@ router.post('/master', requireAuth, requireTenantAdmin, async (req, res) => {
       updatedAt: new Date(),
       sourceType: body.sourceType || 'manual',
       isHqOnly: Boolean(body.isHqOnly),
+      isMinistered: true,
+      scope: 'hq',
       rawData: { ...body, id: songId },
     };
 
-    await prisma.ministeredSong.create({ data: row });
+    await prisma.song.create({ data: row });
     res.status(201).json({ success: true, message: 'Master song created', data: row });
   } catch (err) {
     console.error('[songs/master POST]', err);
@@ -787,7 +749,7 @@ router.patch('/master/:id', requireAuth, requireTenantAdmin, async (req, res) =>
     const songId = req.params.id;
     const body = req.body || {};
 
-    const existing = await prisma.ministeredSong.findUnique({ where: { id: songId } });
+    const existing = await prisma.song.findUnique({ where: { id: songId } });
     if (!existing) {
       res.status(404).json({ success: false, error: 'Master song not found' });
       return;
@@ -804,9 +766,7 @@ router.patch('/master/:id', requireAuth, requireTenantAdmin, async (req, res) =>
     if (body.tempo !== undefined) updateFields.tempo = body.tempo;
     if (body.lyrics !== undefined) updateFields.lyrics = body.lyrics;
     if (body.writer !== undefined) updateFields.writer = body.writer;
-    if (body.solfa !== undefined || body.solfas !== undefined) updateFields.solfa = body.solfa || body.solfas;
     if (body.category !== undefined) updateFields.category = body.category;
-    if (body.imageUrl !== undefined || body.image_url !== undefined) updateFields.imageUrl = body.imageUrl || body.image_url;
     if (body.audioFile !== undefined || body.audio_file !== undefined) updateFields.audioFile = body.audioFile || body.audio_file;
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) updateFields.audioUrls = body.audioUrls || body.audio_urls;
     if (body.conductor !== undefined) updateFields.conductor = body.conductor;
@@ -815,9 +775,8 @@ router.patch('/master/:id', requireAuth, requireTenantAdmin, async (req, res) =>
     if (body.bassGuitarist !== undefined || body.bass_guitarist !== undefined) updateFields.bassGuitarist = body.bassGuitarist || body.bass_guitarist;
     if (body.leadKeyboardist !== undefined || body.lead_keyboardist !== undefined) updateFields.leadKeyboardist = body.leadKeyboardist || body.lead_keyboardist;
     if (body.categories !== undefined) updateFields.categories = body.categories;
-    if (body.customParts !== undefined || body.custom_parts !== undefined) updateFields.customParts = body.customParts || body.custom_parts;
 
-    await prisma.ministeredSong.update({ where: { id: songId }, data: updateFields });
+    await prisma.song.update({ where: { id: songId }, data: updateFields });
     res.json({ success: true, message: 'Master song updated', data: { id: songId, ...updateFields } });
   } catch (err) {
     console.error('[songs/master PATCH]', err);
@@ -828,7 +787,7 @@ router.patch('/master/:id', requireAuth, requireTenantAdmin, async (req, res) =>
 router.delete('/master/:id', requireAuth, requireTenantAdmin, async (req, res) => {
   try {
     const songId = req.params.id;
-    await prisma.ministeredSong.delete({ where: { id: songId } });
+    await prisma.song.delete({ where: { id: songId } });
     res.json({ success: true, message: 'Master song deleted' });
   } catch (err) {
     console.error('[songs/master DELETE]', err);
@@ -848,34 +807,52 @@ router.post('/praise-night/:id/duplicate', requireAuth, requireTenantAdmin, asyn
       return;
     }
 
-    const newId = `song_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const prevRaw = (existing.rawData || {}) as Record<string, unknown>;
-    const targetProg = targetProgramId || targetPraiseNightId || existing.praiseNightId;
+    const newSongId = `song_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const effectiveTargetProgramId = targetProgramId || targetPraiseNightId || existing.praiseNightId;
+    const effectiveZoneId = zoneId || existing.zoneId;
 
-    const duplicateRow = {
-      ...existing,
-      id: newId,
-      title: `${existing.title} (Copy)`,
-      praiseNightId: targetProg,
-      zoneId: zoneId || existing.zoneId,
-      status: 'unheard',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date(),
-      rawData: {
-        ...prevRaw,
-        id: newId,
-        title: `${existing.title} (Copy)`,
-        praiseNightId: targetProg,
-        status: 'unheard',
-        createdAt: new Date().toISOString(),
-      },
+    const rawData = (existing.rawData as Record<string, any>) || {};
+    const newRawData = {
+      ...rawData,
+      id: newSongId,
+      praiseNightId: effectiveTargetProgramId,
+      programId: effectiveTargetProgramId,
+      zoneId: effectiveZoneId,
+      duplicatedFrom: songId,
+      duplicatedAt: new Date().toISOString(),
     };
 
-    await prisma.song.create({ data: duplicateRow as any });
+    const duplicateData: any = {
+      id: newSongId,
+      title: existing.title,
+      key: existing.key,
+      tempo: existing.tempo,
+      lyrics: existing.lyrics,
+      writer: existing.writer,
+      category: existing.category,
+      audioFile: existing.audioFile,
+      audioUrls: existing.audioUrls,
+      conductor: existing.conductor,
+      leadSinger: existing.leadSinger,
+      drummer: existing.drummer,
+      leadKeyboardist: existing.leadKeyboardist,
+      bassGuitarist: existing.bassGuitarist,
+      solfas: existing.solfas,
+      zoneId: effectiveZoneId,
+      praiseNightId: effectiveTargetProgramId,
+      status: existing.status || 'active',
+      isActive: existing.isActive !== false,
+      categories: existing.categories,
+      rawData: newRawData,
+      createdAt: new Date().toISOString(),
+    };
+
+    const created = await prisma.song.create({ data: duplicateData });
+
     res.status(201).json({
       success: true,
       message: 'Song duplicated successfully',
-      data: duplicateRow,
+      data: mergeRawRow(created),
     });
   } catch (err) {
     console.error('[songs/praise-night/:id/duplicate]', err);
@@ -888,15 +865,7 @@ router.get('/:id/lyrics', requireAuth, async (req: any, res: any) => {
   try {
     const { id } = req.params;
 
-    let song = await prisma.song.findUnique({ where: { id } });
-    if (!song) {
-      const mSong = await prisma.ministeredSong.findUnique({ where: { id } });
-      if (mSong) song = mSong as any;
-    }
-    if (!song) {
-      const zSong = await prisma.zoneSong.findUnique({ where: { id } });
-      if (zSong) song = zSong as any;
-    }
+    const song = await prisma.song.findUnique({ where: { id } });
 
     if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
@@ -933,69 +902,26 @@ router.patch('/:id/lyrics', requireAuth, async (req: any, res: any) => {
     const { karaokeLrcText, syncedLyrics, lyrics } = req.body || {};
     const now = new Date().toISOString();
 
-    let updated = false;
-
-    // 1. Try songs table
     const song = await prisma.song.findUnique({ where: { id } });
-    if (song) {
-      const rawData = (song.rawData as Record<string, any>) || {};
-      const updatedRaw = {
-        ...rawData,
-        ...(karaokeLrcText !== undefined ? { karaokeLrcText } : {}),
-        ...(syncedLyrics !== undefined ? { syncedLyrics } : {}),
-        ...(lyrics !== undefined ? { lyrics } : {}),
-        hasSyncedLyrics: Boolean(karaokeLrcText || (syncedLyrics && syncedLyrics.length > 0)),
-        lyricsUpdatedAt: now,
-      };
-
-      const setFields: any = { rawData: updatedRaw };
-      if (lyrics !== undefined) setFields.lyrics = lyrics;
-
-      await prisma.song.update({ where: { id }, data: setFields });
-      updated = true;
-    }
-
-    // 2. Try ministeredSongs table
-    const mSong = await prisma.ministeredSong.findUnique({ where: { id } });
-    if (mSong) {
-      const rawData = (mSong.rawData as Record<string, any>) || {};
-      const updatedRaw = {
-        ...rawData,
-        ...(karaokeLrcText !== undefined ? { karaokeLrcText } : {}),
-        ...(syncedLyrics !== undefined ? { syncedLyrics } : {}),
-        ...(lyrics !== undefined ? { lyrics } : {}),
-        hasSyncedLyrics: Boolean(karaokeLrcText || (syncedLyrics && syncedLyrics.length > 0)),
-        lyricsUpdatedAt: now,
-      };
-
-      const setFields: any = { rawData: updatedRaw };
-      if (lyrics !== undefined) setFields.lyrics = lyrics;
-
-      await prisma.ministeredSong.update({ where: { id }, data: setFields });
-      updated = true;
-    }
-
-    // 3. Try zoneSongs table
-    const zSong = await prisma.zoneSong.findUnique({ where: { id } });
-    if (zSong) {
-      const rawData = (zSong.rawData as Record<string, any>) || {};
-      const updatedRaw = {
-        ...rawData,
-        ...(karaokeLrcText !== undefined ? { karaokeLrcText } : {}),
-        ...(syncedLyrics !== undefined ? { syncedLyrics } : {}),
-        ...(lyrics !== undefined ? { lyrics } : {}),
-        hasSyncedLyrics: Boolean(karaokeLrcText || (syncedLyrics && syncedLyrics.length > 0)),
-        lyricsUpdatedAt: now,
-      };
-
-      await prisma.zoneSong.update({ where: { id }, data: { rawData: updatedRaw } });
-      updated = true;
-    }
-
-    if (!updated) {
+    if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
     }
+
+    const rawData = (song.rawData as Record<string, any>) || {};
+    const updatedRaw = {
+      ...rawData,
+      ...(karaokeLrcText !== undefined ? { karaokeLrcText } : {}),
+      ...(syncedLyrics !== undefined ? { syncedLyrics } : {}),
+      ...(lyrics !== undefined ? { lyrics } : {}),
+      hasSyncedLyrics: Boolean(karaokeLrcText || (syncedLyrics && syncedLyrics.length > 0)),
+      lyricsUpdatedAt: now,
+    };
+
+    const setFields: any = { rawData: updatedRaw };
+    if (lyrics !== undefined) setFields.lyrics = lyrics;
+
+    await prisma.song.update({ where: { id }, data: setFields });
 
     const lyricsData = { id, karaokeLrcText, syncedLyrics, lyrics };
     broadcast('song', id, lyricsData);
@@ -1023,18 +949,6 @@ router.get('/:id', requireAuth, async (req: any, res: any) => {
       return;
     }
 
-    const mSong = await prisma.ministeredSong.findUnique({ where: { id } });
-    if (mSong) {
-      res.json({ success: true, data: mergeRawRow(mSong) });
-      return;
-    }
-
-    const zSong = await prisma.zoneSong.findUnique({ where: { id } });
-    if (zSong) {
-      res.json({ success: true, data: mergeRawRow(zSong) });
-      return;
-    }
-
     res.status(404).json({ success: false, error: 'Song not found' });
   } catch (err) {
     console.error('[songs/:id:GET]', err);
@@ -1052,7 +966,7 @@ router.post('/import-from-ministered', requireAuth, requireTenantAdmin, async (r
       return;
     }
 
-    const ministeredList = await prisma.ministeredSong.findMany({
+    const ministeredList = await prisma.song.findMany({
       where: { id: { in: songIds } },
     });
 
@@ -1083,37 +997,23 @@ router.post('/import-from-ministered', requireAuth, requireTenantAdmin, async (r
       raw.audioFile = m.audioFile || raw.audioFile || '';
       raw.audioUrl = m.audioFile || raw.audioUrl || '';
 
-      if (isHq) {
-        await prisma.song.create({
-          data: {
-            id: newId,
-            title: m.title || 'Untitled Song',
-            writer: m.writer || '',
-            category: m.category || 'Praise Night',
-            key: m.key || '',
-            tempo: m.tempo || '',
-            lyrics: m.lyrics || '',
-            audioFile: m.audioFile || '',
-            audioUrls: m.audioUrls || {},
-            praiseNightId: praiseId,
-            zoneId: 'hq',
-            rawData: raw,
-          },
-        });
-      } else {
-        await prisma.zoneSong.create({
-          data: {
-            id: newId,
-            title: m.title || 'Untitled Song',
-            category: m.category || 'Praise Night',
-            key: m.key || '',
-            tempo: m.tempo || '',
-            audioFile: m.audioFile || '',
-            zoneId,
-            rawData: raw,
-          },
-        });
-      }
+      await prisma.song.create({
+        data: {
+          id: newId,
+          title: m.title || 'Untitled Song',
+          writer: m.writer || '',
+          category: m.category || 'Praise Night',
+          key: m.key || '',
+          tempo: m.tempo || '',
+          lyrics: m.lyrics || '',
+          audioFile: m.audioFile || '',
+          audioUrls: m.audioUrls || {},
+          praiseNightId: praiseId,
+          scope: isHq ? 'hq' : 'zone',
+          zoneId: isHq ? 'hq' : zoneId,
+          rawData: raw,
+        },
+      });
       importedCount++;
     }
 

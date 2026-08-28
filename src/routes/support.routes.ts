@@ -134,9 +134,9 @@ router.get('/:ticketId/messages', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Support ticket not found' });
       return;
     }
-    const messageRows = await prisma.supportMessage.findMany({
-      where: { ticketId },
-      orderBy: { createdAt: 'asc' },
+    const messageRows = await prisma.message.findMany({
+      where: { chatId: ticketId },
+      orderBy: { id: 'asc' },
     });
 
     const data = messageRows.map((m) => {
@@ -145,13 +145,13 @@ router.get('/:ticketId/messages', requireAuth, async (req, res) => {
       return {
         ...merged,
         id: m.id,
-        ticketId: m.ticketId,
+        ticketId: m.chatId,
         senderId: m.senderId,
         senderName: m.senderName || raw.senderName || 'Support User',
-        senderType: m.senderType || raw.senderType || 'user',
-        text: m.message,
-        message: m.message,
-        timestamp: m.createdAt ? new Date(m.createdAt).toISOString() : new Date().toISOString(),
+        senderType: raw.senderType || 'user',
+        text: m.text || raw.text || '',
+        message: m.text || raw.text || '',
+        timestamp: raw.createdAt || new Date().toISOString(),
       };
     });
 
@@ -213,16 +213,27 @@ router.post('/', requireAuth, async (req: any, res) => {
       },
     });
 
-    await prisma.supportMessage.create({
+    // Ensure chat exists or create support message
+    await prisma.chat.upsert({
+      where: { id: ticketId },
+      update: {},
+      create: {
+        id: ticketId,
+        type: 'support',
+        createdBy: auth.userId,
+        participants: [auth.userId],
+      },
+    });
+
+    await prisma.message.create({
       data: {
         id: messageId,
-        ticketId,
+        chatId: ticketId,
         senderId: auth.userId,
         senderName: userName,
-        senderType: 'user',
-        message: firstText,
-        createdAt: now,
-        rawData: { id: messageId, ticketId, senderId: auth.userId, senderName: userName, text: firstText, createdAt: now.toISOString() },
+        type: 'support',
+        text: firstText,
+        rawData: { id: messageId, ticketId, senderId: auth.userId, senderName: userName, text: firstText, senderType: 'user', createdAt: now.toISOString() },
       },
     });
 
@@ -273,15 +284,25 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
       createdAt: now.toISOString(),
     };
 
-    await prisma.supportMessage.create({
+    await prisma.chat.upsert({
+      where: { id: ticketId },
+      update: {},
+      create: {
+        id: ticketId,
+        type: 'support',
+        createdBy: auth.userId,
+        participants: [auth.userId],
+      },
+    });
+
+    await prisma.message.create({
       data: {
         id: messageId,
-        ticketId,
+        chatId: ticketId,
         senderId: auth.userId,
         senderName,
-        senderType,
-        message: text,
-        createdAt: now,
+        type: 'support',
+        text,
         rawData: msgPayload,
       },
     });
@@ -347,7 +368,7 @@ router.delete('/:ticketId', requireAuth, async (req, res) => {
     }
 
     const { ticketId } = req.params;
-    await prisma.supportMessage.deleteMany({ where: { ticketId } });
+    await prisma.message.deleteMany({ where: { chatId: ticketId } });
     await prisma.supportTicket.delete({ where: { id: ticketId } });
 
     res.json({ success: true, message: 'Support ticket deleted' });

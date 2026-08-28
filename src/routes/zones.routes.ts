@@ -28,7 +28,7 @@ router.get('/:zoneId/members', requireAuth, async (req, res) => {
   if (!isHqAdmin && (!authZoneId || norm(requestedZoneId) !== norm(authZoneId))) {
     return res.status(403).json({ success: false, error: 'Forbidden' });
   }
-  const members = await prisma.zoneMember.findMany({ where: { zoneId: req.params.zoneId } });
+  const members = await prisma.profile.findMany({ where: { zoneId: req.params.zoneId } });
   res.json({ success: true, data: members });
 });
 

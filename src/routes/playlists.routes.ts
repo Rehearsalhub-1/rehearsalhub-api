@@ -8,7 +8,7 @@ const router = Router();
 router.get('/me', requireAuth, async (_req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const rows = await prisma.userPlaylist.findMany({ where: { userId } });
+    const rows = await prisma.playlist.findMany({ where: { userId } });
     const data = rows.map((row) => {
       const merged = mergeRawRow(row);
       const songIds = asStringArray(merged.songIds ?? merged.songs ?? row.songIds);
@@ -29,7 +29,7 @@ router.post('/', requireAuth, async (req, res) => {
     const requestedId = typeof req.body.id === 'string' ? req.body.id : '';
     const playlistId = requestedId.startsWith(`${userId}_`) ? requestedId : `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const newSongIds = Array.isArray(songIds) ? songIds : [];
-    const created = await prisma.userPlaylist.create({
+    const created = await prisma.playlist.create({
       data: { id: playlistId, title: playlistTitle, userId, songIds: newSongIds, isPublic: Boolean(isPublic), rawData: { name: playlistTitle, title: playlistTitle, description: description || '', createdBy: userId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } },
     });
     res.json({ success: true, data: { id: created.id, name: playlistTitle, title: playlistTitle, userId, songIds: newSongIds, songs: newSongIds, isPublic: created.isPublic } });
@@ -41,20 +41,16 @@ router.post('/', requireAuth, async (req, res) => {
 
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const row = await prisma.userPlaylist.findUnique({ where: { id: req.params.id } });
+    const row = await prisma.playlist.findUnique({ where: { id: req.params.id } });
     if (!row) return res.status(404).json({ success: false, error: 'Playlist not found' });
     if (row.userId !== (res.locals.auth.userId as string) && !row.isPublic) return res.status(403).json({ success: false, error: 'Forbidden' });
     const merged = mergeRawRow(row);
     const songIds = asStringArray(merged.songIds ?? merged.songs ?? row.songIds);
     let resolvedSongs: any[] = [];
     if (songIds.length > 0) {
-      const [hqList, zoneList, ministeredList] = await Promise.all([
-        prisma.song.findMany({ where: { id: { in: songIds } } }).catch(() => []),
-        prisma.zoneSong.findMany({ where: { id: { in: songIds } } }).catch(() => []),
-        prisma.ministeredSong.findMany({ where: { id: { in: songIds } } }).catch(() => []),
-      ]);
+      const hqList = await prisma.song.findMany({ where: { id: { in: songIds } } }).catch(() => []);
       const songMap = new Map<string, any>();
-      [...hqList, ...zoneList, ...ministeredList].forEach((s) => {
+      hqList.forEach((s) => {
         if (!songMap.has(s.id)) {
           const m = mergeRawRow(s);
           const raw = (s.rawData && typeof s.rawData === 'object') ? (s.rawData as any) : {};
@@ -76,7 +72,7 @@ router.post('/:id/songs', requireAuth, async (req, res) => {
     const { songId, songIds } = req.body;
     const toAdd: string[] = songIds ? asStringArray(songIds) : songId ? [String(songId)] : [];
     if (toAdd.length === 0) return res.status(400).json({ success: false, error: 'songId or songIds required' });
-    const existing = await prisma.userPlaylist.findUnique({ where: { id } });
+    const existing = await prisma.playlist.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Playlist not found' });
     if (existing.userId !== (res.locals.auth.userId as string)) return res.status(403).json({ success: false, error: 'Forbidden' });
     const merged = mergeRawRow(existing);
@@ -84,7 +80,7 @@ router.post('/:id/songs', requireAuth, async (req, res) => {
     const updatedIds = Array.from(new Set([...currentList, ...toAdd]));
     const raw = (existing.rawData && typeof existing.rawData === 'object') ? { ...(existing.rawData as any) } : {};
     raw.songIds = updatedIds; raw.updatedAt = new Date().toISOString();
-    const updated = await prisma.userPlaylist.update({ where: { id }, data: { songIds: updatedIds, rawData: raw } });
+    const updated = await prisma.playlist.update({ where: { id }, data: { songIds: updatedIds, rawData: raw } });
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('[playlists/:id/songs:POST]', err);
@@ -95,14 +91,14 @@ router.post('/:id/songs', requireAuth, async (req, res) => {
 router.delete('/:id/songs/:songId', requireAuth, async (req, res) => {
   try {
     const { id, songId } = req.params;
-    const existing = await prisma.userPlaylist.findUnique({ where: { id } });
+    const existing = await prisma.playlist.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Playlist not found' });
     if (existing.userId !== (res.locals.auth.userId as string)) return res.status(403).json({ success: false, error: 'Forbidden' });
     const merged = mergeRawRow(existing);
     const updatedIds = asStringArray(merged.songIds ?? merged.songs ?? existing.songIds).filter((s) => s !== songId);
     const raw = (existing.rawData && typeof existing.rawData === 'object') ? { ...(existing.rawData as any) } : {};
     raw.songIds = updatedIds; raw.updatedAt = new Date().toISOString();
-    const updated = await prisma.userPlaylist.update({ where: { id }, data: { songIds: updatedIds, rawData: raw } });
+    const updated = await prisma.playlist.update({ where: { id }, data: { songIds: updatedIds, rawData: raw } });
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('[playlists/:id/songs:DELETE]', err);
@@ -114,7 +110,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = res.locals.auth.userId as string;
-    const existing = await prisma.userPlaylist.findUnique({ where: { id } });
+    const existing = await prisma.playlist.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Playlist not found' });
     if (existing.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' });
     const body = req.body || {};
@@ -123,7 +119,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     if (title !== undefined) raw.title = title;
     if (body.description !== undefined) raw.description = body.description;
     raw.updatedAt = new Date().toISOString();
-    const updated = await prisma.userPlaylist.update({ where: { id }, data: { ...(title !== undefined ? { title: String(title).trim() } : {}), ...(body.isPublic !== undefined ? { isPublic: Boolean(body.isPublic) } : {}), rawData: raw } });
+    const updated = await prisma.playlist.update({ where: { id }, data: { ...(title !== undefined ? { title: String(title).trim() } : {}), ...(body.isPublic !== undefined ? { isPublic: Boolean(body.isPublic) } : {}), rawData: raw } });
     res.json({ success: true, data: updated });
   } catch (err) {
     console.error('[playlists/:id:PATCH]', err);
@@ -135,10 +131,10 @@ router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = res.locals.auth.userId as string;
-    const existing = await prisma.userPlaylist.findUnique({ where: { id } });
+    const existing = await prisma.playlist.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Playlist not found' });
     if (existing.userId !== userId) return res.status(403).json({ success: false, error: 'Forbidden' });
-    await prisma.userPlaylist.delete({ where: { id } });
+    await prisma.playlist.delete({ where: { id } });
     res.json({ success: true, message: 'Playlist deleted' });
   } catch (err) {
     console.error('[playlists/:id:DELETE]', err);

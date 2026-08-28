@@ -30,11 +30,17 @@ router.get('/', requireAuth, async (req, res) => {
 
     // 1. If scoped to a specific church / subgroup
     if (effectiveChurchId) {
-      const [sgProgs, zRows] = await Promise.all([
-        prisma.subgroupProgram.findMany({ where: { subGroupId: effectiveChurchId } }),
-        prisma.zoneProgram.findMany({ where: { rawData: { path: ['subGroupId'], equals: effectiveChurchId } } }).catch(() => []),
-      ]);
-      rows = [...sgProgs.map(mergeRawRow), ...zRows.map(mergeRawRow)];
+      const progs = await prisma.program.findMany({
+        where: {
+          OR: [
+            { subgroupId: effectiveChurchId },
+            { rawData: { path: ['subGroupId'], equals: effectiveChurchId } },
+            { rawData: { path: ['sub_group_id'], equals: effectiveChurchId } },
+            { rawData: { path: ['churchId'], equals: effectiveChurchId } },
+          ]
+        }
+      });
+      rows = progs.map(mergeRawRow);
     } else if (effectiveZoneId) {
       const cleanZone = effectiveZoneId.toLowerCase().trim();
       const withoutHyphen = cleanZone.replace(/-/g, '');
@@ -48,73 +54,25 @@ router.get('/', requireAuth, async (req, res) => {
         cleanZone === 'loveworld-singers-hq';
 
       if (isHqGroup || effectiveZoneId === 'all') {
-        const [hqProgs, zRows, sgProgs] = await Promise.all([
-          prisma.program.findMany(),
-          prisma.$queryRawUnsafe<any[]>(
-            `SELECT * FROM zone_programs
-             WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-                OR lower(COALESCE(zone_id, '')) = $2
-                OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
-                OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1`,
-            withoutHyphen,
-            withHyphen,
-          ),
-          prisma.subgroupProgram.findMany().catch(() => []),
-        ]);
-        const mergedZ = zRows.map(mergeRawRow);
-        const mergedHq = hqProgs.map(mergeRawRow);
-        const mergedSg = sgProgs.map(mergeRawRow);
-        rows = [...mergedZ, ...mergedHq, ...mergedSg];
+        const progs = await prisma.program.findMany();
+        rows = progs.map(mergeRawRow);
       } else {
-        const [zRows, zoneSpecificRows, userSubgroups] = await Promise.all([
-          prisma.$queryRawUnsafe<any[]>(
-            `SELECT * FROM zone_programs
-             WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-                OR lower(COALESCE(zone_id, '')) = $2
-                OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
-                OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1`,
-            withoutHyphen,
-            withHyphen,
-          ),
-          prisma.$queryRawUnsafe<any[]>(
-            `SELECT * FROM programs
-             WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-                OR lower(COALESCE(zone_id, '')) = $2
-                OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
-                OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1`,
-            withoutHyphen,
-            withHyphen,
-          ),
-          prisma.subgroup.findMany({
-            where: {
-              OR: [
-                { zoneId: effectiveZoneId },
-                { coordinatorId: auth.userId },
-                { createdBy: auth.userId },
-              ]
-            }
-          }).catch(() => []),
-        ]);
-        const mergedZ = zRows.map(mergeRawRow);
-        const mergedZoneSpecific = zoneSpecificRows.map(mergeRawRow);
-        
-        let sgProgs: any[] = [];
-        if (userSubgroups.length > 0) {
-          const sgIds = userSubgroups.map(s => s.id);
-          const foundSgProgs = await prisma.subgroupProgram.findMany({
-            where: { subGroupId: { in: sgIds } }
-          }).catch(() => []);
-          sgProgs = foundSgProgs.map(mergeRawRow);
-        }
-
-        rows = [...mergedZ, ...mergedZoneSpecific, ...sgProgs];
+        const progs = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT * FROM programs
+           WHERE scope = 'hq'
+              OR lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
+              OR lower(COALESCE(zone_id, '')) = $2
+              OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
+              OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1
+              OR lower(replace(COALESCE(raw_data->>'zone_id', ''), '-', '')) = $1`,
+          withoutHyphen,
+          withHyphen,
+        );
+        rows = progs.map(mergeRawRow);
       }
     } else {
-      const [allGlobal, allSg] = await Promise.all([
-        prisma.program.findMany(),
-        prisma.subgroupProgram.findMany().catch(() => []),
-      ]);
-      rows = [...allGlobal.map(mergeRawRow), ...allSg.map(mergeRawRow)];
+      const progs = await prisma.program.findMany();
+      rows = progs.map(mergeRawRow);
     }
 
     function getProgramTimestamp(p: any): number {
@@ -188,12 +146,7 @@ router.get('/:id', requireAuth, async (req, res) => {
   try {
     const row = await prisma.program.findUnique({ where: { id: req.params.id } });
     if (!row) {
-      const zRow = await prisma.zoneProgram.findUnique({ where: { id: req.params.id } });
-      if (!zRow) {
-        res.status(404).json({ success: false, error: 'Not found' });
-        return;
-      }
-      res.json({ success: true, data: mergeRawRow(zRow) });
+      res.status(404).json({ success: false, error: 'Not found' });
       return;
     }
     res.json({ success: true, data: mergeRawRow(row) });
@@ -207,10 +160,17 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.get('/zone/all', requireAuth, async (req, res) => {
   try {
     const { zoneId } = req.query as { zoneId?: string };
-    const rows = await prisma.zoneProgram.findMany();
+    const rows = await prisma.program.findMany({
+      where: zoneId ? {
+        OR: [
+          { zoneId },
+          { rawData: { path: ['zoneId'], equals: zoneId } },
+          { scope: 'hq' },
+        ]
+      } : undefined
+    });
     const data = rows
       .map(mergeRawRow)
-      .filter((r: any) => !zoneId || r.zoneId === zoneId || r.zone_id === zoneId)
       .sort((a: any, b: any) => {
         const ac = String(a.createdAt ?? a.date ?? '');
         const bc = String(b.createdAt ?? b.date ?? '');
@@ -233,67 +193,29 @@ router.post('/', requireAuth, requireTenantAdmin, async (req, res) => {
     const effectiveStatus = status || effectiveCategory;
     const subGroupId = req.body.subGroupId || req.body.sub_group_id || req.body.churchId || req.tenant?.effectiveChurchId || null;
 
-    if (subGroupId) {
-      await prisma.subgroupProgram.create({
-        data: {
-          id: programId,
-          name: name || 'Church Rehearsal',
-          date: date || new Date().toISOString(),
-          location: location || null,
-          category: effectiveCategory,
-          subGroupId,
-          songIds: songIds || (Array.isArray(songs) ? songs.map((s: any) => s.id || s) : []),
-          rawData: { ...req.body, subGroupId },
-        },
-      }).catch(() => null);
-    }
+    const row = await prisma.program.create({
+      data: {
+        id: programId,
+        name: name || 'Program',
+        date: date || new Date().toISOString(),
+        scope: scope || (subGroupId ? 'subgroup' : (zoneId && zoneId !== 'zone-001') ? 'zone' : 'hq'),
+        zoneId: zoneId || 'zone-001',
+        subgroupId: subGroupId,
+        category: effectiveCategory,
+        status: effectiveStatus,
+        isActive: effectiveStatus === 'ongoing',
+        isArchived: effectiveStatus === 'archive',
+        location: location || null,
+        bannerImage: bannerImage || null,
+        songs: songs || [],
+        songIds: songIds || (Array.isArray(songs) ? songs.map((s: any) => s.id || s) : []),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        rawData: { ...req.body, subGroupId },
+      },
+    });
 
-    const isZoneSpecific = zoneId && zoneId !== 'zone-001' && !zoneId.toLowerCase().includes('hq') && zoneId !== 'ZONE001';
-
-    if (isZoneSpecific) {
-      await prisma.zoneProgram.create({
-        data: {
-          id: programId,
-          name: name || 'Rehearsal Program',
-          date: date || new Date().toISOString(),
-          zoneId,
-          category: effectiveCategory,
-          status: effectiveStatus,
-          isActive: effectiveStatus === 'ongoing',
-          isArchived: effectiveStatus === 'archive',
-          location: location || null,
-          bannerImage: bannerImage || null,
-          songs: songs || [],
-          songIds: songIds || (Array.isArray(songs) ? songs.map((s: any) => s.id || s) : []),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          rawData: { ...req.body, subGroupId },
-        },
-      });
-    } else {
-      await prisma.program.create({
-        data: {
-          id: programId,
-          name: name || 'Praise Night / Program',
-          date: date || new Date().toISOString(),
-          scope: scope || (subGroupId ? 'subgroup' : 'hq'),
-          zoneId: zoneId || 'zone-001',
-          category: effectiveCategory,
-          status: effectiveStatus,
-          isActive: effectiveStatus === 'ongoing',
-          isArchived: effectiveStatus === 'archive',
-          location: location || null,
-          bannerImage: bannerImage || null,
-          songs: songs || [],
-          songIds: songIds || (Array.isArray(songs) ? songs.map((s: any) => s.id || s) : []),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          rawData: { ...req.body, subGroupId },
-        },
-      });
-    }
-
-    res.json({ success: true, message: 'Program created successfully', data: { id: programId } });
+    res.json({ success: true, message: 'Program created successfully', data: mergeRawRow(row) });
   } catch (err) {
     console.error('[programs/create]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -311,28 +233,16 @@ router.patch('/:id/status', requireAuth, requireTenantAdmin, async (req, res) =>
     const isOngoing = status === 'ongoing';
     const isArchive = status === 'archive' || status === 'archived';
 
-    await Promise.allSettled([
-      prisma.program.update({
-        where: { id: req.params.id },
-        data: {
-          status,
-          category: isOngoing ? 'ongoing' : isArchive ? 'archive' : 'pre-rehearsal',
-          isActive: isOngoing,
-          isArchived: isArchive,
-          updatedAt: new Date(),
-        },
-      }),
-      prisma.zoneProgram.update({
-        where: { id: req.params.id },
-        data: {
-          status,
-          category: isOngoing ? 'ongoing' : isArchive ? 'archive' : 'pre-rehearsal',
-          isActive: isOngoing,
-          isArchived: isArchive,
-          updatedAt: new Date(),
-        },
-      }),
-    ]);
+    await prisma.program.update({
+      where: { id: req.params.id },
+      data: {
+        status,
+        category: isOngoing ? 'ongoing' : isArchive ? 'archive' : 'pre-rehearsal',
+        isActive: isOngoing,
+        isArchived: isArchive,
+        updatedAt: new Date(),
+      },
+    });
 
     res.json({ success: true, message: `Program status updated to ${status}` });
   } catch (err) {
@@ -341,12 +251,11 @@ router.patch('/:id/status', requireAuth, requireTenantAdmin, async (req, res) =>
   }
 });
 
-// Helper to find a program across programs and zonePrograms tables
+// Helper to find a program across programs table
 async function findProgramRow(programId: string) {
   if (!programId) return null;
   const decoded = decodeURIComponent(programId).trim();
   
-  // 1. Check programs table
   const progs = await prisma.$queryRawUnsafe<any[]>(
     `SELECT * FROM programs
      WHERE id = $1
@@ -361,23 +270,6 @@ async function findProgramRow(programId: string) {
   );
 
   if (progs.length > 0) return { row: progs[0], table: 'programs' as const };
-
-  // 2. Check zonePrograms table
-  const zProgs = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT * FROM zone_programs
-     WHERE id = $1
-        OR id = $2
-        OR lower(id) = lower($2)
-        OR raw_data->>'firebaseId' = $2
-        OR raw_data->>'id' = $2
-        OR lower(name) = lower($2)
-     LIMIT 1`,
-    programId,
-    decoded,
-  );
-
-  if (zProgs.length > 0) return { row: zProgs[0], table: 'zonePrograms' as const };
-
   return null;
 }
 
@@ -387,9 +279,7 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req, res) 
     const sourceId = req.params.id;
     const { newName, newDate, targetZoneId } = req.body;
 
-    const prog = await prisma.program.findUnique({ where: { id: sourceId } });
-    const zProg = !prog ? await prisma.zoneProgram.findUnique({ where: { id: sourceId } }) : null;
-    const source = prog || zProg;
+    const source = await prisma.program.findUnique({ where: { id: sourceId } });
 
     if (!source) {
       res.status(404).json({ success: false, error: 'Source program not found' });
@@ -398,12 +288,12 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req, res) 
 
     const newId = `prog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const effectiveZoneId = targetZoneId || source.zoneId || 'zone-001';
-    const isZoneSpecific = effectiveZoneId && effectiveZoneId !== 'zone-001' && !effectiveZoneId.toLowerCase().includes('hq');
 
     const duplicateData = {
       id: newId,
       name: newName || `${source.name} (Copy)`,
       date: newDate || new Date().toISOString(),
+      scope: source.scope || 'zone',
       zoneId: effectiveZoneId,
       category: 'pre-rehearsal',
       status: 'pre-rehearsal',
@@ -418,11 +308,7 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req, res) 
       rawData: { ...(source.rawData as Record<string, unknown> || {}), isCloned: true, clonedFromId: sourceId },
     };
 
-    if (isZoneSpecific) {
-      await prisma.zoneProgram.create({ data: duplicateData });
-    } else {
-      await prisma.program.create({ data: { ...duplicateData, scope: (source as any).scope || 'hq' } });
-    }
+    await prisma.program.create({ data: duplicateData });
 
     res.json({
       success: true,
@@ -446,19 +332,13 @@ router.post('/:id/import-songs', requireAuth, requireTenantAdmin, async (req, re
       return;
     }
 
-    const sProg = await prisma.program.findUnique({ where: { id: sourceProgramId } });
-    const sZProg = !sProg ? await prisma.zoneProgram.findUnique({ where: { id: sourceProgramId } }) : null;
-    const source = sProg || sZProg;
-
+    const source = await prisma.program.findUnique({ where: { id: sourceProgramId } });
     if (!source) {
       res.status(404).json({ success: false, error: 'Source program not found' });
       return;
     }
 
-    const tProg = await prisma.program.findUnique({ where: { id: targetId } });
-    const tZProg = !tProg ? await prisma.zoneProgram.findUnique({ where: { id: targetId } }) : null;
-    const target = tProg || tZProg;
-
+    const target = await prisma.program.findUnique({ where: { id: targetId } });
     if (!target) {
       res.status(404).json({ success: false, error: 'Target program not found' });
       return;
@@ -483,12 +363,7 @@ router.post('/:id/import-songs', requireAuth, requireTenantAdmin, async (req, re
     }
 
     const newSongIds = Array.from(existingIds);
-
-    if (tProg) {
-      await prisma.program.update({ where: { id: targetId }, data: { songs: newSongs, songIds: newSongIds, updatedAt: new Date() } });
-    } else {
-      await prisma.zoneProgram.update({ where: { id: targetId }, data: { songs: newSongs, songIds: newSongIds, updatedAt: new Date() } });
-    }
+    await prisma.program.update({ where: { id: targetId }, data: { songs: newSongs, songIds: newSongIds, updatedAt: new Date() } });
 
     res.json({
       success: true,
@@ -512,10 +387,7 @@ router.post('/:id/copy-songs', requireAuth, requireTenantAdmin, async (req, res)
       return;
     }
 
-    const tProg = await prisma.program.findUnique({ where: { id: targetId } });
-    const tZProg = !tProg ? await prisma.zoneProgram.findUnique({ where: { id: targetId } }) : null;
-    const target = tProg || tZProg;
-
+    const target = await prisma.program.findUnique({ where: { id: targetId } });
     if (!target) {
       res.status(404).json({ success: false, error: 'Target program not found' });
       return;
@@ -529,11 +401,7 @@ router.post('/:id/copy-songs', requireAuth, requireTenantAdmin, async (req, res)
 
     const updatedSongIds = Array.from(new Set([...currentSongIds, ...songIds]));
 
-    if (tProg) {
-      await prisma.program.update({ where: { id: targetId }, data: { songIds: updatedSongIds, updatedAt: new Date() } });
-    } else {
-      await prisma.zoneProgram.update({ where: { id: targetId }, data: { songIds: updatedSongIds, updatedAt: new Date() } });
-    }
+    await prisma.program.update({ where: { id: targetId }, data: { songIds: updatedSongIds, updatedAt: new Date() } });
 
     res.json({
       success: true,
@@ -593,12 +461,7 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     if (body.songs !== undefined) updateFields.songs = body.songs;
     if (body.songIds !== undefined) updateFields.songIds = body.songIds;
 
-    let updatedRow: any = null;
-    if (found.table === 'programs') {
-      updatedRow = await prisma.program.update({ where: { id: existing.id }, data: updateFields });
-    } else {
-      updatedRow = await prisma.zoneProgram.update({ where: { id: existing.id }, data: updateFields });
-    }
+    const updatedRow = await prisma.program.update({ where: { id: existing.id }, data: updateFields });
 
     res.json({ success: true, message: 'Program updated successfully', data: mergeRawRow(updatedRow) });
   } catch (err) {
@@ -614,16 +477,9 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     const found = await findProgramRow(programId);
 
     if (found) {
-      if (found.table === 'programs') {
-        await prisma.program.delete({ where: { id: found.row.id } });
-      } else {
-        await prisma.zoneProgram.delete({ where: { id: found.row.id } });
-      }
+      await prisma.program.delete({ where: { id: found.row.id } });
     } else {
-      await Promise.allSettled([
-        prisma.program.deleteMany({ where: { id: programId } }),
-        prisma.zoneProgram.deleteMany({ where: { id: programId } }),
-      ]);
+      await prisma.program.deleteMany({ where: { id: programId } });
     }
 
     res.json({ success: true, message: 'Program deleted successfully' });
@@ -639,9 +495,7 @@ router.patch('/:id/category-order', requireAuth, requireTenantAdmin, async (req,
     const programId = req.params.id;
     const { categoryOrder } = req.body;
 
-    const prog = await prisma.program.findUnique({ where: { id: programId } });
-    const zProg = !prog ? await prisma.zoneProgram.findUnique({ where: { id: programId } }) : null;
-    const existing = prog || zProg;
+    const existing = await prisma.program.findUnique({ where: { id: programId } });
 
     if (!existing) {
       res.status(404).json({ success: false, error: 'Program not found' });
@@ -654,11 +508,7 @@ router.patch('/:id/category-order', requireAuth, requireTenantAdmin, async (req,
 
     const updatedRaw = { ...prevRaw, categoryOrder };
 
-    if (prog) {
-      await prisma.program.update({ where: { id: programId }, data: { rawData: updatedRaw, updatedAt: new Date() } });
-    } else {
-      await prisma.zoneProgram.update({ where: { id: programId }, data: { rawData: updatedRaw, updatedAt: new Date() } });
-    }
+    await prisma.program.update({ where: { id: programId }, data: { rawData: updatedRaw, updatedAt: new Date() } });
 
     res.json({ success: true, message: 'Category order updated successfully' });
   } catch (err) {

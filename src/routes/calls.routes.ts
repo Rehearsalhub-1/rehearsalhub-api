@@ -7,29 +7,67 @@ import { mergeRawRow } from '../lib/rawRow';
 
 const router = Router();
 
+function shapeCall(c: any, profileMap: Record<string, { name: string; avatar: string | null }>) {
+  const merged = mergeRawRow(c);
+  const raw = (c.rawData && typeof c.rawData === 'object') ? (c.rawData as Record<string, any>) : {};
+
+  const callerId = raw.callerId || raw.caller_id;
+  const receiverId = raw.receiverId || raw.receiver_id;
+  const callerProf = callerId ? profileMap[callerId] : null;
+  const receiverProf = receiverId ? profileMap[receiverId] : null;
+
+  let rawTime = raw.timestamp || raw.startedAt || raw.createdAt || raw.created_at;
+  let timestampISO = new Date().toISOString();
+  if (rawTime) {
+    if (typeof rawTime === 'object' && rawTime._seconds) {
+      timestampISO = new Date(rawTime._seconds * 1000).toISOString();
+    } else if (rawTime instanceof Date) {
+      timestampISO = rawTime.toISOString();
+    } else if (typeof rawTime === 'string') {
+      timestampISO = rawTime;
+    }
+  }
+
+  return {
+    ...merged,
+    id: c.id,
+    callerId,
+    receiverId,
+    callerName: (raw.callerName && raw.callerName !== 'Caller') ? raw.callerName : (callerProf?.name || 'Caller'),
+    callerAvatar: raw.callerAvatar || callerProf?.avatar || null,
+    receiverName: raw.receiverName || receiverProf?.name || 'Member',
+    receiverAvatar: raw.receiverAvatar || receiverProf?.avatar || null,
+    type: raw.type || 'voice',
+    status: raw.status || 'ended',
+    duration: raw.duration || 0,
+    chatId: raw.chatId || raw.chat_id,
+    createdAt: timestampISO,
+    timestamp: timestampISO,
+  };
+}
+
 // GET /calls — Call history for current user
 router.get('/', requireAuth, async (req, res) => {
   try {
     const auth = res.locals.auth;
     const userId = auth.userId as string;
 
-    const userCalls = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM calls
-       WHERE caller_id = $1 
-          OR receiver_id = $1 
-          OR raw_data->>'callerId' = $1 
-          OR raw_data->>'receiverId' = $1 
-          OR raw_data->>'caller_id' = $1 
-          OR raw_data->>'receiver_id' = $1 
-          OR raw_data->'participants' ? $1
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      userId,
-    );
+    const userCalls = await prisma.call.findMany({
+      where: {
+        OR: [
+          { rawData: { path: ['callerId'], equals: userId } },
+          { rawData: { path: ['receiverId'], equals: userId } },
+          { rawData: { path: ['caller_id'], equals: userId } },
+          { rawData: { path: ['receiver_id'], equals: userId } },
+          { rawData: { path: ['participants'], array_contains: userId } },
+        ],
+      },
+      take: 100,
+    });
 
     const userIds = Array.from(new Set(userCalls.flatMap(c => {
       const raw = (c.rawData && typeof c.rawData === 'object') ? (c.rawData as any) : {};
-      return [c.callerId, c.receiverId, raw.callerId, raw.receiverId, raw.caller_id, raw.receiver_id];
+      return [raw.callerId, raw.receiverId, raw.caller_id, raw.receiver_id];
     }).filter(Boolean))) as string[];
 
     const profileMap: Record<string, { name: string; avatar: string | null }> = {};
@@ -43,44 +81,8 @@ router.get('/', requireAuth, async (req, res) => {
       }
     }
 
-    const enrichedCalls = userCalls.map(c => {
-      const merged = mergeRawRow(c);
-      const raw = (c.rawData && typeof c.rawData === 'object') ? (c.rawData as any) : {};
-      
-      const callerId = c.callerId || raw.callerId || raw.caller_id;
-      const receiverId = c.receiverId || raw.receiverId || raw.receiver_id;
-      const callerProf = profileMap[callerId];
-      const receiverProf = profileMap[receiverId];
-
-      let rawTime = raw.timestamp || raw.startedAt || raw.createdAt || c.startedAt || c.createdAt;
-      let timestampISO = new Date().toISOString();
-      if (rawTime) {
-        if (typeof rawTime === 'object' && rawTime._seconds) {
-          timestampISO = new Date(rawTime._seconds * 1000).toISOString();
-        } else if (rawTime instanceof Date) {
-          timestampISO = rawTime.toISOString();
-        } else if (typeof rawTime === 'string') {
-          timestampISO = rawTime;
-        }
-      }
-
-      return {
-        ...merged,
-        id: c.id,
-        callerId,
-        receiverId,
-        callerName: (raw.callerName && raw.callerName !== 'Caller') ? raw.callerName : (callerProf?.name || c.callerName || 'Caller'),
-        callerAvatar: c.callerAvatar || raw.callerAvatar || callerProf?.avatar || null,
-        receiverName: raw.receiverName || receiverProf?.name || 'Member',
-        receiverAvatar: raw.receiverAvatar || receiverProf?.avatar || null,
-        type: c.type || raw.type || 'voice',
-        status: c.status || raw.status || 'ended',
-        duration: raw.duration || 0,
-        chatId: c.chatId || raw.chatId || raw.chat_id,
-        createdAt: timestampISO,
-        timestamp: timestampISO,
-      };
-    });
+    const enrichedCalls = userCalls.map(c => shapeCall(c, profileMap));
+    enrichedCalls.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
 
     res.json({ success: true, count: enrichedCalls.length, data: enrichedCalls });
   } catch (err) {
@@ -97,11 +99,14 @@ router.get('/:callId', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Call not found' }); 
       return; 
     }
-    if (call.callerId !== res.locals.auth.userId && call.receiverId !== res.locals.auth.userId) {
+    const raw = (call.rawData && typeof call.rawData === 'object') ? (call.rawData as Record<string, any>) : {};
+    const callerId = raw.callerId || raw.caller_id;
+    const receiverId = raw.receiverId || raw.receiver_id;
+    if (callerId !== res.locals.auth.userId && receiverId !== res.locals.auth.userId) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
-    res.json({ success: true, data: call });
+    res.json({ success: true, data: mergeRawRow(call) });
   } catch (err) {
     console.error('[calls/:id]', err);
     res.status(500).json({ success: false, error: 'Failed to load call' });
@@ -139,24 +144,32 @@ router.post('/', requireAuth, async (req, res) => {
 
     const id = crypto.randomUUID();
     const generatedRoomId = room_id || roomId || `call_${id}`;
+    const now = new Date().toISOString();
+
+    const rawData = {
+      id,
+      callerId: auth.userId,
+      receiverId: targetReceiverId,
+      type: type === 'video' ? 'video' : 'voice',
+      callerName: caller_name || callerName || 'Caller',
+      callerAvatar: caller_avatar || callerAvatar || null,
+      chatId: chat_id || chatId || null,
+      roomId: generatedRoomId,
+      status: 'ringing',
+      createdAt: now,
+      startedAt: now,
+    };
 
     const call = await prisma.call.create({
       data: {
         id,
-        callerId: auth.userId,
-        receiverId: targetReceiverId,
-        type: type === 'video' ? 'video' : 'voice',
-        callerName: caller_name || callerName || 'Caller',
-        callerAvatar: caller_avatar || callerAvatar,
-        chatId: chat_id || chatId,
-        roomId: generatedRoomId,
-        status: 'ringing',
+        rawData,
       },
     });
 
-    broadcast('call', call.id, call);
-    broadcast('incoming_call', targetReceiverId, call);
-    res.status(201).json({ success: true, data: call });
+    broadcast('call', call.id, rawData);
+    broadcast('incoming_call', targetReceiverId, rawData);
+    res.status(201).json({ success: true, data: rawData });
   } catch (err) {
     console.error('[calls:post]', err);
     res.status(500).json({ success: false, error: 'Failed to initiate call' });
@@ -180,31 +193,32 @@ router.patch('/:callId', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Call not found' });
       return;
     }
-    if (existing.callerId !== auth.userId && existing.receiverId !== auth.userId) {
+    const raw = (existing.rawData && typeof existing.rawData === 'object') ? (existing.rawData as Record<string, any>) : {};
+    const callerId = raw.callerId || raw.caller_id;
+    const receiverId = raw.receiverId || raw.receiver_id;
+
+    if (callerId !== auth.userId && receiverId !== auth.userId) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
 
-    const now = new Date();
-    const updates: any = {
+    const now = new Date().toISOString();
+    const updatedRaw = {
+      ...raw,
       status,
+      ...(status === 'answered' || status === 'accepted' ? { startedAt: now } : {}),
+      ...(status === 'ended' || status === 'declined' || status === 'missed' ? { endedAt: now } : {}),
     };
 
-    if (status === 'answered' || status === 'accepted') {
-      updates.startedAt = now;
-    } else if (status === 'ended' || status === 'declined' || status === 'missed') {
-      updates.endedAt = now;
-    }
-
-    const updated = await prisma.call.update({
+    await prisma.call.update({
       where: { id: callId },
-      data: updates,
+      data: { rawData: updatedRaw },
     });
 
-    broadcast('call', callId, updated);
-    if (existing?.receiverId) broadcast('call_status', existing.receiverId, updated);
-    if (existing?.callerId) broadcast('call_status', existing.callerId, updated);
-    res.json({ success: true, data: updated });
+    broadcast('call', callId, updatedRaw);
+    if (receiverId) broadcast('call_status', receiverId, updatedRaw);
+    if (callerId) broadcast('call_status', callerId, updatedRaw);
+    res.json({ success: true, data: updatedRaw });
   } catch (err) {
     console.error('[calls/:id:patch]', err);
     res.status(500).json({ success: false, error: 'Failed to update call' });
@@ -223,13 +237,17 @@ router.post('/:callId/signal', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Call not found' });
       return;
     }
-    if (call.callerId !== auth.userId && call.receiverId !== auth.userId) {
+    const raw = (call.rawData && typeof call.rawData === 'object') ? (call.rawData as Record<string, any>) : {};
+    const callerId = raw.callerId || raw.caller_id;
+    const receiverId = raw.receiverId || raw.receiver_id;
+
+    if (callerId !== auth.userId && receiverId !== auth.userId) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
 
-    const destination = targetUserId || (call.callerId === auth.userId ? call.receiverId : call.callerId);
-    if (destination !== call.callerId && destination !== call.receiverId) {
+    const destination = targetUserId || (callerId === auth.userId ? receiverId : callerId);
+    if (destination !== callerId && destination !== receiverId) {
       res.status(403).json({ success: false, error: 'Forbidden destination' });
       return;
     }
@@ -253,12 +271,15 @@ router.delete('/:callId', requireAuth, async (req, res) => {
     const { callId } = req.params;
     const auth = res.locals.auth;
 
-    await prisma.call.deleteMany({
-      where: {
-        id: callId,
-        OR: [{ callerId: auth.userId }, { receiverId: auth.userId }],
-      },
-    });
+    const existing = await prisma.call.findUnique({ where: { id: callId } });
+    if (existing) {
+      const raw = (existing.rawData && typeof existing.rawData === 'object') ? (existing.rawData as Record<string, any>) : {};
+      const callerId = raw.callerId || raw.caller_id;
+      const receiverId = raw.receiverId || raw.receiver_id;
+      if (callerId === auth.userId || receiverId === auth.userId) {
+        await prisma.call.delete({ where: { id: callId } });
+      }
+    }
     res.json({ success: true, message: 'Call log deleted' });
   } catch (err) {
     console.error('[calls/:id:delete]', err);
@@ -276,7 +297,10 @@ router.delete('/', requireAuth, async (req, res) => {
       await prisma.call.deleteMany({
         where: {
           id: { in: ids },
-          OR: [{ callerId: auth.userId }, { receiverId: auth.userId }],
+          OR: [
+            { rawData: { path: ['callerId'], equals: auth.userId } },
+            { rawData: { path: ['receiverId'], equals: auth.userId } },
+          ],
         },
       });
     }

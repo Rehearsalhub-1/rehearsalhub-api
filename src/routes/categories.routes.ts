@@ -6,61 +6,22 @@ import { mergeRawRow } from '../lib/rawRow';
 const router = Router();
 
 // GET /categories
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, async (req: any, res) => {
   try {
-    const { zoneId } = req.query;
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
+    const zoneId = (req.query.zoneId && req.query.zoneId !== 'all')
+      ? String(req.query.zoneId)
+      : (!isHqAdmin ? (auth.zoneId as string | null) : null);
 
-    // Always fetch global baseline categories
-    const globalRows = await prisma.category.findMany();
-    const globalList = globalRows.map((r) => {
-      const m = mergeRawRow(r);
-      return {
-        id: String(m.id),
-        name: typeof m.name === 'string' ? m.name : '',
-        color: typeof m.color === 'string' ? m.color : null,
-        isActive: m.isActive !== false,
-        description: typeof m.description === 'string' ? m.description : null,
-        isGlobal: true,
-      };
-    });
+    const rows = await prisma.category.findMany();
+    const data = rows.map(mergeRawRow);
+    const filtered = zoneId
+      ? data.filter((c: any) => !c.zoneId || c.zoneId === 'global' || c.zoneId === zoneId || c.zone_id === zoneId)
+      : data;
 
-    let zoneList: any[] = [];
-    if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
-      const target = String(zoneId).toLowerCase();
-      const withoutHyphen = target.replace(/-/g, '');
-      const withHyphen = target.includes('-') ? target : target.replace(/^zone(\d+)$/, 'zone-$1');
-
-      const zoneRows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM zone_categories
-         WHERE lower(replace(raw_data->>'zoneId', '-', '')) = $1
-            OR lower(replace(raw_data->>'zone_id', '-', '')) = $1
-            OR lower(raw_data->>'zoneId') = $2
-            OR lower(raw_data->>'zone_id') = $2`,
-        withoutHyphen,
-        withHyphen,
-      );
-      zoneList = zoneRows.map((r) => {
-        const m = mergeRawRow(r);
-        return {
-          id: String(m.id),
-          name: typeof m.name === 'string' ? m.name : '',
-          color: typeof m.color === 'string' ? m.color : null,
-          isActive: m.isActive !== false,
-          description: typeof m.description === 'string' ? m.description : null,
-          zoneId: m.zoneId || m.zone_id || zoneId,
-          isGlobal: false,
-        };
-      });
-    }
-
-    // Merge zone items with global baseline (zone items override global if same name)
-    const mergedMap = new Map<string, any>();
-    globalList.forEach((c) => { if (c.name) mergedMap.set(c.name.toLowerCase().trim(), c); });
-    zoneList.forEach((c) => { if (c.name) mergedMap.set(c.name.toLowerCase().trim(), c); });
-
-    const data = Array.from(mergedMap.values());
-    data.sort((a, b) => a.name.localeCompare(b.name));
-    res.json({ success: true, data });
+    filtered.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+    res.json({ success: true, data: filtered });
   } catch (err) {
     console.error('[categories]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -70,7 +31,7 @@ router.get('/', requireAuth, async (req, res) => {
 // GET /categories/page
 router.get('/page', requireAuth, async (_req, res) => {
   try {
-    const rows = await prisma.pageCategory.findMany();
+    const rows = await prisma.category.findMany({ where: { type: 'page' } });
     res.json({ success: true, data: rows.map(mergeRawRow) });
   } catch (err) {
     console.error('[categories/page]', err);
@@ -87,23 +48,12 @@ router.get('/zone-page', requireAuth, async (req: any, res) => {
       ? String(req.query.zoneId)
       : (!isHqAdmin ? (auth.zoneId as string | null) : null);
 
-    let rows: any[];
-    if (effectiveZoneId && effectiveZoneId !== 'all') {
-      const withoutHyphen = effectiveZoneId.replace(/-/g, '').toLowerCase();
-      const withHyphen = effectiveZoneId.includes('-') ? effectiveZoneId.toLowerCase() : effectiveZoneId.toLowerCase().replace(/^zone(\d+)$/, 'zone-$1');
-
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM zone_page_categories
-         WHERE lower(replace(raw_data->>'zoneId', '-', '')) = $1
-            OR lower(replace(raw_data->>'zone_id', '-', '')) = $1
-            OR lower(raw_data->>'zoneId') = $2
-            OR lower(raw_data->>'zone_id') = $2`,
-        withoutHyphen,
-        withHyphen,
-      );
-    } else {
-      rows = await prisma.zonePageCategory.findMany();
-    }
+    const rows = await prisma.category.findMany({
+      where: {
+        type: 'page',
+        ...(effectiveZoneId ? { zoneId: effectiveZoneId } : {}),
+      },
+    });
 
     res.json({ success: true, data: rows.map(mergeRawRow) });
   } catch (err) {
@@ -127,12 +77,17 @@ router.post('/', requireAuth, requireTenantAdmin, async (req, res) => {
       zoneId: zoneId || 'global', createdAt: new Date().toISOString(),
     };
 
-    let row: any;
-    if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
-      row = await prisma.zoneCategory.create({ data: { id, rawData } });
-    } else {
-      row = await prisma.category.create({ data: { id, rawData } });
-    }
+    const row = await prisma.category.create({
+      data: {
+        id,
+        name: name.trim(),
+        color: color || '#9333ea',
+        scope: zoneId && zoneId !== 'global' ? 'zone' : 'hq',
+        zoneId: zoneId || null,
+        type: 'program',
+        rawData,
+      },
+    });
 
     res.status(201).json({ success: true, message: 'Category created', data: mergeRawRow(row) });
   } catch (err) {
@@ -148,22 +103,22 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     const body = req.body || {};
 
     const existing = await prisma.category.findUnique({ where: { id: categoryId } });
-    if (existing) {
-      const updatedRaw = { ...(existing.rawData as Record<string, unknown> || {}), ...body, updatedAt: new Date().toISOString() };
-      await prisma.category.update({ where: { id: categoryId }, data: { rawData: updatedRaw } });
-      res.json({ success: true, message: 'Category updated', data: mergeRawRow({ id: categoryId, rawData: updatedRaw }) });
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Category not found' });
       return;
     }
 
-    const zoneExisting = await prisma.zoneCategory.findUnique({ where: { id: categoryId } });
-    if (zoneExisting) {
-      const updatedRaw = { ...(zoneExisting.rawData as Record<string, unknown> || {}), ...body, updatedAt: new Date().toISOString() };
-      await prisma.zoneCategory.update({ where: { id: categoryId }, data: { rawData: updatedRaw } });
-      res.json({ success: true, message: 'Category updated', data: mergeRawRow({ id: categoryId, rawData: updatedRaw }) });
-      return;
-    }
+    const updatedRaw = { ...(existing.rawData as Record<string, unknown> || {}), ...body, updatedAt: new Date().toISOString() };
+    const row = await prisma.category.update({
+      where: { id: categoryId },
+      data: {
+        name: body.name !== undefined ? body.name : existing.name,
+        color: body.color !== undefined ? body.color : existing.color,
+        rawData: updatedRaw,
+      },
+    });
 
-    res.status(404).json({ success: false, error: 'Category not found' });
+    res.json({ success: true, message: 'Category updated', data: mergeRawRow(row) });
   } catch (err) {
     console.error('[categories PATCH]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -174,10 +129,7 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
 router.delete('/:id', requireAuth, requireTenantAdmin, async (req, res) => {
   try {
     const categoryId = req.params.id;
-    await Promise.allSettled([
-      prisma.category.delete({ where: { id: categoryId } }),
-      prisma.zoneCategory.delete({ where: { id: categoryId } }),
-    ]);
+    await prisma.category.deleteMany({ where: { id: categoryId } });
     res.json({ success: true, message: 'Category deleted' });
   } catch (err) {
     console.error('[categories DELETE]', err);
@@ -193,12 +145,16 @@ router.post('/page', requireAuth, requireTenantAdmin, async (req, res) => {
     const zoneId = body.zoneId || body.zone_id;
     const rawData = { id: pageCatId, name: body.name || '', description: body.description || '', image: body.image || '', zoneId: zoneId || null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...body };
 
-    let row: any;
-    if (zoneId && zoneId !== 'zone-001' && !zoneId.toLowerCase().includes('hq') && zoneId !== 'ZONE001') {
-      row = await prisma.zonePageCategory.create({ data: { id: pageCatId, rawData } });
-    } else {
-      row = await prisma.pageCategory.create({ data: { id: pageCatId, rawData } });
-    }
+    const row = await prisma.category.create({
+      data: {
+        id: pageCatId,
+        name: body.name || 'Page Category',
+        scope: zoneId ? 'zone' : 'hq',
+        zoneId: zoneId || null,
+        type: 'page',
+        rawData,
+      },
+    });
     res.status(201).json({ success: true, message: 'Page category created', data: mergeRawRow(row) });
   } catch (err) {
     console.error('[categories/page POST]', err);
@@ -212,18 +168,18 @@ router.patch('/page/:id', requireAuth, requireTenantAdmin, async (req, res) => {
     const pageCatId = req.params.id;
     const body = req.body || {};
 
-    const pCat = await prisma.pageCategory.findUnique({ where: { id: pageCatId } });
-    const zpCat = !pCat ? await prisma.zonePageCategory.findUnique({ where: { id: pageCatId } }) : null;
-    const existing = pCat || zpCat;
+    const existing = await prisma.category.findUnique({ where: { id: pageCatId } });
     if (!existing) return res.status(404).json({ success: false, error: 'Page category not found' });
 
     const updatedRaw = { ...(existing.rawData as Record<string, unknown> || {}), ...body, updatedAt: new Date().toISOString() };
-    if (pCat) {
-      await prisma.pageCategory.update({ where: { id: pageCatId }, data: { rawData: updatedRaw } });
-    } else {
-      await prisma.zonePageCategory.update({ where: { id: pageCatId }, data: { rawData: updatedRaw } });
-    }
-    res.json({ success: true, message: 'Page category updated', data: mergeRawRow({ id: pageCatId, rawData: updatedRaw }) });
+    const row = await prisma.category.update({
+      where: { id: pageCatId },
+      data: {
+        name: body.name !== undefined ? body.name : existing.name,
+        rawData: updatedRaw,
+      },
+    });
+    res.json({ success: true, message: 'Page category updated', data: mergeRawRow(row) });
   } catch (err) {
     console.error('[categories/page PATCH]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -234,10 +190,7 @@ router.patch('/page/:id', requireAuth, requireTenantAdmin, async (req, res) => {
 router.delete('/page/:id', requireAuth, requireTenantAdmin, async (req, res) => {
   try {
     const pageCatId = req.params.id;
-    await Promise.allSettled([
-      prisma.pageCategory.delete({ where: { id: pageCatId } }),
-      prisma.zonePageCategory.delete({ where: { id: pageCatId } }),
-    ]);
+    await prisma.category.deleteMany({ where: { id: pageCatId } });
     res.json({ success: true, message: 'Page category deleted' });
   } catch (err) {
     console.error('[categories/page DELETE]', err);
@@ -257,25 +210,25 @@ router.post('/page/order', requireAuth, requireTenantAdmin, async (req, res) => 
       const itemId = typeof item === 'string' ? item : (item.id || item.firebaseId || item._id);
       if (!itemId) continue;
 
-      const pCat = await prisma.pageCategory.findUnique({ where: { id: String(itemId) } });
-      const zpCat = !pCat ? await prisma.zonePageCategory.findUnique({ where: { id: String(itemId) } }) : null;
-      const existing = pCat || zpCat;
+      const existing = await prisma.category.findUnique({ where: { id: String(itemId) } });
 
       if (existing) {
         const updatedRaw = { ...(existing.rawData as Record<string, unknown> || {}), ...(typeof item === 'object' ? item : {}), orderIndex: i, order: i };
-        if (pCat) {
-          await prisma.pageCategory.update({ where: { id: String(itemId) }, data: { rawData: updatedRaw } });
-        } else {
-          await prisma.zonePageCategory.update({ where: { id: String(itemId) }, data: { rawData: updatedRaw } });
-        }
+        await prisma.category.update({ where: { id: String(itemId) }, data: { order: i, rawData: updatedRaw } });
       } else if (typeof item === 'object') {
         const rawData = { ...item, orderIndex: i, order: i, ...(zoneId ? { zoneId } : {}) };
         try {
-          if (zoneId && zoneId !== 'zone-001' && !zoneId.toLowerCase().includes('hq')) {
-            await prisma.zonePageCategory.create({ data: { id: String(itemId), rawData } });
-          } else {
-            await prisma.pageCategory.create({ data: { id: String(itemId), rawData } });
-          }
+          await prisma.category.create({
+            data: {
+              id: String(itemId),
+              name: item.name || 'Category',
+              type: 'page',
+              order: i,
+              scope: zoneId ? 'zone' : 'hq',
+              zoneId: zoneId || null,
+              rawData,
+            },
+          });
         } catch { /* already exists, skip */ }
       }
     }

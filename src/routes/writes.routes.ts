@@ -37,21 +37,26 @@ writesRouter.patch('/subscriptions/:userId', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
-  const sub = await prisma.individualSubscription.findFirst({ where: { userId } });
-  if (!sub) { notFound(res); return; }
+  const profile = await prisma.profile.findUnique({ where: { id: userId } });
+  if (!profile) { notFound(res); return; }
 
-  const updateData: any = { updatedAt: new Date() };
-  if (parsed.data.status) updateData.status = parsed.data.status;
-  if (parsed.data.plan) updateData.plan = parsed.data.plan;
-  if (parsed.data.expires_at) updateData.expiresAt = parsed.data.expires_at;
+  const prevRaw = (profile.rawData && typeof profile.rawData === 'object') ? (profile.rawData as Record<string, any>) : {};
+  const currentSub = prevRaw.subscription || { id: `sub_${profile.id}`, userId: profile.id, status: 'active', plan: 'premium' };
+  const updatedSub = {
+    ...currentSub,
+    ...(parsed.data.status ? { status: parsed.data.status } : {}),
+    ...(parsed.data.plan ? { plan: parsed.data.plan } : {}),
+    ...(parsed.data.expires_at ? { expiresAt: parsed.data.expires_at } : {}),
+    updatedAt: new Date().toISOString(),
+  };
 
-  const updated = await prisma.individualSubscription.update({
-    where: { id: sub.id },
-    data: updateData,
+  await prisma.profile.update({
+    where: { id: userId },
+    data: { rawData: { ...prevRaw, subscription: updatedSub } },
   });
 
-  broadcast('subscription', userId, updated);
-  res.json({ success: true, data: updated });
+  broadcast('subscription', userId, updatedSub);
+  res.json({ success: true, data: updatedSub });
 });
 
 // ── Chats & Messages ──────────────────────────────────────────────────────────
@@ -220,15 +225,20 @@ writesRouter.patch('/calls/:callId', requireAuth, async (req, res) => {
 
   const call = await prisma.call.findUnique({ where: { id: callId } });
   if (!call) { notFound(res); return; }
-  if (call.callerId !== auth.userId && call.receiverId !== auth.userId) { forbidden(res); return; }
 
+  const prevRaw = (call.rawData && typeof call.rawData === 'object') ? (call.rawData as Record<string, any>) : {};
+  const callerId = prevRaw.callerId || prevRaw.caller_id;
+  const receiverId = prevRaw.receiverId || prevRaw.receiver_id;
+  if (callerId !== auth.userId && receiverId !== auth.userId) { forbidden(res); return; }
+
+  const nextRaw = { ...prevRaw, status: parsed.data.status, updatedAt: new Date().toISOString() };
   const updated = await prisma.call.update({
     where: { id: callId },
-    data: { status: parsed.data.status },
+    data: { rawData: nextRaw },
   });
 
-  broadcast('call', callId, updated);
-  res.json({ success: true, data: updated });
+  broadcast('call', callId, nextRaw);
+  res.json({ success: true, data: nextRaw });
 });
 
 writesRouter.post('/calls', requireAuth, async (req, res) => {
@@ -245,22 +255,29 @@ writesRouter.post('/calls', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
+  const id = crypto.randomUUID();
+  const rawData = {
+    id,
+    callerId: auth.userId,
+    receiverId: parsed.data.receiver_id,
+    type: parsed.data.type,
+    callerName: parsed.data.caller_name || 'Caller',
+    callerAvatar: parsed.data.caller_avatar || null,
+    chatId: parsed.data.chat_id || null,
+    roomId: parsed.data.room_id || `call_${id}`,
+    status: 'ringing',
+    createdAt: new Date().toISOString(),
+  };
+
   const call = await prisma.call.create({
     data: {
-      id: crypto.randomUUID(),
-      callerId: auth.userId,
-      receiverId: parsed.data.receiver_id,
-      type: parsed.data.type,
-      callerName: parsed.data.caller_name,
-      callerAvatar: parsed.data.caller_avatar,
-      chatId: parsed.data.chat_id,
-      roomId: parsed.data.room_id,
-      status: 'ringing',
+      id,
+      rawData,
     },
   });
 
-  broadcast('call', call.id, call);
-  res.status(201).json({ success: true, data: call });
+  broadcast('call', call.id, rawData);
+  res.status(201).json({ success: true, data: rawData });
 });
 
 // ── Zone membership writes ────────────────────────────────────────────────────
@@ -302,28 +319,14 @@ writesRouter.post('/members/zone-join', requireAuth, async (req, res) => {
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
   if (parsed.data.is_hq) {
-    await prisma.hqMember.upsert({
-      where: { id: `hq_${auth.userId}` },
-      update: {},
-      create: {
-        id: `hq_${auth.userId}`,
-        hqGroupId: parsed.data.zone_id,
-        userId: auth.userId,
-        userEmail: parsed.data.user_email,
-        userName: parsed.data.user_name,
-      },
+    await prisma.profile.update({
+      where: { id: auth.userId },
+      data: { hasHqAccess: true },
     });
   } else {
-    await prisma.zoneMember.upsert({
-      where: { id: `mem_${Date.now()}_${auth.userId}` },
-      update: {},
-      create: {
-        id: `mem_${Date.now()}_${auth.userId}`,
-        zoneId: parsed.data.zone_id,
-        userId: auth.userId,
-        role: 'member',
-        status: 'active',
-      },
+    await prisma.profile.update({
+      where: { id: auth.userId },
+      data: { zoneId: parsed.data.zone_id },
     });
   }
 
@@ -346,7 +349,7 @@ writesRouter.patch('/songs/annotations/:songId', requireAuth, async (req, res) =
   if (ownRecord) {
     const updated = await prisma.mediaDoodle.update({
       where: { id: ownRecord.id },
-      data: { data: parsed.data.data as any, updatedAt: new Date() },
+      data: { data: parsed.data.data as any, rawData: { songId, userId: auth.userId, data: parsed.data.data, updatedAt: new Date().toISOString() } as any },
     });
     res.json({ success: true, data: updated });
   } else {
@@ -356,6 +359,8 @@ writesRouter.patch('/songs/annotations/:songId', requireAuth, async (req, res) =
         userId: auth.userId,
         songId,
         data: parsed.data.data as any,
+        createdAt: new Date(),
+        rawData: { songId, userId: auth.userId, data: parsed.data.data, createdAt: new Date().toISOString() } as any,
       },
     });
     res.json({ success: true, data: created });
@@ -369,27 +374,19 @@ writesRouter.patch('/songs/notes/:songId', requireAuth, async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: 'Invalid body' }); return; }
 
-  const ownRecord = await prisma.userSongNote.findFirst({
-    where: { songId, userId: auth.userId },
+  const noteId = `note_${auth.userId}_${songId}`;
+  const updated = await prisma.userSongNote.upsert({
+    where: { id: noteId },
+    update: {
+      rawData: { songId, userId: auth.userId, notes: parsed.data.notes, updatedAt: new Date().toISOString() },
+    },
+    create: {
+      id: noteId,
+      rawData: { songId, userId: auth.userId, notes: parsed.data.notes, createdAt: new Date().toISOString() },
+    },
   });
 
-  if (ownRecord) {
-    const updated = await prisma.userSongNote.update({
-      where: { id: ownRecord.id },
-      data: { notes: parsed.data.notes, updatedAt: new Date() },
-    });
-    res.json({ success: true, data: updated });
-  } else {
-    const created = await prisma.userSongNote.create({
-      data: {
-        id: crypto.randomUUID(),
-        userId: auth.userId,
-        songId,
-        notes: parsed.data.notes,
-      },
-    });
-    res.json({ success: true, data: created });
-  }
+  res.json({ success: true, data: updated });
 });
 
 // ── OneSignal subscription ID ─────────────────────────────────────────────────

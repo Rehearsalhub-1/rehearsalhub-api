@@ -37,7 +37,7 @@ function shapeSchedule(row: any) {
 router.get(['/', '/programs'], requireAuth, async (req, res) => {
   try {
     const { zoneId } = req.query;
-    const rows = await prisma.scheduleProgram.findMany();
+    const rows = await prisma.program.findMany();
     let data = rows.map(shapeSchedule);
     if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
       const target = String(zoneId).toLowerCase();
@@ -53,7 +53,7 @@ router.get(['/', '/programs'], requireAuth, async (req, res) => {
 
 router.get('/:scheduleId', requireAuth, async (req, res) => {
   try {
-    const row = await prisma.scheduleProgram.findUnique({ where: { id: req.params.scheduleId } });
+    const row = await prisma.program.findUnique({ where: { id: req.params.scheduleId } });
     if (!row) return res.status(404).json({ success: false, error: 'Schedule program not found' });
     res.json({ success: true, data: shapeSchedule(row) });
   } catch (err) {
@@ -72,7 +72,17 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: any, res) => {
     const defaultWeeks = [{ id: 'week_1', name: 'Week 1' }];
     const defaultDays = [{ id: 'day_1', weekId: 'week_1', name: 'Day 1' }];
     const rawData = { id, name, date, zoneId, weeks: req.body.weeks || defaultWeeks, days: req.body.days || defaultDays, dailySchedules: req.body.dailySchedules || [], newSongs: req.body.newSongs || [], carriedOver: req.body.carriedOver || [], swapped: req.body.swapped || [], nameChanges: req.body.nameChanges || [], invalidSongs: req.body.invalidSongs || [], isArchived: false, isCurrent: false, createdBy: res.locals.auth?.userId || null, createdAt: now.toISOString(), updatedAt: now.toISOString() };
-    const inserted = await prisma.scheduleProgram.create({ data: { id, name, date, createdAt: now, rawData } });
+    const inserted = await prisma.program.create({
+      data: {
+        id,
+        name,
+        date,
+        category: 'schedule',
+        zoneId: zoneId !== 'global' ? zoneId : null,
+        createdAt: now,
+        rawData,
+      },
+    });
     res.status(201).json({ success: true, message: 'Program created', data: shapeSchedule(inserted) });
   } catch (err: any) {
     console.error('[schedule:create]', err);
@@ -83,11 +93,18 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: any, res) => {
 router.patch('/:scheduleId', requireAuth, requireTenantAdmin, async (req: any, res) => {
   try {
     const { scheduleId } = req.params;
-    const existing = await prisma.scheduleProgram.findUnique({ where: { id: scheduleId } });
+    const existing = await prisma.program.findUnique({ where: { id: scheduleId } });
     if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
     const existingRaw = (existing.rawData as Record<string, any>) || {};
     const updatedRaw = { ...existingRaw, ...req.body, id: scheduleId, updatedAt: new Date().toISOString(), updatedBy: res.locals.auth.userId };
-    const updated = await prisma.scheduleProgram.update({ where: { id: scheduleId }, data: { name: req.body.name || existing.name, date: req.body.date || existing.date, rawData: updatedRaw } });
+    const updated = await prisma.program.update({
+      where: { id: scheduleId },
+      data: {
+        name: req.body.name || existing.name,
+        date: req.body.date || existing.date,
+        rawData: updatedRaw,
+      },
+    });
     res.json({ success: true, message: 'Schedule updated', data: shapeSchedule(updated) });
   } catch (err: any) {
     console.error('[schedule:patch]', err);
@@ -97,7 +114,7 @@ router.patch('/:scheduleId', requireAuth, requireTenantAdmin, async (req: any, r
 
 router.delete('/:scheduleId', requireAuth, requireTenantAdmin, async (req, res) => {
   try {
-    await prisma.scheduleProgram.delete({ where: { id: req.params.scheduleId } });
+    await prisma.program.delete({ where: { id: req.params.scheduleId } });
     res.json({ success: true, message: 'Schedule program deleted' });
   } catch (err) {
     console.error('[schedule:delete]', err);

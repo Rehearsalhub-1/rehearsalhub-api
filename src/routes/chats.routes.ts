@@ -650,19 +650,17 @@ router.patch('/messages/:messageId/status', requireAuth, async (req, res) => {
       res.status(400).json({ success: false, error: 'Invalid device id' });
       return;
     }
-    const receiptId = `${messageId}:${recipientId}:${deviceId}`;
-    await prisma.messageReceipt.upsert({
-      where: { id: receiptId },
-      update: { status, updatedAt: new Date() },
-      create: {
-        id: receiptId,
-        messageId,
-        recipientId,
-        deviceId,
-        status,
-        updatedAt: new Date(),
-      },
+
+    const raw = (message.rawData && typeof message.rawData === 'object') ? (message.rawData as Record<string, any>) : {};
+    const receipts = { ...(raw.receipts || {}) };
+    receipts[`${recipientId}:${deviceId}`] = { status, updatedAt: new Date().toISOString() };
+    raw.receipts = receipts;
+
+    await prisma.message.update({
+      where: { id: messageId },
+      data: { rawData: raw },
     });
+
     const receipt = { messageId, recipientId, deviceId, status, updatedAt: new Date().toISOString() };
     broadcast('message_receipt', message.chatId, receipt);
     res.json({ success: true, data: receipt });

@@ -9,18 +9,19 @@ const router = Router();
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const rows = await prisma.userFavorite.findMany({
-      where: { OR: [{ id: userId }, { userId }] },
+    const rows = await prisma.playlist.findMany({
+      where: {
+        userId,
+        type: 'favorites',
+      },
     });
 
     const songs = new Set<string>();
     for (const row of rows) {
       const merged = mergeRawRow(row);
-      const fromRaw = asStringArray(merged.songs);
-      if (fromRaw.length > 0) {
-        for (const id of fromRaw) songs.add(id);
-      } else if (typeof row.songId === 'string' && row.songId) {
-        songs.add(row.songId);
+      const fromSongIds = asStringArray(merged.songIds ?? merged.songs ?? row.songIds ?? row.songs);
+      if (fromSongIds.length > 0) {
+        for (const id of fromSongIds) songs.add(id);
       } else if (typeof merged.songId === 'string' && merged.songId) {
         songs.add(merged.songId);
       }

@@ -34,26 +34,16 @@ function wantsEnrich(enrich: unknown): boolean {
 // GET /members/mine
 router.get('/mine', requireAuth, async (req, res) => {
   const userId = res.locals.auth.userId as string;
-  const [zoneRows, hqRows, profileRow] = await Promise.all([
-    prisma.zoneMember.findMany({ where: { userId } }),
-    prisma.hqMember.findMany({ where: { userId } }),
-    prisma.profile.findUnique({ where: { id: userId } }),
-  ]);
+  const profile = await prisma.profile.findUnique({ where: { id: userId } });
+  if (!profile) return res.status(404).json({ success: false, error: 'User not found' });
 
-  const augmentedZoneRows: any[] = [...zoneRows];
-  if (profileRow) {
-    const raw = (profileRow.rawData as any) || {};
-    const possibleZoneCodes = new Set<string>(
-      [raw.zoneCode, raw.zone_code].filter(Boolean).map(String)
-    );
-    possibleZoneCodes.forEach((zid) => {
-      if (!augmentedZoneRows.some((z) => z.zoneId === zid)) {
-        augmentedZoneRows.push({ id: `legacy_${zid}`, zoneId: zid, userId, role: profileRow.role || 'member', status: 'active', createdAt: profileRow.createdAt, rawData: null });
-      }
-    });
-  }
+  const raw = (profile.rawData as any) || {};
+  const zoneId = profile.zoneId || raw.zoneId || raw.zone_id || raw.zoneCode || null;
 
-  res.json({ success: true, data: { zoneMembers: augmentedZoneRows, hqMembers: hqRows } });
+  const zoneMembers = zoneId ? [{ id: `zm_${userId}`, zoneId, userId, role: profile.role || 'member', status: profile.status || 'active', createdAt: profile.createdAt, rawData: null }] : [];
+  const hqMembers = profile.hasHqAccess ? [{ id: `hqm_${userId}`, hqGroupId: 'hq', userId, userEmail: profile.email, userName: profile.name, role: profile.role || 'member', status: profile.status || 'active', rawData: null }] : [];
+
+  res.json({ success: true, data: { zoneMembers, hqMembers } });
 });
 
 // GET /members/by-user/:userId
@@ -64,20 +54,34 @@ router.get('/by-user/:userId', requireAuth, async (req, res) => {
   const isAdmin = auth.role === 'admin' || auth.role === 'hq_admin';
   if (!isSelf && !isAdmin) return res.status(403).json({ success: false, error: 'Forbidden' });
 
-  const [zoneRows, hqRows] = await Promise.all([
-    prisma.zoneMember.findMany({ where: { userId } }),
-    prisma.hqMember.findMany({ where: { userId } }),
-  ]);
-  res.json({ success: true, data: { zoneMembers: zoneRows, hqMembers: hqRows } });
+  const profile = await prisma.profile.findUnique({ where: { id: userId } });
+  if (!profile) return res.status(404).json({ success: false, error: 'User not found' });
+
+  const raw = (profile.rawData as any) || {};
+  const zoneId = profile.zoneId || raw.zoneId || raw.zone_id || raw.zoneCode || null;
+
+  const zoneMembers = zoneId ? [{ id: `zm_${userId}`, zoneId, userId, role: profile.role || 'member', status: profile.status || 'active', createdAt: profile.createdAt, rawData: null }] : [];
+  const hqMembers = profile.hasHqAccess ? [{ id: `hqm_${userId}`, hqGroupId: 'hq', userId, userEmail: profile.email, userName: profile.name, role: profile.role || 'member', status: profile.status || 'active', rawData: null }] : [];
+
+  res.json({ success: true, data: { zoneMembers, hqMembers } });
 });
 
 // GET /members/hq
 router.get('/hq', requireAuth, async (req, res) => {
   const auth = res.locals.auth;
   if (auth.role !== 'admin' && auth.role !== 'hq_admin') return res.status(403).json({ success: false, error: 'Forbidden' });
-  const members = await prisma.hqMember.findMany();
-  const data = wantsEnrich(req.query.enrich) ? await enrichMemberships(members as any) : members;
-  res.json({ success: true, data });
+  const profiles = await prisma.profile.findMany({ where: { hasHqAccess: true } });
+  const members = profiles.map((p) => ({
+    id: `hqm_${p.id}`,
+    hqGroupId: 'hq',
+    userId: p.id,
+    userEmail: p.email,
+    userName: p.name,
+    role: p.role || 'member',
+    status: p.status || 'active',
+    profile: p,
+  }));
+  res.json({ success: true, data: members });
 });
 
 // GET /members/hq/:hqGroupId
@@ -85,9 +89,18 @@ router.get('/hq/:hqGroupId', requireAuth, async (req, res) => {
   const auth = res.locals.auth;
   const isHQAdmin = auth.role === 'admin' || auth.role === 'hq_admin' || auth.role === 'super_admin';
   if (!isHQAdmin && auth.zoneId !== req.params.hqGroupId) return res.status(403).json({ success: false, error: 'Forbidden' });
-  const members = await prisma.hqMember.findMany({ where: { hqGroupId: req.params.hqGroupId } });
-  const data = wantsEnrich(req.query.enrich) ? await enrichMemberships(members as any) : members;
-  res.json({ success: true, data });
+  const profiles = await prisma.profile.findMany({ where: { hasHqAccess: true } });
+  const members = profiles.map((p) => ({
+    id: `hqm_${p.id}`,
+    hqGroupId: req.params.hqGroupId,
+    userId: p.id,
+    userEmail: p.email,
+    userName: p.name,
+    role: p.role || 'member',
+    status: p.status || 'active',
+    profile: p,
+  }));
+  res.json({ success: true, data: members });
 });
 
 // GET /members/zone/:zoneId
@@ -96,32 +109,29 @@ router.get('/zone/:zoneId', requireAuth, async (req, res) => {
   const isHQAdmin = auth.role === 'admin' || auth.role === 'hq_admin' || auth.role === 'super_admin';
   const norm = (v: unknown) => String(v || '').replace(/-/g, '').toLowerCase();
   if (!isHQAdmin && norm(auth.zoneId) !== norm(req.params.zoneId)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  const members = await prisma.zoneMember.findMany({ where: { zoneId: req.params.zoneId } });
-  const data = wantsEnrich(req.query.enrich) ? await enrichMemberships(members as any) : members;
-  res.json({ success: true, data });
+  const profiles = await prisma.profile.findMany({ where: { zoneId: req.params.zoneId } });
+  const members = profiles.map((p) => ({
+    id: `zm_${p.id}`,
+    zoneId: req.params.zoneId,
+    userId: p.id,
+    role: p.role || 'member',
+    status: p.status || 'active',
+    profile: p,
+  }));
+  res.json({ success: true, data: members });
 });
 
 // POST /members/zone-join
 router.post('/zone-join', requireAuth, async (req, res) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const { zone_id, is_hq, user_email, user_name } = req.body;
+    const { zone_id, is_hq } = req.body;
     if (!zone_id) return res.status(400).json({ success: false, error: 'Missing zone_id' });
 
     if (is_hq) {
-      const existing = await prisma.hqMember.findFirst({ where: { userId, hqGroupId: zone_id } });
-      if (!existing) {
-        await prisma.hqMember.create({
-          data: { id: Math.random().toString(36).slice(2, 10), hqGroupId: zone_id, userId, userEmail: user_email || null, userName: user_name || null, role: 'member', status: 'active', rawData: {} },
-        });
-      }
+      await prisma.profile.update({ where: { id: userId }, data: { hasHqAccess: true } });
     } else {
-      const existing = await prisma.zoneMember.findFirst({ where: { userId, zoneId: zone_id } });
-      if (!existing) {
-        await prisma.zoneMember.create({
-          data: { id: Math.random().toString(36).slice(2, 10), zoneId: zone_id, userId, role: 'member', status: 'active', rawData: {} },
-        });
-      }
+      await prisma.profile.update({ where: { id: userId }, data: { zoneId: zone_id } });
     }
     res.json({ success: true, message: 'Successfully joined' });
   } catch (err) {
@@ -138,9 +148,9 @@ router.post('/zone-leave', requireAuth, async (req, res) => {
     if (!zone_id) return res.status(400).json({ success: false, error: 'Missing zone_id' });
 
     if (is_hq) {
-      await prisma.hqMember.deleteMany({ where: { userId, hqGroupId: zone_id } });
+      await prisma.profile.update({ where: { id: userId }, data: { hasHqAccess: false } });
     } else {
-      await prisma.zoneMember.deleteMany({ where: { userId, zoneId: zone_id } });
+      await prisma.profile.update({ where: { id: userId }, data: { zoneId: null } });
     }
     res.json({ success: true, message: 'Successfully left zone' });
   } catch (err) {
@@ -163,7 +173,7 @@ const handleAccessRequest = async (req: any, res: any) => {
 
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     prisma.notification.create({
-      data: { id: notifId, title: effectiveRole === 'hq_member' ? 'HQ Group Join Request' : 'New Coordinator Access Request', message: `${userName || userEmail || 'A user'} submitted a request for ${effectiveRole === 'hq_member' ? 'HQ Group Access' : 'Zonal Coordinator Access'}.`, type: 'admin_request', targetAudience: 'hq_admin', createdAt: new Date().toISOString(), rawData: { requestId, userId, requestedRole: effectiveRole, link: '/admin?section=Members' } },
+      data: { id: notifId, title: effectiveRole === 'hq_member' ? 'HQ Group Join Request' : 'New Coordinator Access Request', message: `${userName || userEmail || 'A user'} submitted a request for ${effectiveRole === 'hq_member' ? 'HQ Group Access' : 'Zonal Coordinator Access'}.`, type: 'admin_request', targetAudience: 'hq_admin', createdAt: new Date(), rawData: { requestId, userId, requestedRole: effectiveRole, link: '/admin?section=Members' } },
     }).catch((err) => console.error('[members/request] notif error:', err));
 
     res.json({ success: true, message: 'Request submitted for HQ review', data: { id: requestId } });
@@ -196,16 +206,10 @@ router.post('/admin-requests/:id/approve', requireAuth, requireTenantAdmin, asyn
     if (auth.role !== 'hq_admin' && auth.role !== 'admin') return res.status(403).json({ success: false, error: 'Forbidden' });
 
     const reqRow = await prisma.adminRequest.findUnique({ where: { id: req.params.id } });
-    if (!reqRow) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (!reqRow || !reqRow.userId) return res.status(404).json({ success: false, error: 'Request or user not found' });
 
     const roleToGrant = reqRow.requestedRole || 'zone_admin';
     if (roleToGrant === 'hq_member') {
-      const existingHq = await prisma.hqMember.findFirst({ where: { userId: reqRow.userId } });
-      if (!existingHq) {
-        await prisma.hqMember.create({
-          data: { id: `hqm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, hqGroupId: 'hq_singers', userId: reqRow.userId, userEmail: reqRow.userEmail, userName: reqRow.userName, role: 'member', status: 'active', rawData: {} },
-        });
-      }
       await prisma.profile.update({ where: { id: reqRow.userId }, data: { hasHqAccess: true } });
     } else {
       await prisma.profile.update({ where: { id: reqRow.userId }, data: { role: 'zone_admin' } });
@@ -215,7 +219,7 @@ router.post('/admin-requests/:id/approve', requireAuth, requireTenantAdmin, asyn
 
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     prisma.notification.create({
-      data: { id: notifId, title: 'Request Approved 🎉', message: roleToGrant === 'hq_member' ? 'Your request to join HQ Group has been approved!' : 'Your request for Coordinator access has been approved!', type: 'request_approved', targetUserId: reqRow.userId, createdAt: new Date().toISOString(), rawData: { requestId: req.params.id, status: 'approved' } },
+      data: { id: notifId, title: 'Request Approved 🎉', message: roleToGrant === 'hq_member' ? 'Your request to join HQ Group has been approved!' : 'Your request for Coordinator access has been approved!', type: 'request_approved', targetUserId: reqRow.userId, createdAt: new Date(), rawData: { requestId: req.params.id, status: 'approved' } },
     }).catch((err) => console.error('[members/approve] notif error:', err));
 
     res.json({ success: true, message: `Request approved successfully (${roleToGrant})` });

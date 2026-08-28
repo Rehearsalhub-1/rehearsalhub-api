@@ -165,16 +165,20 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const profile = await prisma.profile.findUnique({ where: { id: profileId } });
   if (!profile) throw new AuthError('User not found', 404);
 
-  const [zoneRows, hqRows] = await Promise.all([
-    prisma.zoneMember.findMany({ where: { userId: profileId } }),
-    prisma.hqMember.findMany({ where: { userId: profileId } }),
-  ]);
+  const zoneId = zoneIdFromProfile(profile);
+  const zoneMembers = zoneId ? [{ id: `zm_${profile.id}`, userId: profile.id, zoneId, role: profile.role || 'member', status: profile.status || 'active' }] : [];
+  const hqMembers = profile.hasHqAccess ? [{ id: `hqm_${profile.id}`, userId: profile.id, hqGroupId: 'hq', role: profile.role || 'member', status: profile.status || 'active', userEmail: profile.email, userName: profile.name }] : [];
 
   return {
-    id: profile.id, email: (profile.email || '').toLowerCase(), role: tokenRole(profile), zoneId: zoneIdFromProfile(profile), firstName: profile.firstName, lastName: profile.lastName,
+    id: profile.id,
+    email: (profile.email || '').toLowerCase(),
+    role: tokenRole(profile),
+    zoneId,
+    firstName: profile.firstName,
+    lastName: profile.lastName,
     memberships: {
-      zoneMembers: zoneRows.map((r) => ({ id: r.id, userId: r.userId, zoneId: r.zoneId, role: r.role, status: r.status })),
-      hqMembers: hqRows.map((r) => ({ id: r.id, userId: r.userId, hqGroupId: r.hqGroupId, role: r.role, status: r.status, userEmail: r.userEmail, userName: r.userName })),
+      zoneMembers,
+      hqMembers,
     },
   };
 }
