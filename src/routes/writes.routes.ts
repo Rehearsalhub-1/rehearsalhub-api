@@ -417,6 +417,23 @@ writesRouter.patch('/songs/notes/:songId', requireAuth, async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+// GET /songs/annotations/:songId — load user's doodle strokes for a song
+writesRouter.get('/songs/annotations/:songId', requireAuth, async (req, res) => {
+  const { songId } = req.params;
+  const auth = res.locals.auth;
+
+  const record = await prisma.mediaDoodle.findFirst({
+    where: { songId, userId: auth.userId },
+  });
+
+  if (!record) {
+    res.json({ success: true, data: null });
+    return;
+  }
+
+  res.json({ success: true, data: record });
+});
+
 // ── OneSignal subscription ID ─────────────────────────────────────────────────
 
 writesRouter.patch('/profiles/:userId/onesignal', requireAuth, async (req, res) => {

@@ -6,36 +6,73 @@ import { broadcast } from '../ws/wsServer';
 
 const router = Router();
 
-/** GET /notifications — per-user read state, audience-scoped, and admin feeds */
+/** GET /notifications — per-user, zone-scoped notifications only */
 router.get('/', requireAuth, async (req, res) => {
   try {
     const auth = res.locals.auth;
     const userId = auth.userId as string;
-    const isAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'zone_admin' || req.query.admin === 'true';
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
+    const isZoneAdmin = auth.role === 'zone_admin' || isHqAdmin;
 
-    const [notifRows, groupRows] = await Promise.all([
-      prisma.notification.findMany({
+    // Resolve the caller's effective organisation ID from tenant middleware or headers
+    const effectiveOrgId = (
+      (req.headers['x-organization-id'] as string) ||
+      (req.headers['x-zone-id'] as string) ||
+      res.locals.tenant?.effectiveZoneId ||
+      auth.zoneId ||
+      ''
+    ).trim();
+
+    // ── 1. DATABASE-LEVEL FILTER ─────────────────────────────────────────────
+    // Only pull rows that COULD be visible to this user:
+    //   a) Addressed directly to this user
+    //   b) Scoped to their organisation
+    //   c) No organisation scope set (global HQ broadcast)
+    //   d) HQ admin sees all rows for their scope
+    //
+    // This prevents the full table scan that was leaking cross-zone data.
+
+    const orgFilter = effectiveOrgId
+      ? {
+          OR: [
+            { organizationId: null },
+            { organizationId: '' },
+            { organizationId: effectiveOrgId },
+            // rawData.target_user_id match handled below in app filter
+          ],
+        }
+      : {};
+
+    const notifRows = await prisma.broadcastNotification.findMany({
+      where: {
+        ...orgFilter,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    }).catch(async () => {
+      // Fallback: try the generic notification model if broadcastNotification fails
+      return prisma.notification.findMany({
+        where: effectiveOrgId ? {
+          OR: [
+            { organizationId: null },
+            { organizationId: '' },
+            { organizationId: effectiveOrgId },
+          ],
+        } : {},
         orderBy: { createdAt: 'desc' },
-        take: 150,
-      }),
-      prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM user_groups WHERE raw_data->>'user_id' = $1 OR raw_data->>'userId' = $1`,
-        userId,
-      ).catch(() => []),
-    ]);
+        take: 100,
+      });
+    });
 
-    const groupNames = new Set<string>();
-    for (const g of groupRows) {
-      const m = mergeRawRow(g);
-      const name = (m.group_name || m.groupName) as string | undefined;
-      if (name) groupNames.add(name);
-    }
+    // ── 2. APP-LEVEL FINE-GRAINED FILTER ────────────────────────────────────
+    // Apply per-notification visibility rules on the already-scoped result set.
 
     const data = notifRows
-      .map((row) => {
+      .map((row: any) => {
         const merged = mergeRawRow(row);
         const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
 
+        // Dismissed by this user — skip
         const dismissedBy = (raw.dismissedBy && typeof raw.dismissedBy === 'object') ? raw.dismissedBy : {};
         if (dismissedBy[userId]) return null;
 
@@ -46,64 +83,63 @@ router.get('/', requireAuth, async (req, res) => {
         const targetUser =
           (raw.target_user_id as string | undefined) ||
           (raw.targetUserId as string | undefined);
-        const targetGroup =
-          (raw.target_group as string | undefined) || (raw.targetGroup as string | undefined);
+        const notifZone = (row.organizationId || (raw.zoneId as string) || (raw.zone_id as string) || (raw.target_zone_id as string) || '').trim();
 
-        const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
-        const isZoneAdmin = auth.role === 'zone_admin' || isHqAdmin;
-        const effectiveOrgId = ((req.headers['x-organization-id'] as string) || (req.headers['x-zone-id'] as string) || res.locals.tenant?.effectiveZoneId || auth.zoneId || '').trim();
-
-        // Strict visibility resolution based on active organization scope
         let visible = false;
 
+        // Direct user notification — only show to the target user
         if (targetUser) {
-          if (targetUser === userId) {
-            visible = true;
-          } else if (req.query.admin === 'true' && isHqAdmin) {
-            visible = true;
-          }
-        } else if (audience === 'hq_admin') {
+          visible = targetUser === userId || isHqAdmin;
+        }
+        // HQ-admin-only notification
+        else if (audience === 'hq_admin') {
           visible = isHqAdmin;
-        } else if (audience === 'zone_admin') {
+        }
+        // Zone-admin-only notification
+        else if (audience === 'zone_admin') {
           visible = isZoneAdmin;
-        } else if (audience === 'group' && targetGroup) {
-          visible = groupNames.has(targetGroup) || isHqAdmin;
-        } else if (audience === 'all' || audience === 'broadcast') {
-          const notifZone = (row.organizationId || (raw.zoneId as string) || (raw.zone_id as string) || '').trim();
+        }
+        // Broadcast to all / general announcement
+        else if (audience === 'all' || audience === 'broadcast' || !audience) {
           if (!notifZone || notifZone === 'all' || notifZone === 'global') {
-            visible = true;
-          } else if (effectiveOrgId && notifZone) {
-            const uNorm = effectiveOrgId.replace(/-/g, '').toLowerCase();
-            const nNorm = notifZone.replace(/-/g, '').toLowerCase();
-            if (uNorm === nNorm || effectiveOrgId.toLowerCase() === notifZone.toLowerCase()) {
-              visible = true;
+            // Truly global — only show if HQ admin, OR the user has no specific zone
+            // Regular singers only see global notifications if they have no zone scope
+            visible = isHqAdmin || !effectiveOrgId;
+          } else {
+            // Zone-scoped broadcast — only show to that zone
+            if (effectiveOrgId) {
+              const uNorm = effectiveOrgId.replace(/-/g, '').toLowerCase();
+              const nNorm = notifZone.replace(/-/g, '').toLowerCase();
+              visible = uNorm === nNorm;
+            } else {
+              visible = isHqAdmin;
             }
           }
-        } else if (isAdmin) {
-          const notifZone = (row.organizationId || (raw.zoneId as string) || (raw.zone_id as string) || '').trim();
-          if (!notifZone || notifZone === 'all' || notifZone === 'global' || notifZone === effectiveOrgId) {
-            visible = true;
-          }
+        }
+        // Any other audience — only admins see it
+        else {
+          visible = isZoneAdmin;
         }
 
         if (!visible) return null;
 
+        // Build the notification object
         const title = row.title || (raw.title as string) || (merged.title as string) || 'Broadcast Notification';
         const message = row.message || (raw.message as string) || (raw.body as string) || (raw.text as string) || (merged.message as string) || (merged.body as string) || '';
         const body = (raw.body as string) || message;
+
+        // Skip empty notifications
+        if (!message.trim() && !body.trim()) return null;
+        if (title.trim() === 'Notification' && !message.trim()) return null;
+
         const category = row.category || (raw.category as string) || (merged.category as string) || 'general';
         const priority = row.priority || (raw.priority as string) || (merged.priority as string) || 'normal';
         const senderName = (raw.sender_name as string) || (raw.senderName as string) || (raw.sentBy as string) || (merged.sender_name as string) || (merged.senderName as string) || 'HQ Administrator';
-        const sentBy = senderName;
-        const createdAt = row.createdAt || (raw.created_at as string) || (raw.createdAt as string) || (merged.created_at as string) || new Date().toISOString();
+        const createdAt = row.createdAt || (raw.created_at as string) || (raw.createdAt as string) || new Date().toISOString();
         const readBy = (raw.readBy && typeof raw.readBy === 'object') ? raw.readBy : {};
         const isRead = Boolean(readBy[userId])
-          || (row as any).isRead === true
           || (raw.is_read === true && (!targetUser || targetUser === userId))
           || (raw.isRead === true && (!targetUser || targetUser === userId));
-
-        if (!message.trim() && !body.trim()) return null;
-        if (title.trim() === 'Notification' && !message.trim()) return null;
 
         return {
           ...merged,
@@ -114,7 +150,7 @@ router.get('/', requireAuth, async (req, res) => {
           category,
           priority,
           senderName,
-          sentBy,
+          sentBy: senderName,
           targetAudience: audience,
           target_audience: audience,
           createdAt,

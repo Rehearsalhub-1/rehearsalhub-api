@@ -379,4 +379,88 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: any, res) => 
   }
 });
 
+/** POST /attendance/code — Create, update, or deactivate an attendance check-in code */
+router.post('/code', requireAuth, requireTenantAdmin, async (req: any, res) => {
+  try {
+    const auth = res.locals.auth;
+    const { code, validMinutes, active, zoneId: bodyZoneId } = req.body;
+
+    const effectiveZoneId = req.tenant?.effectiveZoneId || bodyZoneId || auth.zoneId || 'general';
+    const settingKey = `attendance_code_${effectiveZoneId}`;
+
+    if (active === false) {
+      // Deactivate
+      await prisma.setting.upsert({
+        where: { id: settingKey },
+        update: { value: { active: false, code: '', expiresAt: null }, updatedAt: new Date() },
+        create: { id: settingKey, key: settingKey, value: { active: false, code: '', expiresAt: null } },
+      });
+      res.json({ success: true, data: { active: false } });
+      return;
+    }
+
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      res.status(400).json({ success: false, error: 'code is required' });
+      return;
+    }
+
+    const minutes = typeof validMinutes === 'number' && validMinutes > 0 ? validMinutes : 60;
+    const createdAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+
+    const value = {
+      code: code.trim().toUpperCase(),
+      active: true,
+      validMinutes: minutes,
+      zoneId: effectiveZoneId,
+      createdAt,
+      expiresAt,
+    };
+
+    await prisma.setting.upsert({
+      where: { id: settingKey },
+      update: { value, updatedAt: new Date() },
+      create: { id: settingKey, key: settingKey, value },
+    });
+
+    res.json({ success: true, data: { code: value.code, active: true, expiresAt } });
+  } catch (err) {
+    console.error('[attendance:code:post]', err);
+    res.status(500).json({ success: false, error: 'Failed to save attendance code' });
+  }
+});
+
+/** GET /attendance/code — Retrieve active attendance code for zone */
+router.get('/code', requireAuth, async (req: any, res) => {
+  try {
+    const auth = res.locals.auth;
+    const effectiveZoneId = req.tenant?.effectiveZoneId || req.query.zoneId || auth.zoneId || 'general';
+    const settingKey = `attendance_code_${effectiveZoneId}`;
+
+    const setting = await prisma.setting.findUnique({ where: { id: settingKey } });
+
+    if (!setting) {
+      res.json({ success: true, data: { active: false } });
+      return;
+    }
+
+    const val = setting.value as Record<string, any>;
+
+    if (!val?.active) {
+      res.json({ success: true, data: { active: false } });
+      return;
+    }
+
+    if (val.expiresAt && new Date(val.expiresAt) < new Date()) {
+      res.json({ success: true, data: { active: false } });
+      return;
+    }
+
+    res.json({ success: true, data: { code: val.code, active: true, expiresAt: val.expiresAt } });
+  } catch (err) {
+    console.error('[attendance:code:get]', err);
+    res.status(500).json({ success: false, error: 'Failed to retrieve attendance code' });
+  }
+});
+
 export default router;

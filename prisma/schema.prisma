@@ -208,9 +208,9 @@ model Membership {
   userId         String       @map("user_id")
   organizationId String       @map("organization_id")
   subgroupId     String?      @map("subgroup_id")
-  role           MemberRole   @default(MEMBER)
+  role           String?      @default("MEMBER")
   voicePart      String?      @map("voice_part")
-  status         MemberStatus @default(ACTIVE)
+  status         String?      @default("ACTIVE")
   hasHqAccess    Boolean      @default(false) @map("has_hq_access")
   permissions    Json?        @default("{}")
   joinedAt       DateTime     @default(now()) @map("joined_at")
@@ -408,7 +408,7 @@ model Category {
   id             String        @id @default(cuid())
   organizationId String?       @map("zone_id")
   name           String?
-  type           CategoryType  @default(PROGRAM)
+  type           String?       @default("PROGRAM")
   color          String?
   order          Int?
   rawData        Json?         @map("raw_data")
@@ -468,7 +468,7 @@ model MediaComment {
 model Chat {
   id             String          @id @default(cuid())
   organizationId String?         @map("organization_id")
-  type           ChatType        @default(DIRECT)
+  type           String?         @default("direct")
   createdById    String          @map("created_by")
   createdAt      DateTime        @default(now()) @map("created_at")
   rawData        Json?           @map("raw_data")
@@ -500,7 +500,7 @@ model Message {
   chatId    String      @map("chat_id")
   senderId  String      @map("sender_id")
   text      String?
-  type      MessageType @default(TEXT)
+  type      String?     @default("text")
   edited    Boolean?    @default(false)
   status    String?
   reactions Json?
@@ -533,7 +533,7 @@ model BroadcastNotification {
   message        String?
   type           String               @default("announcement")
   category       String?
-  priority       NotificationPriority @default(NORMAL)
+  priority       String?              @default("normal")
   actionUrl      String?              @map("action_url")
   createdAt      DateTime             @default(now()) @map("created_at")
   rawData        Json?                @map("raw_data")
@@ -598,7 +598,7 @@ model AdminRequest {
   userId         String?       @map("user_id")
   organizationId String?       @map("zone_id")
   requestedRole  String?       @map("requested_role")
-  status         RequestStatus @default(PENDING)
+  status         String?       @default("pending")
   reason         String?
   reviewedById   String?       @map("reviewed_by")
   reviewedAt     DateTime?     @map("reviewed_at")
@@ -619,7 +619,7 @@ model SubmittedSong {
   userId           String?          @map("user_id")
   zoneId           String?          @map("zone_id")
   title            String?
-  status           SubmissionStatus @default(PENDING)
+  status           String?          @default("pending")
   submittedBy      String?          @map("submitted_by")
   submittedByEmail String?          @map("submitted_by_email")
   createdAt        DateTime?        @default(now()) @map("created_at")
@@ -638,8 +638,8 @@ model SupportTicket {
   organizationId String?        @map("zone_id")
   subject        String?
   category       String?
-  status         TicketStatus   @default(OPEN)
-  priority       TicketPriority @default(NORMAL)
+  status         String?        @default("open")
+  priority       String?        @default("normal")
   lastMessage    String?        @map("last_message")
   lastTimestamp  DateTime?      @map("last_timestamp")
   unreadByAdmin  Int?           @default(0) @map("unread_by_admin")

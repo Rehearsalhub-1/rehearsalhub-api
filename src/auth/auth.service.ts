@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { signAccessToken, generateRefreshToken } from './token';
 import { verifyPassword, hashPassword, validatePasswordStrength } from './password';
 import { revocationStore } from './revocation';
+import { isHQRole } from './permissions';
 
 const HQ_ZONE_CODES = new Set([
   'ZONE001', 'ZONE002', 'ZONE003', 'ZONE004', 'ZONE005',
@@ -59,7 +60,16 @@ function profileFromInternal(row: InternalProfileRow): any {
   return { id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, role: row.role, hasHqAccess: row.has_hq_access, avatarUrl: row.avatar_url, createdAt: row.created_at, rawData: row.raw_data, kingschatId: row.kingschat_id, profileCompleted: row.profile_completed, updatedAt: row.updated_at };
 }
 
-export type AuthUser = { id: string; email: string; role: string; zoneId: string | null; firstName?: string | null; lastName?: string | null };
+export type AuthUser = {
+  id: string;
+  email: string;
+  role: string;
+  zoneId: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  hasHqAccess?: boolean;
+  has_hq_access?: boolean;
+};
 export type AuthTokenResult = { accessToken: string; refreshToken: string; user: AuthUser };
 
 async function issueTokens(profile: any): Promise<AuthTokenResult> {
@@ -127,34 +137,59 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
   }
 
   if (!matchedRow) {
-    await prisma.refreshToken.deleteMany({ where: { userId: profileId } });
     throw new AuthError('Invalid or reused refresh token');
   }
   if (matchedRow.expiresAt <= new Date()) {
-    await prisma.refreshToken.deleteMany({ where: { userId: profileId } });
+    await prisma.refreshToken.deleteMany({ where: { id: matchedRow.id } });
     throw new AuthError('Refresh token expired');
   }
 
-  await prisma.refreshToken.delete({ where: { id: matchedRow.id } });
+  await prisma.refreshToken.deleteMany({ where: { id: matchedRow.id } });
 
-  const user = await prisma.user.findUnique({ where: { id: profileId } });
+  const user = await prisma.user.findUnique({
+    where: { id: profileId },
+    include: {
+      memberships: {
+        include: { organization: true },
+      },
+    },
+  });
   if (!user) throw new AuthError('User not found');
+
+  const hasHq = user.memberships.some((m) => m.hasHqAccess || m.organization.isHq || isHQRole(m.role));
+  const hqMembership = user.memberships.find((m) => isHQRole(m.role));
+  const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
+  const normalizedRole = tokenRole({ role: primaryRole, hasHqAccess: hasHq });
 
   const newRaw = generateRefreshToken();
   const newHash = await bcrypt.hash(newRaw, 12);
-  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), userId: user.id, tokenHash: newHash, expiresAt: refreshExpiresAt() } });
+  await prisma.refreshToken.create({
+    data: {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      tokenHash: newHash,
+      expiresAt: refreshExpiresAt(),
+    },
+  });
 
-  const accessToken = signAccessToken({ sub: user.id, role: tokenRole({ role: null, hasHqAccess: false }), zoneId: zoneIdFromProfile(user) ?? undefined });
+  const accessToken = signAccessToken({
+    sub: user.id,
+    role: normalizedRole,
+    zoneId: primaryZoneId ?? undefined,
+  });
   return { accessToken, refreshToken: newRaw };
 }
 
-export async function logout(jti: string, exp: number, profileId: string, rawRefreshToken: string): Promise<void> {
+export async function logout(jti: string, exp: number, profileId: string, rawRefreshToken?: string): Promise<void> {
   revocationStore.revoke(jti, new Date(exp * 1000));
-  const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
-  for (const row of rows) {
-    if (await bcrypt.compare(rawRefreshToken, row.tokenHash)) {
-      await prisma.refreshToken.delete({ where: { id: row.id } });
-      break;
+  if (rawRefreshToken && profileId) {
+    const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
+    for (const row of rows) {
+      if (await bcrypt.compare(rawRefreshToken, row.tokenHash)) {
+        await prisma.refreshToken.deleteMany({ where: { id: row.id } });
+        break;
+      }
     }
   }
 }
@@ -209,8 +244,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
     userId: user.id,
     organizationId: m.organizationId,
     subgroupId: m.subgroupId,
-    role: m.role,
-    status: m.status,
+    role: m.role || 'MEMBER',
+    status: m.status || 'ACTIVE',
     hasHqAccess: m.hasHqAccess,
     organization: {
       id: m.organization.id,
@@ -240,8 +275,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
       zoneName: m.organization.name,
       subgroupId: m.subgroupId,
       subgroupName: m.subgroup?.name,
-      role: m.role.toLowerCase(),
-      status: m.status.toLowerCase(),
+      role: (m.role || 'member').toLowerCase(),
+      status: (m.status || 'active').toLowerCase(),
     }));
 
   const hqMembers = user.memberships
@@ -250,14 +285,16 @@ export async function getMe(profileId: string): Promise<MeResult> {
       id: m.id,
       userId: user.id,
       hqGroupId: m.organizationId,
-      role: m.role.toLowerCase(),
-      status: m.status.toLowerCase(),
+      role: (m.role || 'member').toLowerCase(),
+      status: (m.status || 'active').toLowerCase(),
       userEmail: user.email,
       userName: user.name,
     }));
 
-  const primaryRole = user.memberships[0]?.role.toLowerCase() || 'member';
-  const primaryZoneId = user.memberships[0]?.organizationId || null;
+  const hasHq = user.memberships.some((m) => m.hasHqAccess || m.organization.isHq || isHQRole(m.role));
+  const hqMembership = user.memberships.find((m) => isHQRole(m.role));
+  const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
 
   return {
     id: user.id,
@@ -266,6 +303,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
     zoneId: primaryZoneId,
     firstName: user.firstName,
     lastName: user.lastName,
+    hasHqAccess: hasHq,
+    has_hq_access: hasHq,
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
   };

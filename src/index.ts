@@ -1,4 +1,4 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -36,6 +36,8 @@ import statusesRouter from './routes/statuses.routes';
 import { writesRouter } from './routes/writes.routes';
 import livekitRouter from './routes/livekit.routes';
 import internalCronRouter from './routes/internal-cron.routes';
+import audiolabRouter from './routes/audiolab.routes';
+import analyticsRouter from './routes/analytics.routes';
 import { createWsServer } from './ws/wsServer';
 import { tenantMiddleware } from './middleware/tenant.middleware';
 import prisma from './lib/prisma';
@@ -89,6 +91,8 @@ const corsOptions: cors.CorsOptions = {
   allowedHeaders: [
     'Content-Type',
     'Authorization',
+    'x-organization-id',
+    'x-selected-zone-id',
     'x-zone-id',
     'x-zone-code',
     'x-church-id',
@@ -96,6 +100,7 @@ const corsOptions: cors.CorsOptions = {
     'x-scope',
     'x-device-id',
     'x-requested-with',
+    'x-api-key',
     'Accept',
     'Origin',
   ],
@@ -186,6 +191,8 @@ app.use('/events', upcomingEventsRouter);
 app.use('/calendar-events', upcomingEventsRouter);
 app.use('/internal/cron', internalCronRouter);
 app.use('/livekit-token', livekitRouter);
+app.use('/audiolab', audiolabRouter);
+app.use('/analytics', analyticsRouter);
 
 // Write endpoints
 app.use('/', writesRouter);
@@ -225,7 +232,7 @@ const httpServer = http.createServer(app);
 createWsServer(httpServer);
 
 httpServer.listen(PORT, async () => {
-  console.log(`🎵 RehearsalHub API running on port ${PORT}`);
+  console.log(`ðŸŽµ RehearsalHub API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Docs:   http://localhost:${PORT}/`);
 
@@ -236,7 +243,7 @@ httpServer.listen(PORT, async () => {
   // Warm up the DB connection on startup via Prisma
   try {
     await prisma.$queryRawUnsafe('SELECT 1');
-    console.log(`   Prisma DB connection warmed up ✓`);
+    console.log(`   Prisma DB connection warmed up âœ“`);
   } catch (e) {
     console.warn(`   DB warmup failed (will retry on first request):`, (e as Error).message);
   }
