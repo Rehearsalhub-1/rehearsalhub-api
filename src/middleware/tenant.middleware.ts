@@ -49,7 +49,7 @@ const HQ_ROLES = new Set(['super_admin', 'admin', 'hq_admin']);
  *
  * Attaches req.tenant so all route handlers can use it directly without re-deriving scope.
  */
-export function resolveTenantScope(req: Request, auth: any): TenantScope {
+export function resolveTenantScope(req: Request, auth: any, res?: Response): TenantScope {
   if (!auth) {
     return {
       mode: 'global',
@@ -104,8 +104,11 @@ export function resolveTenantScope(req: Request, auth: any): TenantScope {
     effectiveZoneId = auth.zoneId || null;
     mode = 'church';
   } else if (isZoneAdmin) {
-    // Zone admins are HARD-LOCKED to their JWT zoneId.
-    effectiveZoneId = auth.zoneId || null;
+    // Zone admins are LOCKED to their ONE admin org.
+    // If verifyAdminScope ran first, use the DB-verified scope.
+    // Otherwise fall back to JWT zoneId (less secure but non-blocking).
+    const dbVerifiedZoneId = (res as any)?.locals?.adminScope?.effectiveZoneId;
+    effectiveZoneId = dbVerifiedZoneId || auth.zoneId || null;
     effectiveChurchId = null;
     mode = effectiveZoneId ? 'zone' : 'global';
   } else {
@@ -137,6 +140,6 @@ export function withTenantTransaction(
 
 export function tenantMiddleware(req: Request, res: Response, next: NextFunction): void {
   const auth = (res as any).locals?.auth;
-  req.tenant = resolveTenantScope(req, auth);
+  req.tenant = resolveTenantScope(req, auth, res);
   next();
 }
