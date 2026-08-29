@@ -14,7 +14,7 @@ const getMinisteredSongsHandler = async (_req: any, res: any) => {
         OR: [
           { isMinistered: true },
           { category: 'Ministered Songs' },
-          { organizationId: 'zone-001' },
+          { category: 'Master Library' },
         ],
       },
       orderBy: { title: 'asc' },

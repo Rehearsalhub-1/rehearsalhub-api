@@ -63,7 +63,7 @@ export function resolveTenantScope(req: Request, auth: any): TenantScope {
   }
 
   const role: string = (auth.role || '').toLowerCase();
-  const isHQAdmin = HQ_ROLES.has(role);
+  const isHQAdmin = HQ_ROLES.has(role) || Boolean(auth.hasHqAccess || auth.has_hq_access);
   const isZoneAdmin = role === 'zone_admin' || role === 'zone_coordinator' || role === 'subgroup_admin' || role === 'subgroup_coordinator';
   const isChurchCoordinator = role === 'church_coordinator';
 

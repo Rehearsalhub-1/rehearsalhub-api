@@ -5,19 +5,18 @@ const sql = postgres(process.env.DATABASE_URL);
 
 async function check() {
   try {
-    const tables = await sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`;
-    console.log('=== All Database Tables ===');
-    console.log(tables.map(t => t.table_name).join(', '));
-
-    const mediaTables = tables.filter(t => 
-      t.table_name.includes('media') || 
-      t.table_name.includes('video') || 
-      t.table_name.includes('asset') || 
-      t.table_name.includes('upload') ||
-      t.table_name.includes('content')
-    );
-
-    console.log('\n=== Media-Related Tables ===');
+    const tables = await sql`
+      SELECT table_schema, table_name 
+      FROM information_schema.tables 
+      WHERE table_name ILIKE '%firebase%' 
+         OR table_name ILIKE '%firestore%' 
+         OR table_name ILIKE '%export%'
+         OR table_name ILIKE '%media%'
+         OR table_name ILIKE '%video%'
+      ORDER BY table_schema, table_name
+    `;
+    console.log('=== Matching Tables Across All Schemas ===');
+    console.log(tables);
     for (const t of mediaTables) {
       console.log(`\n--- TABLE: ${t.table_name} ---`);
       const cols = await sql`SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = ${t.table_name} ORDER BY ordinal_position`;

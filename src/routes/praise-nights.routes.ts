@@ -13,7 +13,7 @@ router.get('/', requireAuth, async (req, res) => {
     const auth = res.locals.auth;
 
     // HQ admins see everything; everyone else scopes to their zone
-    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess || auth.has_hq_access);
     const effectiveZoneId = req.tenant?.effectiveZoneId !== undefined
       ? req.tenant.effectiveZoneId
       : (queryZoneId || (!isHqAdmin ? (auth.zoneId as string | null) : null));

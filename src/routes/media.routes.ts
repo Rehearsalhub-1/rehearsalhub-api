@@ -20,22 +20,23 @@ function parseIsoDate(val: any): string {
 
 function normalizeAsset(row: any, source: 'media_videos' | 'media_assets' | 'zone_media_assets'): any {
   const m = mergeRawRow(row);
-  const url = String(m.url || m.videoUrl || m.video_url || '');
-  const thumbnail = typeof m.thumbnail === 'string' ? m.thumbnail : null;
-  const title = String(m.title || m.name || 'Untitled Asset');
+  const rawVideoUrl = String(m.videoUrl || m.video_url || m.youtubeUrl || m.youtube_url || '');
+  const url = String(m.url || rawVideoUrl || '');
+  const thumbnail = typeof m.thumbnail === 'string' ? m.thumbnail : (typeof m.thumbnailUrl === 'string' ? m.thumbnailUrl : null);
+  const title = String(m.name || m.title || 'Untitled Asset');
   
-  let detectedType = m.type || 'video';
+  let detectedType = String(m.type || m.mediaType || m.category || '').toLowerCase();
   const lowerUrl = url.toLowerCase();
   const lowerTitle = title.toLowerCase();
 
-  if (detectedType === 'audio' || lowerUrl.match(/\.(mp3|wav|m4a|aac|ogg|flac|wma|3gp)$/) || lowerTitle.match(/\.(mp3|wav|m4a|aac|ogg|flac|wma|3gp)$/)) {
+  if (rawVideoUrl || lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be') || lowerUrl.match(/\.(mp4|webm|mov|mkv)$/) || lowerUrl.includes('/videos/') || detectedType === 'video') {
+    detectedType = 'video';
+  } else if (detectedType === 'audio' || lowerUrl.match(/\.(mp3|wav|m4a|aac|ogg|flac|wma|3gp)$/) || lowerUrl.includes('/audio/')) {
     detectedType = 'audio';
-  } else if (detectedType === 'image' || lowerUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|pdf)$/) || lowerTitle.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|pdf)$/)) {
+  } else if (detectedType === 'image' || lowerUrl.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|pdf)$/) || lowerUrl.includes('/images/') || lowerUrl.includes('/thumbnails/')) {
     detectedType = 'image';
-  } else if (detectedType === 'video' || lowerUrl.includes('youtube.com') || lowerUrl.includes('youtu.be') || lowerUrl.match(/\.(mp4|webm|mov|mkv)$/)) {
-    detectedType = 'video';
   } else {
-    detectedType = 'video';
+    detectedType = 'audio';
   }
 
   const isYt = Boolean(
@@ -87,13 +88,27 @@ async function loadAllMediaAssets(): Promise<any[]> {
     return cachedMediaAssets;
   }
 
-  const assetRows = await prisma.mediaAsset.findMany();
-  const combined = assetRows.map((r) => normalizeAsset(r, 'media_assets'));
-  combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  try {
+    const assetRows = await prisma.mediaAsset.findMany();
+    const combined = assetRows.map((r) => normalizeAsset(r, 'media_assets'));
+    combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  cachedMediaAssets = combined;
-  lastMediaCacheTime = now;
-  return combined;
+    cachedMediaAssets = combined;
+    lastMediaCacheTime = now;
+    return combined;
+  } catch (err: any) {
+    console.warn('[media:cache] Retrying database query after connection drop...', err?.message || err);
+    if (cachedMediaAssets && cachedMediaAssets.length > 0) {
+      return cachedMediaAssets;
+    }
+    // Retry once
+    const assetRows = await prisma.mediaAsset.findMany();
+    const combined = assetRows.map((r) => normalizeAsset(r, 'media_assets'));
+    combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    cachedMediaAssets = combined;
+    lastMediaCacheTime = now;
+    return combined;
+  }
 }
 
 // GET /media/stats - Summary counts across all media assets
@@ -122,46 +137,38 @@ router.get('/stats', requireAuth, async (_req, res) => {
   }
 });
 
-// GET /media - List media with filtering, search, and scalable pagination
+// GET /media - List media strictly scoped to the active organization / zone
 router.get('/', requireAuth, async (req: any, res) => {
   try {
-    const { zoneId: requestedZoneId, type, search, featured, isHqOnly, limit, page = '1' } = req.query;
+    const { zoneId: requestedZoneId, organizationId: requestedOrgId, type, search, featured, isHqOnly, limit, page = '1' } = req.query;
     const allAssets = await loadAllMediaAssets();
     const tenant = req.tenant;
-    const zoneId = tenant?.isHQAdmin ? requestedZoneId : tenant?.effectiveZoneId;
+    
+    // Determine the active target tenant (supports all HQ zones like zone-002, zone-orchestra, zone-director, zone-001, and regional zones)
+    const activeZone = requestedZoneId || requestedOrgId || tenant?.effectiveZoneId || (tenant?.isHQAdmin ? 'zone-001' : undefined);
 
     let data = allAssets;
 
-    if (!tenant?.isHQAdmin) {
-      data = data.filter((item) => {
-        if (item.forHq || item.isHqOnly) return false;
-        if (!item.zoneId || item.zoneId === 'global') return true;
-        return item.zoneId === zoneId;
-      });
-    }
-
-    if (type && type !== 'all') {
-      data = data.filter((item) => item.type === type);
-    }
-    if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
-      const target = String(zoneId).toLowerCase();
+    // Strict Tenant Isolation: HQ only sees HQ media, each zone/church only sees its own media
+    if (activeZone && activeZone !== 'all') {
+      const target = String(activeZone).toLowerCase().trim();
       const withoutHyphen = target.replace(/-/g, '');
       const withHyphen = target.includes('-') ? target : target.replace(/^zone(\d+)$/, 'zone-$1');
 
       data = data.filter((item) => {
-        if (item.forHq || (item as any).isHqOnly) return false;
-
-        const itemZone = (item.zoneId || '').toLowerCase();
+        const itemZone = String(item.zoneId || (item as any).organizationId || (item as any).organization_id || '').toLowerCase().trim();
         const itemWithoutHyphen = itemZone.replace(/-/g, '');
 
         return (
           itemZone === target ||
           itemZone === withHyphen ||
-          itemWithoutHyphen === withoutHyphen ||
-          (!item.zoneId && !item.forHq) ||
-          itemZone === 'global'
+          itemWithoutHyphen === withoutHyphen
         );
       });
+    }
+
+    if (type && type !== 'all') {
+      data = data.filter((item) => item.type === type);
     }
     if (featured === 'true') {
       data = data.filter((item) => item.featured);

@@ -15,9 +15,17 @@ function createPrismaClient(): ExtendedPrismaClient {
   const pool = new pg.Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
-    max: 8,
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 30000,
+    max: 10,
+    idleTimeoutMillis: 8000,          // shorter than Supabase's 10s kill timer
+    connectionTimeoutMillis: 10000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 5000,
+    allowExitOnIdle: false,
+  });
+
+  // Catch transient idle socket terminations from cloud pooler (Supabase/PgBouncer)
+  pool.on('error', (err) => {
+    console.warn('[pg-pool] Handled idle connection drop:', err?.message || err);
   });
 
   const adapter = new PrismaPg(pool);

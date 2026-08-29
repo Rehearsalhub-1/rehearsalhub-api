@@ -47,7 +47,12 @@ function directoryDto(row: any) {
     role: row.role,
     hasHqAccess: row.hasHqAccess,
     has_hq_access: row.hasHqAccess,
-    canAnnotate: !!raw.canAnnotate,
+    canAnnotate: !!raw.canAnnotate || !!raw.canUseAnnotation || !!raw.canUseBrush,
+    can_annotate: !!raw.canAnnotate || !!raw.canUseAnnotation || !!raw.canUseBrush,
+    canAccessArchive: !!raw.can_access_archive || !!raw.canAccessArchive || !!raw.canSeeArchive || !!row.hasHqAccess,
+    can_access_archive: !!raw.can_access_archive || !!raw.canAccessArchive || !!raw.canSeeArchive || !!row.hasHqAccess,
+    canAccessPreRehearsal: !!raw.can_access_pre_rehearsal || !!raw.canAccessPreRehearsal,
+    can_access_pre_rehearsal: !!raw.can_access_pre_rehearsal || !!raw.canAccessPreRehearsal,
     hiddenFeatures: raw.hidden_features || raw.hiddenFeatures || {},
     hidden_features: raw.hidden_features || raw.hiddenFeatures || {},
     rawData: raw,
@@ -242,12 +247,12 @@ router.get('/directory', requireAuth, async (req, res) => {
       const zoneId = req.tenant?.effectiveZoneId;
       const normalizedZone = String(zoneId || '').replace(/-/g, '').toLowerCase();
       const memberships = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT user_id FROM zone_members
-         WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
+        `SELECT user_id FROM memberships
+         WHERE (organization_id = $1 OR lower(replace(COALESCE(organization_id, ''), '-', '')) = $1)
            AND user_id = ANY($2::text[])`,
         normalizedZone,
         idList,
-      );
+      ).catch(() => []);
       const allowedIds = new Set(memberships.map((m) => m.user_id));
       const scopedRows = rows.filter((row) => allowedIds.has(row.id) || row.id === auth.userId);
       res.json({ success: true, data: scopedRows.map(directoryDto) });
@@ -267,7 +272,7 @@ router.get('/directory', requireAuth, async (req, res) => {
     const withoutHyphen = targetZone.replace(/-/g, '').toLowerCase();
     const withHyphen = targetZone.includes('-') ? targetZone.toLowerCase() : targetZone.toLowerCase().replace(/^zone(\d+)$/, 'zone-$1');
 
-    const [directProfiles, zmRows, hmRows] = await Promise.all([
+    const [directProfiles, memberRows] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(
         `SELECT * FROM profiles
          WHERE lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
@@ -280,27 +285,19 @@ router.get('/directory', requireAuth, async (req, res) => {
             OR lower(COALESCE(raw_data->>'zone_id', '')) = $2`,
         withoutHyphen,
         withHyphen,
-      ),
+      ).catch(() => []),
       prisma.$queryRawUnsafe<any[]>(
-        `SELECT user_id FROM zone_members
-         WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-            OR lower(COALESCE(zone_id, '')) = $2`,
+        `SELECT user_id FROM memberships
+         WHERE lower(replace(COALESCE(organization_id, ''), '-', '')) = $1
+            OR lower(COALESCE(organization_id, '')) = $2`,
         withoutHyphen,
         withHyphen,
-      ),
-      prisma.$queryRawUnsafe<any[]>(
-        `SELECT user_id FROM hq_members
-         WHERE lower(replace(COALESCE(hq_group_id, ''), '-', '')) = $1
-            OR lower(COALESCE(hq_group_id, '')) = $2`,
-        withoutHyphen,
-        withHyphen,
-      ),
+      ).catch(() => []),
     ]);
 
     const targetUserIds = new Set<string>([
       ...directProfiles.map(p => p.id),
-      ...zmRows.map(z => z.user_id).filter(Boolean),
-      ...hmRows.map(h => h.user_id).filter(Boolean),
+      ...memberRows.map(m => m.user_id).filter(Boolean),
     ]);
 
     if (targetUserIds.size === 0) {
@@ -316,7 +313,7 @@ router.get('/directory', requireAuth, async (req, res) => {
 
   // A non-HQ caller must always receive only their signed tenant directory.
   const rows = await prisma.profile.findMany();
-  const canViewAllProfiles = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
+  const canViewAllProfiles = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || !!auth.hasHqAccess;
   if (canViewAllProfiles) {
     res.json({ success: true, data: rows.map(directoryDto) });
     return;
@@ -324,10 +321,10 @@ router.get('/directory', requireAuth, async (req, res) => {
 
   const normalizedZone = String(req.tenant?.effectiveZoneId || '').replace(/-/g, '').toLowerCase();
   const memberships = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT user_id FROM zone_members
-     WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1`,
+    `SELECT user_id FROM memberships
+     WHERE lower(replace(COALESCE(organization_id, ''), '-', '')) = $1`,
     normalizedZone,
-  );
+  ).catch(() => []);
   const allowedIds = new Set(memberships.map((m) => m.user_id));
   res.json({ success: true, data: rows.filter((row) => allowedIds.has(row.id) || row.id === auth.userId).map(directoryDto) });
 });
@@ -336,7 +333,7 @@ router.get('/directory', requireAuth, async (req, res) => {
 router.get('/:userId', requireAuth, async (req, res) => {
   const { userId } = req.params;
   const auth = res.locals.auth;
-  const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
+  const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || !!auth.hasHqAccess;
   const profile = await prisma.profile.findUnique({ where: { id: userId } });
   if (!profile) {
     res.status(404).json({ success: false, error: 'Profile not found' });
@@ -346,12 +343,12 @@ router.get('/:userId', requireAuth, async (req, res) => {
     const zoneId = req.tenant?.effectiveZoneId;
     const normalizedZone = String(zoneId || '').replace(/-/g, '').toLowerCase();
     const membership = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT id FROM zone_members
-       WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1 AND user_id = $2
+      `SELECT id FROM memberships
+       WHERE (organization_id = $1 OR lower(replace(COALESCE(organization_id, ''), '-', '')) = $1) AND user_id = $2
        LIMIT 1`,
       normalizedZone,
       userId,
-    );
+    ).catch(() => []);
     if (membership.length === 0) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
@@ -452,6 +449,22 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   if (hiddenFeatures !== undefined) {
     raw.hidden_features = hiddenFeatures;
     raw.hiddenFeatures = hiddenFeatures;
+  }
+  if (body.can_access_archive !== undefined || body.canAccessArchive !== undefined) {
+    const val = Boolean(body.can_access_archive ?? body.canAccessArchive);
+    raw.can_access_archive = val;
+    raw.canAccessArchive = val;
+  }
+  if (body.can_access_pre_rehearsal !== undefined || body.canAccessPreRehearsal !== undefined) {
+    const val = Boolean(body.can_access_pre_rehearsal ?? body.canAccessPreRehearsal);
+    raw.can_access_pre_rehearsal = val;
+    raw.canAccessPreRehearsal = val;
+  }
+  if (body.canAnnotate !== undefined || body.can_annotate !== undefined || (body as any).canUseAnnotation !== undefined) {
+    const val = Boolean(body.canAnnotate ?? body.can_annotate ?? (body as any).canUseAnnotation);
+    raw.canAnnotate = val;
+    raw.canUseAnnotation = val;
+    raw.canUseBrush = val;
   }
   if (isHqAdmin && body.role !== undefined) {
     raw.role = body.role;
