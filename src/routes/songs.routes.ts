@@ -7,18 +7,36 @@ import { broadcast } from '../ws/wsServer';
 const router = Router();
 
 // GET /songs/master & /songs/ministered — ministered songs library
-const getMinisteredSongsHandler = async (_req: any, res: any) => {
+const getMinisteredSongsHandler = async (req: any, res: any) => {
   try {
-    const rows = await prisma.song.findMany({
-      where: {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const search = (req.query.search as string || '').trim();
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [
+        { isMinistered: true },
+        { category: 'Ministered Songs' },
+        { category: 'Master Library' },
+      ],
+    };
+
+    if (search) {
+      where.AND = [{
         OR: [
-          { isMinistered: true },
-          { category: 'Ministered Songs' },
-          { category: 'Master Library' },
-        ],
-      },
-      orderBy: { title: 'asc' },
-    });
+          { title: { contains: search, mode: 'insensitive' } },
+          { writer: { contains: search, mode: 'insensitive' } },
+          { leadSinger: { contains: search, mode: 'insensitive' } },
+          { category: { contains: search, mode: 'insensitive' } },
+        ]
+      }];
+    }
+
+    const [total, rows] = await Promise.all([
+      prisma.song.count({ where }),
+      prisma.song.findMany({ where, orderBy: { title: 'asc' }, skip, take: limit }),
+    ]);
     const merged = rows.map((r) => {
       const m = mergeRawRow(r);
       const raw = (r.rawData && typeof r.rawData === 'object') ? (r.rawData as Record<string, any>) : {};
@@ -40,7 +58,7 @@ const getMinisteredSongsHandler = async (_req: any, res: any) => {
         conductorGuide: raw.conductorGuide || raw.conductor_guide || '',
       };
     });
-    res.json({ success: true, count: merged.length, data: merged });
+    res.json({ success: true, count: merged.length, total, page, limit, totalPages: Math.ceil(total / limit), data: merged });
   } catch (err) {
     console.error('[songs/ministered]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -387,63 +405,101 @@ router.get('/annotations/:songId', requireAuth, async (req: any, res: any) => {
 /** GET /songs/history */
 router.get('/history', requireAuth, async (req, res) => {
   try {
-    const { songId, title } = req.query as { songId?: string; title?: string };
+    const { songId, title, programId } = req.query as { songId?: string; title?: string; programId?: string };
     if (!songId && !title) {
       res.status(400).json({ success: false, error: 'Missing songId or title' });
       return;
     }
 
     const sid = typeof songId === 'string' ? songId.trim() : '';
-    const stitle = typeof title === 'string' ? title.trim() : '';
+    let stitle = typeof title === 'string' ? title.trim() : '';
+
+    // Collect all candidate search identifiers for this song
+    const candidateIds = new Set<string>();
+    if (sid) candidateIds.add(sid);
+
+    if (sid) {
+      const songDoc = await prisma.song.findUnique({
+        where: { id: sid },
+        select: { id: true, title: true, rawData: true },
+      });
+      if (songDoc) {
+        if (!stitle && songDoc.title) stitle = songDoc.title.trim();
+        const raw = (songDoc.rawData && typeof songDoc.rawData === 'object') ? (songDoc.rawData as Record<string, any>) : {};
+        if (raw.song_id !== undefined && raw.song_id !== null) candidateIds.add(String(raw.song_id));
+        if (raw.songId !== undefined && raw.songId !== null) candidateIds.add(String(raw.songId));
+        if (raw.id !== undefined && raw.id !== null) candidateIds.add(String(raw.id));
+        if (raw.image !== undefined && raw.image !== null) candidateIds.add(String(raw.image));
+        if (raw.songNumber !== undefined && raw.songNumber !== null) candidateIds.add(String(raw.songNumber));
+      }
+    }
+
+    const idList = Array.from(candidateIds).filter(Boolean);
 
     let rows: any[] = [];
-    if (sid && stitle) {
+    if (idList.length > 0 && stitle) {
       rows = await prisma.$queryRawUnsafe<any[]>(
         `SELECT * FROM song_history
-         WHERE song_id = $1 OR raw_data->>'songId' = $1 OR raw_data->>'song_id' = $1 OR raw_data->>'firebaseId' = $1
-            OR lower(title) = lower($2) OR lower(raw_data->>'title') = lower($2) OR lower(raw_data->>'songTitle') = lower($2)
+         WHERE (song_id = ANY($1::text[]) 
+            OR raw_data->>'songId' = ANY($1::text[])
+            OR raw_data->>'song_id' = ANY($1::text[])
+            OR lower(title) = lower($2) 
+            OR lower(raw_data->>'title') = lower($2)
+            OR lower(raw_data->>'songTitle') = lower($2))
          ORDER BY created_at DESC`,
-        sid,
+        idList,
         stitle,
       );
-    } else if (sid) {
+    } else if (idList.length > 0) {
       rows = await prisma.$queryRawUnsafe<any[]>(
         `SELECT * FROM song_history
-         WHERE song_id = $1 OR raw_data->>'songId' = $1 OR raw_data->>'song_id' = $1 OR raw_data->>'firebaseId' = $1
+         WHERE (song_id = ANY($1::text[]) 
+            OR raw_data->>'songId' = ANY($1::text[])
+            OR raw_data->>'song_id' = ANY($1::text[]))
          ORDER BY created_at DESC`,
-        sid,
+        idList,
       );
     } else if (stitle) {
       rows = await prisma.$queryRawUnsafe<any[]>(
         `SELECT * FROM song_history
-         WHERE lower(title) = lower($1) OR lower(raw_data->>'title') = lower($1) OR lower(raw_data->>'songTitle') = lower($1)
+         WHERE (lower(title) = lower($1) 
+            OR lower(raw_data->>'title') = lower($1)
+            OR lower(raw_data->>'songTitle') = lower($1))
          ORDER BY created_at DESC`,
         stitle,
       );
     }
 
-    const merged = rows.map(mergeRawRow);
+    const data = rows.map((r) => {
+      const merged = mergeRawRow(r);
+      const raw = (r.rawData && typeof r.rawData === 'object') ? (r.rawData as Record<string, any>) : {};
+      const type = r.type || raw.type || 'metadata';
+      const newValue = r.newValue || raw.new_value || raw.newValue || '';
+      const oldValue = r.oldValue || raw.old_value || raw.oldValue || '';
+      const audioUrl = type === 'audio' ? (newValue || raw.audioUrl || raw.audio_url || oldValue) : (raw.audioUrl || raw.audio_url);
+      const createdAt = r.createdAt ? new Date(r.createdAt).toISOString() : (raw.createdAt || raw.created_at || new Date().toISOString());
 
-    if (merged.length === 0 && sid) {
-      const foundSong = await prisma.song.findUnique({ where: { id: sid } });
+      return {
+        ...merged,
+        id: r.id,
+        songId: r.songId || raw.songId || raw.song_id || sid,
+        song_id: r.songId || raw.songId || raw.song_id || sid,
+        type,
+        title: r.title || raw.title || `${type} Update`,
+        description: r.description || raw.description || '',
+        new_value: newValue,
+        newValue,
+        old_value: oldValue,
+        oldValue,
+        audioUrl,
+        createdBy: r.createdBy || raw.created_by || raw.createdBy || 'admin',
+        created_by: r.createdBy || raw.created_by || raw.createdBy || 'admin',
+        createdAt,
+        created_at: createdAt,
+      };
+    });
 
-      if (foundSong) {
-        let history = (foundSong as any).rawData?.history || (foundSong as any).raw_data?.history;
-        if (typeof history === 'string') {
-          try {
-            history = JSON.parse(history);
-          } catch {
-            history = [];
-          }
-        }
-        if (Array.isArray(history) && history.length > 0) {
-          res.json({ success: true, count: history.length, data: history });
-          return;
-        }
-      }
-    }
-
-    res.json({ success: true, count: merged.length, data: merged });
+    res.json({ success: true, count: data.length, data });
   } catch (err) {
     console.error('[songs/history]', err);
     res.status(500).json({ success: false, error: 'Something went wrong' });
@@ -454,7 +510,7 @@ router.get('/history', requireAuth, async (req, res) => {
 router.post('/history', requireAuth, async (req: any, res: any) => {
   try {
     const body = req.body || {};
-    const { songId, type, title, new_value, old_value, description } = body;
+    const { songId, type, title, new_value, old_value, description, programId, praiseNightId } = body;
     if (!songId) {
       res.status(400).json({ success: false, error: 'Missing songId' });
       return;
@@ -463,10 +519,12 @@ router.post('/history', requireAuth, async (req: any, res: any) => {
     const id = body.id || `hist_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const createdBy = body.created_by || req.user?.displayName || req.user?.email || 'Admin';
     const now = new Date();
+    const pid = programId || praiseNightId || null;
 
     const row = {
       id,
       songId,
+      rehearsalId: pid,
       type: type || 'metadata',
       title: title || 'Song Update',
       newValue: typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || ''),
@@ -478,6 +536,8 @@ router.post('/history', requireAuth, async (req: any, res: any) => {
         ...body,
         id,
         songId,
+        programId: pid,
+        praiseNightId: pid,
         type,
         title,
         new_value,

@@ -34,10 +34,16 @@ function asRaw(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
 }
 
-export function tokenRole(profile: { role: string | null; hasHqAccess: boolean | null }): string {
-  if (profile.hasHqAccess) return 'hq_admin';
-  const r = (profile.role || '').toLowerCase();
-  if (r === 'admin' || r === 'hq_admin' || r === 'super_admin') return 'hq_admin';
+export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean | null; rawData?: unknown }): string {
+  // Check hasHqAccess from model field OR rawData (Firebase migrated profiles store it in rawData)
+  const raw = profile.rawData && typeof profile.rawData === 'object' && !Array.isArray(profile.rawData)
+    ? (profile.rawData as Record<string, unknown>) : {};
+  const hasHq = profile.hasHqAccess === true ||
+    raw.has_hq_access === true || raw.has_hq_access === 'true' ||
+    raw.hasHqAccess === true || raw.hasHqAccess === 'true';
+  if (hasHq) return 'hq_admin';
+  const r = (profile.role || String(raw.role || '')).toLowerCase();
+  if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
   if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator') return 'zone_admin';
   if (r === 'church_coordinator') return 'church_coordinator';
   return 'member';
@@ -57,7 +63,30 @@ type InternalProfileRow = {
 };
 
 function profileFromInternal(row: InternalProfileRow): any {
-  return { id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, role: row.role, hasHqAccess: row.has_hq_access, avatarUrl: row.avatar_url, createdAt: row.created_at, rawData: row.raw_data, kingschatId: row.kingschat_id, profileCompleted: row.profile_completed, updatedAt: row.updated_at };
+  // has_hq_access is not a real column in profiles table — it lives in raw_data
+  const rawData = asRaw(row.raw_data);
+  const hasHqAccess = row.has_hq_access === true
+    || rawData.has_hq_access === true
+    || rawData.has_hq_access === 'true'
+    || rawData.hasHqAccess === true
+    || rawData.hasHqAccess === 'true';
+  // role also comes from raw_data for migrated Firebase profiles
+  const role = row.role && row.role !== 'user' ? row.role : (String(rawData.role || '')||null) || row.role;
+  return {
+    id: row.id,
+    email: row.email,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    role,
+    hasHqAccess,
+    has_hq_access: hasHqAccess,
+    avatarUrl: row.avatar_url,
+    createdAt: row.created_at,
+    rawData: row.raw_data,
+    kingschatId: row.kingschat_id,
+    profileCompleted: row.profile_completed,
+    updatedAt: row.updated_at,
+  };
 }
 
 export type AuthUser = {
@@ -72,15 +101,60 @@ export type AuthUser = {
 };
 export type AuthTokenResult = { accessToken: string; refreshToken: string; user: AuthUser };
 
+const ADMIN_MEMBERSHIP_ROLES = new Set([
+  'hq_admin', 'HQ_ADMIN', 'admin', 'ADMIN', 'super_admin', 'SUPER_ADMIN',
+  'boss', 'BOSS', 'zone_admin', 'ZONE_ADMIN', 'zone_coordinator', 'ZONE_COORDINATOR',
+  'coordinator', 'COORDINATOR', 'subgroup_admin', 'SUBGROUP_ADMIN',
+  'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
+]);
+
 async function issueTokens(profile: any): Promise<AuthTokenResult> {
   const email = (profile.email || '').toLowerCase();
-  const role = tokenRole(profile);
-  const zoneId = zoneIdFromProfile(profile);
+
+  // Check ALL memberships to determine the highest role across all orgs.
+  // A user may be a member in one org and admin in another — always issue the highest role.
+  let resolvedRole = tokenRole(profile);
+  let resolvedZoneId = zoneIdFromProfile(profile);
+
+  try {
+    const memberships = await prisma.membership.findMany({
+      where: { userId: profile.id, status: { in: ['ACTIVE', 'active'] } },
+      include: { organization: { select: { id: true, isHq: true } } },
+    });
+
+    if (memberships.length > 0) {
+      const hasAnyAdminRole = memberships.some(m =>
+        ADMIN_MEMBERSHIP_ROLES.has(m.role || '') || m.hasHqAccess || m.organization?.isHq
+      );
+      const hqMembership = memberships.find(m =>
+        m.hasHqAccess || m.organization?.isHq ||
+        ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS'].includes(m.role || '')
+      );
+
+      if (hqMembership) {
+        resolvedRole = 'hq_admin';
+        resolvedZoneId = resolvedZoneId || hqMembership.organizationId;
+      } else if (hasAnyAdminRole) {
+        const adminMembership = memberships.find(m => ADMIN_MEMBERSHIP_ROLES.has(m.role || ''));
+        resolvedRole = tokenRole({ ...profile, role: adminMembership?.role || resolvedRole });
+        resolvedZoneId = resolvedZoneId || adminMembership?.organizationId || null;
+      }
+    }
+  } catch {
+    // Non-blocking — fall back to profile-based role
+  }
+
   const rawRefresh = generateRefreshToken();
   const tokenHash = await bcrypt.hash(rawRefresh, 12);
-  await prisma.refreshToken.create({ data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() } });
-  const accessToken = signAccessToken({ sub: profile.id, role, zoneId: zoneId ?? undefined });
-  return { accessToken, refreshToken: rawRefresh, user: { id: profile.id, email, role, zoneId, firstName: profile.firstName, lastName: profile.lastName } };
+  await prisma.refreshToken.create({
+    data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() },
+  });
+  const accessToken = signAccessToken({ sub: profile.id, role: resolvedRole, zoneId: resolvedZoneId ?? undefined });
+  return {
+    accessToken,
+    refreshToken: rawRefresh,
+    user: { id: profile.id, email, role: resolvedRole, zoneId: resolvedZoneId, firstName: profile.firstName, lastName: profile.lastName },
+  };
 }
 
 export async function register(input: { email: string; password: string; firstName: string; lastName: string; zoneCode: string; designation?: string; kingschatId?: string }): Promise<AuthTokenResult | { pendingApproval: true; userId: string; zoneName?: string }> {
@@ -195,6 +269,21 @@ export async function logout(jti: string, exp: number, profileId: string, rawRef
 }
 
 export type MeResult = AuthUser & {
+  first_name?: string | null;
+  last_name?: string | null;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+  phone?: string | null;
+  canAccessArchive?: boolean;
+  can_access_archive?: boolean;
+  canAccessPreRehearsal?: boolean;
+  can_access_pre_rehearsal?: boolean;
+  canAnnotate?: boolean;
+  can_annotate?: boolean;
+  hiddenFeatures?: Record<string, boolean>;
+  hidden_features?: Record<string, boolean>;
+  raw?: Record<string, any>;
+  rawData?: Record<string, any>;
   memberships: Array<{
     id: string;
     userId: string;
@@ -296,6 +385,15 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
   const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
 
+  const raw = (user.rawData && typeof user.rawData === 'object' && !Array.isArray(user.rawData))
+    ? (user.rawData as Record<string, any>)
+    : {};
+
+  const hiddenFeatures = raw.hidden_features || raw.hiddenFeatures || {};
+  const canAccessArchive = !!(raw.can_access_archive || raw.canAccessArchive || raw.canSeeArchive || hasHq);
+  const canAccessPreRehearsal = !!(raw.can_access_pre_rehearsal || raw.canAccessPreRehearsal);
+  const canAnnotate = !!(raw.canAnnotate || raw.can_annotate || raw.canUseAnnotation);
+
   return {
     id: user.id,
     email: user.email || '',
@@ -303,10 +401,25 @@ export async function getMe(profileId: string): Promise<MeResult> {
     zoneId: primaryZoneId,
     firstName: user.firstName,
     lastName: user.lastName,
+    first_name: user.firstName,
+    last_name: user.lastName,
+    avatar: user.avatarUrl || raw.profile_image_url || raw.avatar_url || raw.avatar || null,
+    avatarUrl: user.avatarUrl || raw.profile_image_url || raw.avatar_url || raw.avatar || null,
+    phone: user.phone || raw.phone_number || raw.phoneNumber || null,
     hasHqAccess: hasHq,
     has_hq_access: hasHq,
+    canAccessArchive,
+    can_access_archive: canAccessArchive,
+    canAccessPreRehearsal,
+    can_access_pre_rehearsal: canAccessPreRehearsal,
+    canAnnotate,
+    can_annotate: canAnnotate,
+    hiddenFeatures,
+    hidden_features: hiddenFeatures,
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
+    raw,
+    rawData: raw,
   };
 }
 

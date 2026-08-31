@@ -33,36 +33,39 @@ router.get('/', requireAuth, async (_req, res) => {
     if (!canManageAllTenants(auth.role)) return res.status(403).json({ success: false, error: 'Forbidden' });
 
     const allProfiles = await prisma.profile.findMany();
-    const data = allProfiles.map((p) => {
-      const rawP = (p?.rawData && typeof p.rawData === 'object') ? (p.rawData as Record<string, any>) : {};
-      const fullName = [p?.firstName, p?.lastName].filter(Boolean).join(' ') || (rawP.first_name ? `${rawP.first_name} ${rawP.last_name || ''}` : '') || 'Singer';
-      const email = p?.email || rawP.email || '';
-      const zoneName = rawP.zoneName || rawP.zone_name || rawP.zone_code || 'Assigned Zone';
-      const sub = rawP.subscription || {
-        id: `sub_${p.id}`,
-        userId: p.id,
-        status: rawP.status === 'active' ? 'active' : 'inactive',
-        tier: 'premium',
-        plan: 'monthly',
-        expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
-      };
-      return {
-        payment: {
-          id: `pay_${p.id}`,
-          userId: p.id,
-          userEmail: email,
-          userName: fullName,
-          amount: 1500,
-          currency: 'USD',
-          status: 'success',
-          subscriptionType: 'individual',
-          subscriptionPeriod: { start: new Date().toISOString(), end: sub.expiresAt },
-          metadata: { zoneId: rawP.zone_code || rawP.zoneId, zoneName },
-          createdAt: new Date().toISOString(),
-        },
-        subscription: sub,
-      };
-    });
+
+    // Only return profiles that have a real subscription record stored in raw_data
+    const data = allProfiles
+      .map((p) => {
+        const rawP = (p?.rawData && typeof p.rawData === 'object') ? (p.rawData as Record<string, any>) : {};
+        const sub = rawP.subscription as Record<string, any> | undefined;
+        if (!sub || !sub.id) return null; // skip profiles with no real subscription
+
+        const fullName = [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Singer';
+        const email = p?.email || rawP.email || '';
+        const zoneName = rawP.zoneName || rawP.zone_name || rawP.zone_code || '';
+
+        return {
+          payment: {
+            id: sub.paymentId || sub.id || `pay_${p.id}`,
+            userId: p.id,
+            userEmail: email,
+            userName: fullName,
+            amount: sub.amount || 0,
+            currency: sub.currency || 'USD',
+            status: sub.paymentStatus || (sub.status === 'active' ? 'success' : 'pending'),
+            subscriptionType: sub.type || sub.subscriptionType || 'individual',
+            subscriptionPeriod: {
+              start: sub.startedAt || sub.createdAt || new Date().toISOString(),
+              end: sub.expiresAt || sub.endsAt || new Date().toISOString(),
+            },
+            metadata: { zoneId: rawP.zone_code || rawP.zoneId, zoneName },
+            createdAt: sub.createdAt || new Date().toISOString(),
+          },
+          subscription: sub,
+        };
+      })
+      .filter(Boolean);
 
     res.json({ success: true, count: data.length, data, subscriptions: data });
   } catch (err) {

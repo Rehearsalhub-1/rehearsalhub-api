@@ -14,6 +14,7 @@ import {
   getKingschatProfiles,
   issueTokensForProfile,
 } from './auth.service';
+import prisma from '../lib/prisma';
 
 const router = Router();
 
@@ -419,22 +420,17 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
       return;
     }
 
-    const { sql } = await import('drizzle-orm');
-    const { db } = await import('../db');
-    const { profiles } = await import('../schema');
     const { sendPasswordResetOtpEmail } = await import('../services/email.service');
 
-    const [profile] = await db.select().from(profiles)
-      .where(sql`lower(${profiles.email}) = ${email}`).limit(1);
+    const profile = await prisma.user.findFirst({ where: { email } });
 
     if (!profile) {
       res.status(404).json({ success: false, error: 'No account registered with this email.' });
       return;
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const expiresAt = Date.now() + 10 * 60 * 1000;
 
     otpStore.set(email, { otp, expiresAt });
 

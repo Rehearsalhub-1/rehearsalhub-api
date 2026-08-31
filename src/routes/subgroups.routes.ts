@@ -59,11 +59,10 @@ router.get('/mine', requireAuth, async (_req, res) => {
     const userId = res.locals.auth.userId as string;
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT * FROM subgroups
-       WHERE coordinator_id = $1
-          OR created_by = $1
-          OR raw_data->>'coordinatorId' = $1
+       WHERE raw_data->>'coordinatorId' = $1
           OR raw_data->>'coordinator_id' = $1
           OR raw_data->>'createdBy' = $1
+          OR raw_data->>'created_by' = $1
           OR (raw_data::jsonb -> 'memberIds') ? $1
           OR (raw_data::jsonb -> 'member_ids') ? $1`,
       userId,
@@ -81,8 +80,8 @@ router.get('/member-rehearsals', requireAuth, async (_req, res) => {
     const userId = res.locals.auth.userId as string;
     const sgs = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
       `SELECT id FROM subgroups
-       WHERE coordinator_id = $1
-          OR created_by = $1
+       WHERE raw_data->>'coordinatorId' = $1
+          OR raw_data->>'coordinator_id' = $1
           OR (raw_data::jsonb -> 'memberIds') ? $1
           OR (raw_data::jsonb -> 'member_ids') ? $1`,
       userId,
@@ -113,11 +112,10 @@ router.get('/coordinated', requireAuth, async (_req, res) => {
     const userId = res.locals.auth.userId as string;
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT * FROM subgroups
-       WHERE coordinator_id = $1
-          OR created_by = $1
-          OR raw_data->>'coordinatorId' = $1
+       WHERE raw_data->>'coordinatorId' = $1
           OR raw_data->>'coordinator_id' = $1
-          OR raw_data->>'createdBy' = $1`,
+          OR raw_data->>'createdBy' = $1
+          OR raw_data->>'created_by' = $1`,
       userId,
     );
     const data = rows.map(shapeSubgroup);

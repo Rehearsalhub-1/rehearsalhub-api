@@ -136,24 +136,39 @@ router.get('/:ticketId/messages', requireAuth, async (req, res) => {
     }
     const messageRows = await prisma.message.findMany({
       where: { chatId: ticketId },
-      orderBy: { id: 'asc' },
     });
 
-    const data = messageRows.map((m) => {
-      const merged = mergeRawRow(m);
-      const raw = (m.rawData && typeof m.rawData === 'object') ? (m.rawData as Record<string, any>) : {};
-      return {
-        ...merged,
-        id: m.id,
-        ticketId: m.chatId,
-        senderId: m.senderId,
-        senderName: (raw.senderName as string) || (m as any).senderName || 'Support User',
-        senderType: raw.senderType || 'user',
-        text: m.text || raw.text || '',
-        message: m.text || raw.text || '',
-        timestamp: raw.createdAt || new Date().toISOString(),
-      };
-    });
+    const data = messageRows
+      .map((m) => {
+        const merged = mergeRawRow(m);
+        const raw = (m.rawData && typeof m.rawData === 'object') ? (m.rawData as Record<string, any>) : {};
+        const rawTime = raw.createdAt || raw.timestamp || raw.time || raw.created_at || (m as any).createdAt;
+        let isoTimestamp = new Date().toISOString();
+        if (rawTime) {
+          if (rawTime instanceof Date) isoTimestamp = rawTime.toISOString();
+          else if (typeof rawTime === 'string') {
+            const d = new Date(rawTime);
+            if (!isNaN(d.getTime())) isoTimestamp = d.toISOString();
+          } else if (typeof rawTime === 'number') {
+            const ms = rawTime > 1e11 ? rawTime : rawTime * 1000;
+            isoTimestamp = new Date(ms).toISOString();
+          } else if (typeof rawTime === 'object' && rawTime._seconds !== undefined) {
+            isoTimestamp = new Date(rawTime._seconds * 1000).toISOString();
+          }
+        }
+        return {
+          ...merged,
+          id: m.id,
+          ticketId: m.chatId,
+          senderId: m.senderId,
+          senderName: (raw.senderName as string) || (m as any).senderName || 'Support User',
+          senderType: raw.senderType || (m.senderId === 'admin' ? 'admin' : 'user'),
+          text: m.text || raw.text || raw.message || '',
+          message: m.text || raw.text || raw.message || '',
+          timestamp: isoTimestamp,
+        };
+      })
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     res.json({ success: true, count: data.length, data });
   } catch (err) {

@@ -69,90 +69,136 @@ function normalizeTimestampToISO(ts: any): string | null {
   return null;
 }
 
-function shapeChat(row: any) {
+function extractChatParticipants(row: any): string[] {
+  const pSet = new Set<string>();
+  const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
+
+  // Extract from composite ID (e.g. UID1_UID2)
+  const idStr = String(row.id || '');
+  if (idStr.includes('_')) {
+    idStr.split('_').forEach(part => {
+      if (part && part.length >= 20 && !part.startsWith('group_')) pSet.add(part);
+    });
+  } else if (idStr.length >= 20 && !idStr.includes('-')) {
+    pSet.add(idStr);
+  }
+
+  // Extract from participants relation / array
+  if (Array.isArray(row.participants)) {
+    row.participants.forEach((p: any) => {
+      const uid = typeof p === 'string' ? p : (p.userId || p.id);
+      if (uid) pSet.add(String(uid));
+    });
+  }
+  if (Array.isArray(raw.participants)) {
+    raw.participants.forEach((p: any) => {
+      const uid = typeof p === 'string' ? p : (p.userId || p.id);
+      if (uid) pSet.add(String(uid));
+    });
+  }
+  if (Array.isArray(raw.memberIds)) {
+    raw.memberIds.forEach((p: any) => { if (p) pSet.add(String(p)); });
+  }
+
+  // Extract from messages relation if loaded
+  if (Array.isArray(row.messages)) {
+    row.messages.forEach((m: any) => {
+      if (m.senderId) pSet.add(String(m.senderId));
+    });
+  }
+
+  if (row.createdById) pSet.add(String(row.createdById));
+  if (raw.createdBy) pSet.add(String(raw.createdBy));
+
+  return Array.from(pSet).filter(Boolean);
+}
+
+function shapeChat(row: any, latestMsgMap?: Map<string, any>) {
   const merged = mergeRawRow(row);
   const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
-  const participants = Array.isArray(merged.participants)
-    ? merged.participants
-    : Array.isArray(row.participants)
-      ? row.participants
-      : [];
+  const participants = extractChatParticipants(row);
 
-  let lastMessageText = 'No messages yet';
-  const lm = raw.lastMessage || raw.last_message || merged.lastMessage || merged.last_message;
-  if (typeof lm === 'string') {
-    lastMessageText = lm;
-  } else if (lm && typeof lm === 'object' && typeof lm.text === 'string') {
-    lastMessageText = lm.text;
+  let lastMessageText = '';
+  let lastTimestamp = normalizeTimestampToISO(raw.lastTimestamp || raw.last_timestamp || raw.last_message_at || raw.updatedAt || row.createdAt) || null;
+
+  const latestMsg = latestMsgMap?.get(row.id);
+  if (latestMsg) {
+    const msgRaw = (latestMsg.rawData && typeof latestMsg.rawData === 'object') ? latestMsg.rawData : {};
+    lastMessageText = latestMsg.text || msgRaw.text || msgRaw.message || (latestMsg.type === 'song_share' ? '🎵 Song shared' : latestMsg.type === 'voice' ? '🎤 Voice message' : latestMsg.type === 'call' ? '📞 Voice call' : 'Message');
+    const msgTs = msgRaw.createdAt || msgRaw.timestamp || latestMsg.createdAt;
+    const norm = normalizeTimestampToISO(msgTs);
+    if (norm) lastTimestamp = norm;
+  } else {
+    const lm = raw.lastMessage || raw.last_message || merged.lastMessage;
+    if (typeof lm === 'string') {
+      lastMessageText = lm;
+    } else if (lm && typeof lm === 'object') {
+      lastMessageText = lm.text || lm.message || '';
+      if (lm.timestamp) {
+        const norm = normalizeTimestampToISO(lm.timestamp);
+        if (norm) lastTimestamp = norm;
+      }
+    }
   }
 
-  const rawLastTimestamp = raw.lastTimestamp || raw.last_timestamp || raw.last_message_at || raw.updatedAt || raw.createdAt;
-  let lastTimestamp = normalizeTimestampToISO(rawLastTimestamp);
-  if (lm && typeof lm === 'object' && lm.timestamp) {
-    const lmIso = normalizeTimestampToISO(lm.timestamp);
-    if (lmIso) lastTimestamp = lmIso;
-  }
-  if (!lastTimestamp) {
-    lastTimestamp = normalizeTimestampToISO(row.createdBy) || null;
-  }
-
-  const createdBy = String(row.createdBy || raw.createdBy || raw.created_by || '');
+  const createdBy = String(row.createdById || row.createdBy || raw.createdBy || raw.created_by || (participants[0] || ''));
 
   return {
     ...merged,
     id: row.id,
     type: row.type ?? (merged.type as string | undefined) ?? 'direct',
-    name: raw.name || raw.userName || raw.user_name || merged.name || 'Support Thread',
+    name: raw.name || raw.userName || raw.user_name || merged.name || '',
     createdBy,
     participants,
     memberIds: participants,
     participantDetails: (merged.participantDetails || row.participantDetails || {}) as Record<string, any>,
+    avatar: raw.avatar || raw.profile_image_url || merged.avatar || null,
     unreadCount: merged.unreadCount || row.unreadCount || 0,
     lastMessage: lastMessageText,
     lastTimestamp,
   };
 }
 
-function chatParticipants(row: any): string[] {
-  const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
-  const participants = Array.isArray(row.participants)
-    ? row.participants
-    : Array.isArray(raw.participants)
-      ? raw.participants
-      : Array.isArray(raw.memberIds)
-        ? raw.memberIds
-        : [];
-  return participants.map(String);
-}
-
 function canAccessChat(row: any, userId: string): boolean {
-  return row.createdBy === userId || chatParticipants(row).includes(userId);
+  return row.createdById === userId || row.createdBy === userId || extractChatParticipants(row).includes(userId);
 }
 
-async function hydrateChats(chatRows: any[]) {
+async function hydrateChats(chatRows: any[], currentUserId?: string) {
   if (!chatRows || chatRows.length === 0) return [];
 
+  const chatIds = chatRows.map(r => r.id);
   const allParticipantIds = new Set<string>();
+
   for (const row of chatRows) {
-    const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
-    const participants = Array.isArray(row.participants)
-      ? row.participants
-      : Array.isArray(raw.participants)
-        ? raw.participants
-        : Array.isArray(raw.memberIds)
-          ? raw.memberIds
-          : [];
-    participants.forEach((id: any) => {
-      if (id && typeof id === 'string') allParticipantIds.add(id);
-    });
-    if (row.createdBy) allParticipantIds.add(row.createdBy);
-    if (raw.createdBy) allParticipantIds.add(raw.createdBy);
+    const pList = extractChatParticipants(row);
+    pList.forEach(id => allParticipantIds.add(id));
+  }
+
+  // Fetch latest message for each chat
+  const msgRows = await prisma.message.findMany({
+    where: { chatId: { in: chatIds } },
+  });
+
+  const latestMsgMap = new Map<string, any>();
+  for (const m of msgRows) {
+    const existing = latestMsgMap.get(m.chatId);
+    const mRaw = (m.rawData && typeof m.rawData === 'object' && !Array.isArray(m.rawData)) ? (m.rawData as Record<string, any>) : {};
+    const mTime = new Date(mRaw.createdAt || mRaw.timestamp || (m as any).createdAt || 0).getTime();
+    if (!existing) {
+      latestMsgMap.set(m.chatId, { ...m, timeMs: mTime });
+    } else if (mTime > existing.timeMs) {
+      latestMsgMap.set(m.chatId, { ...m, timeMs: mTime });
+    }
   }
 
   const profileMap = new Map<string, { name: string; avatar?: string; email?: string; username?: string }>();
   if (allParticipantIds.size > 0) {
     const idArray = Array.from(allParticipantIds);
-    const pRows = await prisma.user.findMany({ where: { id: { in: idArray } } });
+    const [uRows, pRows] = await Promise.all([
+      prisma.user.findMany({ where: { id: { in: idArray } } }),
+      prisma.profile.findMany({ where: { id: { in: idArray } } }),
+    ]);
+
     for (const p of pRows) {
       const rawP = (p.rawData && typeof p.rawData === 'object') ? (p.rawData as Record<string, any>) : {};
       const firstName = p.firstName || rawP.first_name || rawP.firstName || '';
@@ -167,10 +213,27 @@ async function hydrateChats(chatRows: any[]) {
         username: username || undefined,
       });
     }
+
+    for (const u of uRows) {
+      if (!profileMap.has(u.id)) {
+        const rawU = (u.rawData && typeof u.rawData === 'object') ? (u.rawData as Record<string, any>) : {};
+        const firstName = u.firstName || rawU.first_name || rawU.firstName || '';
+        const lastName = u.lastName || rawU.last_name || rawU.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim() || rawU.name || rawU.full_name || rawU.displayName || u.email || 'Member';
+        const avatar = u.avatarUrl || rawU.profile_image_url || rawU.avatar_url || rawU.photoURL || rawU.avatar;
+        const username = (rawU.username || rawU.user_name || rawU.alias || '').replace(/^@/, '');
+        profileMap.set(u.id, {
+          name: fullName,
+          avatar: avatar || undefined,
+          email: u.email || undefined,
+          username: username || undefined,
+        });
+      }
+    }
   }
 
   return chatRows.map((row) => {
-    const shaped = shapeChat(row);
+    const shaped = shapeChat(row, latestMsgMap);
     const details: Record<string, any> = { ...(shaped.participantDetails || {}) };
 
     for (const pid of shaped.participants) {
@@ -178,27 +241,46 @@ async function hydrateChats(chatRows: any[]) {
       if (prof) {
         details[pid] = {
           name: prof.name,
+          displayName: prof.name,
           avatar: prof.avatar,
           email: prof.email,
           username: prof.username,
         };
-      } else if (!details[pid] || details[pid].name === 'Member') {
-        details[pid] = { name: 'Member' };
       }
     }
 
-    if (shaped.createdBy && profileMap.has(shaped.createdBy)) {
-      const creatorProf = profileMap.get(shaped.createdBy)!;
-      details[shaped.createdBy] = {
-        name: creatorProf.name,
-        avatar: creatorProf.avatar,
-        email: creatorProf.email,
-        username: creatorProf.username,
-      };
+    const isGroup = ['group', 'announcement', 'channel'].includes(String(shaped.type || '').toLowerCase());
+    let finalName = shaped.name;
+    let finalAvatar = shaped.avatar;
+
+    if (!isGroup) {
+      // For direct chat, the title should be the OTHER user's name
+      const otherUid = currentUserId 
+        ? shaped.participants.find(p => p !== currentUserId)
+        : shaped.participants[0];
+      
+      const otherProf = otherUid ? profileMap.get(otherUid) : null;
+      if (otherProf?.name) {
+        finalName = otherProf.name;
+      } else if (!finalName || finalName === 'Chat' || finalName === 'Direct Message' || finalName === 'Direct Chat') {
+        finalName = otherProf?.email || 'Direct Chat';
+      }
+
+      if (otherProf?.avatar && !finalAvatar) {
+        finalAvatar = otherProf.avatar;
+      }
+    } else {
+      if (!finalName || finalName === 'Chat' || finalName === 'Direct Message' || finalName === 'Direct Chat') {
+        finalName = (row.organizationId === 'zone-001' ? 'Your Loveworld Singers' : row.organizationId ? `Zone ${row.organizationId} Group` : 'Group Chat');
+      }
     }
 
     return {
       ...shaped,
+      name: finalName,
+      title: finalName,
+      avatar: finalAvatar,
+      isGroup,
       participantDetails: details,
     };
   });
@@ -211,6 +293,13 @@ router.get('/', requireAuth, async (req, res) => {
     const userId = auth.userId as string;
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin';
     const showAll = isHqAdmin && req.query.all === 'true';
+
+    const userMemberships = await prisma.membership.findMany({
+      where: { userId },
+      select: { organizationId: true, subgroupId: true },
+    });
+    const userOrgIds = new Set(userMemberships.map((m) => m.organizationId));
+    if (auth.zoneId) userOrgIds.add(auth.zoneId);
 
     const allRows = await prisma.chat.findMany({
       include: { participants: true },
@@ -228,16 +317,21 @@ router.get('/', requireAuth, async (req, res) => {
           : Array.isArray(raw.participants)
             ? raw.participants
             : [];
-        return (
-          pList.includes(userId) ||
-          r.createdById === userId ||
-          raw.createdBy === userId ||
-          raw.created_by === userId
-        );
+        const isParticipant = pList.includes(userId) || r.createdById === userId || raw.createdBy === userId || raw.created_by === userId;
+        if (isParticipant) return true;
+
+        const chatOrg = r.organizationId || raw.organizationId || raw.zoneId;
+        const chatType = String(r.type || raw.type || '').toLowerCase();
+        const isGroupType = ['group', 'channel', 'announcement'].includes(chatType);
+        if (isGroupType && chatOrg && userOrgIds.has(chatOrg)) {
+          return true;
+        }
+
+        return false;
       });
     }
 
-    const data = await hydrateChats(rows);
+    const data = await hydrateChats(rows, userId);
     res.json({ success: true, count: data.length, data });
   } catch (err) {
     console.error('[chats/]', err);
@@ -258,7 +352,7 @@ router.get('/:chatId', requireAuth, async (req, res) => {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
-    const [hydrated] = await hydrateChats([row]);
+    const [hydrated] = await hydrateChats([row], res.locals.auth.userId);
     res.json({ success: true, data: hydrated });
   } catch (err) {
     console.error('[chats/:id]', err);
@@ -335,7 +429,8 @@ router.post('/', requireAuth, async (req, res) => {
       updatedAt: now,
     };
 
-    const chatType = String(type).toUpperCase() === 'GROUP' ? 'GROUP' : String(type).toUpperCase() === 'ANNOUNCEMENT' ? 'ANNOUNCEMENT' : 'DIRECT';
+    const isGroupChat = Boolean(req.body.isGroup || String(type).toUpperCase() === 'GROUP' || id.startsWith('group_') || (name && String(name).trim() !== ''));
+    const chatType = isGroupChat ? 'GROUP' : String(type).toUpperCase() === 'ANNOUNCEMENT' ? 'ANNOUNCEMENT' : 'DIRECT';
 
     const chat = await prisma.chat.create({
       data: {

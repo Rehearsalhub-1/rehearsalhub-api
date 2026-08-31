@@ -54,24 +54,30 @@ router.get('/', requireAuth, async (req, res) => {
         cleanZone === 'loveworld-singers-hq';
 
       if (isHqGroup || effectiveZoneId === 'all') {
-        const progs = await prisma.program.findMany();
+        const progs = await prisma.program.findMany({
+          where: { subgroupId: null },
+        });
         rows = progs.map(mergeRawRow);
       } else {
         const progs = await prisma.$queryRawUnsafe<any[]>(
           `SELECT * FROM programs
-           WHERE scope = 'hq'
-              OR lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-              OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
-              OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1
-              OR lower(replace(COALESCE(raw_data->>'zone_id', ''), '-', '')) = $1`,
+           WHERE subgroup_id IS NULL
+             AND (
+               lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
+               OR lower(COALESCE(zone_id, '')) = $2
+               OR lower(replace(COALESCE(raw_data->>'zone_code', ''), '-', '')) = $1
+               OR lower(replace(COALESCE(raw_data->>'zoneId', ''), '-', '')) = $1
+               OR lower(replace(COALESCE(raw_data->>'zone_id', ''), '-', '')) = $1
+             )`,
           withoutHyphen,
           withHyphen,
         );
         rows = progs.map(mergeRawRow);
       }
     } else {
-      const progs = await prisma.program.findMany();
+      const progs = await prisma.program.findMany({
+        where: { subgroupId: null },
+      });
       rows = progs.map(mergeRawRow);
     }
 

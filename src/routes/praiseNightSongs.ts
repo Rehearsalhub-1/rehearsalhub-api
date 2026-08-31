@@ -1,25 +1,38 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { mergeRawRow } from '../lib/rawRow';
 
 const router = Router();
 
 // GET /api/praise-night-songs
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { praiseNightId, zoneId } = req.query;
-    const where: any = {};
-    if (praiseNightId) {
-      where.programSongs = { some: { programId: praiseNightId as string } };
+    const { praiseNightId, programId, zoneId } = req.query;
+    const targetProgramId = (programId || praiseNightId) as string | undefined;
+
+    let rows: any[] = [];
+
+    if (targetProgramId) {
+      // Query by programId direct column + rawData fallbacks
+      rows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM songs
+         WHERE praise_night_id = $1
+            OR raw_data->>'praiseNightId' = $1
+            OR raw_data->>'programId' = $1
+            OR raw_data->>'praise_night_id' = $1
+         ORDER BY title ASC`,
+        targetProgramId
+      );
     } else if (zoneId) {
-      where.organizationId = zoneId as string;
+      rows = await prisma.song.findMany({
+        where: { organizationId: zoneId as string },
+        orderBy: { title: 'asc' },
+      });
+    } else {
+      rows = await prisma.song.findMany({ orderBy: { title: 'asc' } });
     }
 
-    const rows = await prisma.song.findMany({
-      where,
-      select: { id: true, title: true, key: true, tempo: true, category: true, writer: true, conductor: true, leadSinger: true, drummer: true, audioFile: true, audioUrls: true, lyrics: true, categories: true, status: true, isActive: true, organizationId: true, rawData: true, createdAt: true, updatedAt: true },
-    });
-
-    res.json({ success: true, count: rows.length, data: rows });
+    res.json({ success: true, count: rows.length, data: rows.map(mergeRawRow) });
   } catch (error) {
     console.error('Error fetching praise night songs:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch praise night songs' });
@@ -31,7 +44,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const song = await prisma.song.findUnique({ where: { id: req.params.id } });
     if (!song) return res.status(404).json({ success: false, error: 'Song not found' });
-    res.json({ success: true, data: song });
+    res.json({ success: true, data: mergeRawRow(song) });
   } catch (error) {
     console.error('Error fetching song:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch song' });

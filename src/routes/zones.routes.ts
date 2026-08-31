@@ -5,7 +5,7 @@ import { requireAuth } from '../auth/auth.middleware';
 const router = Router();
 
 // GET /organizations (or /zones) - List all organizations
-router.get('/', requireAuth, async (_req, res) => {
+router.get('/', async (_req, res) => {
   const rows = await prisma.organization.findMany({
     orderBy: { name: 'asc' },
     include: {
@@ -73,7 +73,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // GET /organizations/:organizationId (or /zones/:zoneId)
-router.get('/:zoneId', requireAuth, async (req, res) => {
+router.get('/:zoneId', async (req, res) => {
   const zone = await prisma.organization.findUnique({
     where: { id: req.params.zoneId },
     include: {

@@ -62,7 +62,10 @@ function normalizeAsset(row: any, source: 'media_videos' | 'media_assets' | 'zon
     featured: Boolean(m.featured),
     views: typeof m.views === 'number' ? m.views : 0,
     likes: typeof m.likes === 'number' ? m.likes : 0,
-    zoneId: typeof m.zoneId === 'string' ? m.zoneId : String(m.zone_id || 'global'),
+    zoneId: typeof m.zoneId === 'string' ? m.zoneId : String(m.zone_id || m.organizationId || m.organization_id || 'global'),
+    organizationId: typeof m.organizationId === 'string' ? m.organizationId : (typeof m.organization_id === 'string' ? m.organization_id : (typeof m.zoneId === 'string' ? m.zoneId : String(m.zone_id || ''))),
+    subgroupId: typeof m.subgroupId === 'string' ? m.subgroupId : (typeof m.subgroup_id === 'string' ? m.subgroup_id : (typeof m.churchId === 'string' ? m.churchId : null)),
+    churchId: typeof m.churchId === 'string' ? m.churchId : (typeof m.subgroupId === 'string' ? m.subgroupId : (typeof m.subgroup_id === 'string' ? m.subgroup_id : null)),
     createdBy: typeof m.createdBy === 'string' ? m.createdBy : String(m.created_by || ''),
     createdByName: typeof m.createdByName === 'string' ? m.createdByName : String(m.created_by_name || ''),
     createdAt: parseIsoDate(m.createdAt || m.created_at),
@@ -137,15 +140,16 @@ router.get('/stats', requireAuth, async (_req, res) => {
   }
 });
 
-// GET /media - List media strictly scoped to the active organization / zone
+// GET /media - List media strictly scoped to the active organization / zone / church
 router.get('/', requireAuth, async (req: any, res) => {
   try {
-    const { zoneId: requestedZoneId, organizationId: requestedOrgId, type, search, featured, isHqOnly, limit, page = '1' } = req.query;
+    const { zoneId: requestedZoneId, organizationId: requestedOrgId, subgroupId: requestedSubgroupId, churchId: requestedChurchId, type, search, featured, isHqOnly, limit, page = '1' } = req.query;
     const allAssets = await loadAllMediaAssets();
     const tenant = req.tenant;
     
     // Determine the active target tenant (supports all HQ zones like zone-002, zone-orchestra, zone-director, zone-001, and regional zones)
     const activeZone = requestedZoneId || requestedOrgId || tenant?.effectiveZoneId || (tenant?.isHQAdmin ? 'zone-001' : undefined);
+    const activeSubgroup = requestedSubgroupId || requestedChurchId || tenant?.effectiveChurchId;
 
     let data = allAssets;
 
@@ -164,6 +168,14 @@ router.get('/', requireAuth, async (req: any, res) => {
           itemZone === withHyphen ||
           itemWithoutHyphen === withoutHyphen
         );
+      });
+    }
+
+    if (activeSubgroup && activeSubgroup !== 'all') {
+      const targetSg = String(activeSubgroup).trim();
+      data = data.filter((item) => {
+        const itemSg = String(item.subgroupId || item.churchId || '');
+        return itemSg === targetSg;
       });
     }
 
