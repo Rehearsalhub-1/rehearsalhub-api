@@ -421,10 +421,33 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
       return;
     }
 
-    const profile = await prisma.user.findFirst({ where: { email } });
+    // DB lookup with hard timeout so it can never hang the request
+    const dbTimeout = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('DB_TIMEOUT')), 8000)
+    );
+
+    let profile: { id: string; firstName: string | null } | null;
+    try {
+      profile = await Promise.race([
+        prisma.user.findFirst({
+          where: { email },
+          select: { id: true, firstName: true },
+        }),
+        dbTimeout,
+      ]);
+    } catch (dbErr: any) {
+      if (dbErr?.message === 'DB_TIMEOUT') {
+        console.error('[auth/forgot-password/send-otp] DB lookup timed out');
+        res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.' });
+        return;
+      }
+      throw dbErr;
+    }
 
     if (!profile) {
-      res.status(404).json({ success: false, error: 'No account registered with this email.' });
+      // Security: don't reveal if email exists — respond success regardless
+      // This prevents email enumeration attacks
+      res.json({ success: true, message: `If that email is registered, a code has been sent.` });
       return;
     }
 
