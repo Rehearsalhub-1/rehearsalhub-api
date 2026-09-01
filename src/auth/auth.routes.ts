@@ -43,11 +43,11 @@ const passwordResetLimiter = rateLimit({
 });
 
 const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
+  windowMs: 10 * 60 * 1000, // 10-minute window
+  max: 10,                   // 10 attempts per window
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many OTP requests, please try again later.' },
+  message: { success: false, error: 'Too many OTP requests. Please wait a few minutes before trying again.' },
 });
 
 const loginSchema = z.object({
