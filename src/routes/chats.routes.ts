@@ -28,6 +28,62 @@ function getUserDisplayName(u: any): string {
 function formatMessage(m: any) {
   const sender = m.sender || {};
   const senderName = getUserDisplayName(sender);
+
+  let displayText = m.text || '';
+  let playlistData = m.playlistData || null;
+  let songData = m.songData || null;
+  let profileData = m.profileData || m.contactData || null;
+  let pollOptions = m.pollOptions || null;
+  let audioUrl = m.audioUrl || m.mediaUrl || m.voiceUrl || null;
+  let documentName = m.documentName || null;
+  let documentSize = m.documentSize || null;
+  let replyTo = m.replyTo || null;
+
+  if (typeof m.text === 'string' && m.text.startsWith('{') && m.text.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(m.text);
+      if (parsed && typeof parsed === 'object') {
+        displayText = parsed.text || '';
+        playlistData = parsed.playlistData || playlistData;
+        songData = parsed.songData || songData;
+        profileData = parsed.profileData || parsed.contactData || profileData;
+        pollOptions = parsed.pollOptions || pollOptions;
+        audioUrl = parsed.audioUrl || parsed.mediaUrl || parsed.voiceUrl || audioUrl;
+        documentName = parsed.documentName || documentName;
+        documentSize = parsed.documentSize || documentSize;
+        replyTo = parsed.replyTo || replyTo;
+      }
+    } catch {}
+  }
+
+  // Fallback text parsers if structured payload was legacy formatted text
+  if (m.type === 'playlist_share' && !playlistData && typeof displayText === 'string') {
+    const nameMatch = displayText.match(/💽\s*\*Playlist:\s*([^*]+)\*/i);
+    const countMatch = displayText.match(/(\d+)\s+songs/i);
+    const idMatch = displayText.match(/playlist\/([a-zA-Z0-9_-]+)/i);
+    if (nameMatch) {
+      playlistData = {
+        id: idMatch ? idMatch[1] : 'favs',
+        name: nameMatch[1].trim(),
+        songCount: countMatch ? parseInt(countMatch[1]) : 0,
+        songs: [],
+      };
+    }
+  }
+
+  if (m.type === 'song_share' && !songData && typeof displayText === 'string') {
+    const titleMatch = displayText.match(/🎵\s*\*([^*]+)\*/i);
+    const idMatch = displayText.match(/song\/([a-zA-Z0-9_-]+)/i);
+    const singerMatch = displayText.match(/👤\s*([^\n\r]+)/i);
+    if (titleMatch) {
+      songData = {
+        id: idMatch ? idMatch[1] : 'song_1',
+        title: titleMatch[1].trim(),
+        leadSinger: singerMatch ? singerMatch[1].trim() : 'Singer',
+      };
+    }
+  }
+
   return {
     id: m.id,
     chatId: m.chatId,
@@ -35,8 +91,19 @@ function formatMessage(m: any) {
     senderName,
     sender: senderName,
     senderAvatar: sender.avatarUrl || sender.avatar || null,
-    text: m.text || '',
+    text: displayText,
     type: m.type || 'text',
+    playlistData,
+    songData,
+    profileData,
+    contactData: profileData,
+    pollOptions,
+    audioUrl,
+    mediaUrl: audioUrl,
+    voiceUrl: audioUrl,
+    documentName,
+    documentSize,
+    replyTo,
     status: m.status || 'sent',
     edited: m.edited || false,
     createdAt: m.createdAt,
@@ -270,6 +337,7 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
     const { chatId } = req.params;
     const auth = res.locals.auth;
     const text = (req.body.text || req.body.content || req.body.message || '').trim();
+    const type = req.body.type || 'text';
 
     const chat = await prisma.chat.findUnique({
       where: { id: chatId },
@@ -282,13 +350,33 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
 
     const messageId = req.body.id || crypto.randomUUID();
 
+    let storedText = text;
+    const hasStructuredData = req.body.playlistData || req.body.songData || req.body.profileData || req.body.contactData || req.body.pollOptions || req.body.media_url || req.body.audioUrl || req.body.voiceUrl || req.body.documentName;
+
+    if (hasStructuredData) {
+      storedText = JSON.stringify({
+        text,
+        playlistData: req.body.playlistData || null,
+        songData: req.body.songData || null,
+        profileData: req.body.profileData || req.body.contactData || null,
+        contactData: req.body.contactData || req.body.profileData || null,
+        pollOptions: req.body.pollOptions || null,
+        audioUrl: req.body.audioUrl || req.body.media_url || req.body.voiceUrl || null,
+        mediaUrl: req.body.media_url || req.body.audioUrl || null,
+        voiceUrl: req.body.voiceUrl || req.body.audioUrl || null,
+        documentName: req.body.documentName || null,
+        documentSize: req.body.documentSize || null,
+        replyTo: req.body.replyTo || null,
+      });
+    }
+
     const message = await prisma.message.create({
       data: {
         id: messageId,
         chatId,
         senderId: auth.userId,
-        text,
-        type: req.body.type || 'text',
+        text: storedText,
+        type,
         status: 'sent',
       },
       include: { sender: true },

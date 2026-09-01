@@ -178,6 +178,8 @@ app.use('/attendance', attendanceRouter);
 app.use('/settings', settingsRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/subgroups', subgroupsRouter);
+app.use('/churches', subgroupsRouter);
+app.use('/groups', subgroupsRouter);
 app.use('/audio', audioRouter);
 app.use('/kingspay', kingspayRouter);
 app.use('/lexicon', lexiconRouter);
@@ -232,7 +234,7 @@ const httpServer = http.createServer(app);
 createWsServer(httpServer);
 
 httpServer.listen(PORT, async () => {
-  console.log(`ðŸŽµ RehearsalHub API running on port ${PORT}`);
+  console.log(`🎵 RehearsalHub API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Docs:   http://localhost:${PORT}/`);
 
@@ -249,8 +251,6 @@ httpServer.listen(PORT, async () => {
   }
 
   // ── Keep-alive self-ping ────────────────────────────────────────────────────
-  // Railway free tier sleeps after ~10 min of inactivity. Ping /health every
-  // 4 minutes to keep the server warm and prevent cold-start delays for users.
   if (process.env.NODE_ENV === 'production') {
     const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
     const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -262,10 +262,8 @@ httpServer.listen(PORT, async () => {
         const res = await fetch(selfUrl, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) console.warn('[keep-alive] Health ping returned:', res.status);
       } catch (err: any) {
-        console.warn('[keep-alive] Self-ping failed:', err?.message || err);
+        console.warn('[keep-alive] Ping failed:', err?.message || err);
       }
     }, PING_INTERVAL_MS);
-
-    console.log(`   Keep-alive: pinging ${selfUrl} every 4 min ✓`);
   }
 });
