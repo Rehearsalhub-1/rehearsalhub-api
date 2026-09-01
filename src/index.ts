@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -243,8 +243,29 @@ httpServer.listen(PORT, async () => {
   // Warm up the DB connection on startup via Prisma
   try {
     await prisma.$queryRawUnsafe('SELECT 1');
-    console.log(`   Prisma DB connection warmed up âœ“`);
+    console.log(`   Prisma DB connection warmed up ✓`);
   } catch (e) {
     console.warn(`   DB warmup failed (will retry on first request):`, (e as Error).message);
+  }
+
+  // ── Keep-alive self-ping ────────────────────────────────────────────────────
+  // Railway free tier sleeps after ~10 min of inactivity. Ping /health every
+  // 4 minutes to keep the server warm and prevent cold-start delays for users.
+  if (process.env.NODE_ENV === 'production') {
+    const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
+    const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/health`
+      : `http://localhost:${PORT}/health`;
+
+    setInterval(async () => {
+      try {
+        const res = await fetch(selfUrl, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) console.warn('[keep-alive] Health ping returned:', res.status);
+      } catch (err: any) {
+        console.warn('[keep-alive] Self-ping failed:', err?.message || err);
+      }
+    }, PING_INTERVAL_MS);
+
+    console.log(`   Keep-alive: pinging ${selfUrl} every 4 min ✓`);
   }
 });
