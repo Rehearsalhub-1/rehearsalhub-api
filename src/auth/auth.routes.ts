@@ -416,69 +416,36 @@ const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
   try {
     const email = req.body.email?.trim()?.toLowerCase();
-    if (!email) {
-      res.status(400).json({ success: false, error: 'Email is required' });
-      return;
-    }
-
-    // DB lookup with hard timeout so it can never hang the request
-    const dbTimeout = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('DB_TIMEOUT')), 8000)
-    );
-
-    let profile: { id: string; firstName: string | null } | null;
-    try {
-      profile = await Promise.race([
-        prisma.user.findFirst({
-          where: { email },
-          select: { id: true, firstName: true },
-        }),
-        dbTimeout,
-      ]);
-    } catch (dbErr: any) {
-      if (dbErr?.message === 'DB_TIMEOUT') {
-        console.error('[auth/forgot-password/send-otp] DB lookup timed out');
-        res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.' });
-        return;
-      }
-      throw dbErr;
-    }
-
-    if (!profile) {
-      // Security: don't reveal if email exists — respond success regardless
-      // This prevents email enumeration attacks
-      res.json({ success: true, message: `If that email is registered, a code has been sent.` });
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ success: false, error: 'A valid email is required.' });
       return;
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
     otpStore.set(email, { otp, expiresAt });
 
-    // Respond immediately — do NOT block on email delivery
-    res.json({ success: true, message: `OTP code sent to ${email}` });
+    // Respond immediately — no DB query needed here
+    // Email existence is validated in the reset-password step
+    res.json({ success: true, message: `If that email is registered, a code has been sent.` });
 
-    // Send email in background with a hard 15s timeout
-    const emailTimeout = new Promise<void>((_, reject) =>
-      setTimeout(() => reject(new Error('Email send timeout')), 15000)
-    );
+    // Fire email in background — 15s hard timeout
     const { sendPasswordResetOtpEmail } = await import('../services/email.service');
-    const singerName = profile.firstName || 'Singer';
     Promise.race([
-      sendPasswordResetOtpEmail(email, singerName, otp),
-      emailTimeout
-    ]).catch((err) => {
-      console.error('[auth/forgot-password/send-otp] Background email failed:', err?.message || err);
+      sendPasswordResetOtpEmail(email, 'Singer', otp),
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
+    ]).catch(err => {
+      console.error('[send-otp] Background email failed:', err?.message || err);
     });
 
   } catch (err: any) {
     console.error('[auth/forgot-password/send-otp]', err);
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: 'Failed to send OTP code' });
+      res.status(500).json({ success: false, error: 'Failed to send OTP code.' });
     }
   }
 });
+
 
 // POST /auth/forgot-password/verify-otp
 router.post('/forgot-password/verify-otp', passwordResetLimiter, async (req, res) => {

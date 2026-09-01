@@ -1,24 +1,41 @@
+import 'dotenv/config';
 import nodemailer from 'nodemailer';
 
-// Configure SMTP Transporter (fallback to console logger if credentials not yet configured in .env)
-const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST;
-const smtpPort = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587);
-const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
-const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.SMTP_PASSWORD;
+// Configure SMTP Transporter with connection pooling for instant dispatch
+function createTransporter() {
+  const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 465);
+  const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.SMTP_PASSWORD;
+
+  if (smtpHost && smtpUser && smtpPass) {
+    return nodemailer.createTransport({
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 5000,
+      socketTimeout: 10000,
+    });
+  }
+  return null;
+}
+
 const fromEmail = process.env.SMTP_FROM || process.env.EMAIL_FROM || '"LoveWorld Singers Rehearsal Hub" <noreply@loveworldsingers.org>';
 
 let transporter: nodemailer.Transporter | null = null;
-
-if (smtpHost && smtpUser && smtpPass) {
-  transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-  });
+function getTransporter() {
+  if (!transporter) {
+    transporter = createTransporter();
+  }
+  return transporter;
 }
 
 interface SendMailOptions {
@@ -30,8 +47,9 @@ interface SendMailOptions {
 
 export async function sendEmail({ to, subject, html, text }: SendMailOptions): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
-    if (transporter) {
-      const info = await transporter.sendMail({
+    const activeTransporter = getTransporter();
+    if (activeTransporter) {
+      const info = await activeTransporter.sendMail({
         from: fromEmail,
         to,
         subject,
@@ -41,6 +59,7 @@ export async function sendEmail({ to, subject, html, text }: SendMailOptions): P
       console.log(`[Email] Sent "${subject}" to ${to} (${info.messageId})`);
       return { success: true, messageId: info.messageId };
     } else {
+
       // Fallback logger for dev/staging
       console.log(`\n========================================`);
       console.log(`📧 [EMAIL SERVICE - DEV DISPATCH]`);
