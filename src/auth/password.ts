@@ -1,10 +1,10 @@
 import bcrypt from 'bcrypt';
 
 const BCRYPT_COST = 12;
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 6;
 
 export function validatePasswordStrength(plain: string): boolean {
-  return plain.length >= MIN_PASSWORD_LENGTH;
+  return typeof plain === 'string' && plain.length >= MIN_PASSWORD_LENGTH;
 }
 
 export function hashPassword(plain: string): Promise<string> {

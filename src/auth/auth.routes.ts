@@ -441,13 +441,10 @@ router.post('/forgot-password/send-otp', async (req, res) => {
 router.post('/forgot-password/verify-otp', async (req, res) => {
   try {
     const email = req.body.email?.trim()?.toLowerCase();
-    const otp = req.body.otp?.trim();
-
     if (!email) {
       res.status(400).json({ success: false, error: 'Email is required' });
       return;
     }
-
     res.json({ success: true, message: 'OTP verified successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to verify OTP' });
@@ -456,17 +453,22 @@ router.post('/forgot-password/verify-otp', async (req, res) => {
 
 // POST /auth/reset-password
 router.post('/reset-password', async (req, res) => {
-  const parsed = resetPasswordSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ success: false, error: 'Please enter a valid email and new password (min. 6 characters).' });
-    return;
-  }
-
   try {
-    const { email, newPassword } = parsed.data;
-    const cleanEmail = email.toLowerCase().trim();
+    const rawEmail = req.body.email || req.body.identifier || req.body.username || '';
+    const cleanEmail = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    const newPassword = req.body.newPassword || req.body.password || req.body.new_password || req.body.newPass || '';
 
-    await resetPasswordForEmail(cleanEmail, newPassword);
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      res.status(400).json({ success: false, error: 'Please enter a valid registered email address.' });
+      return;
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+      res.status(400).json({ success: false, error: 'Password must be at least 6 characters.' });
+      return;
+    }
+
+    await resetPasswordForEmail(cleanEmail, newPassword.trim());
     otpStore.delete(cleanEmail);
 
     res.json({ success: true, message: 'Password has been reset successfully. You can now log in.' });
@@ -475,6 +477,7 @@ router.post('/reset-password', async (req, res) => {
       res.status(err.statusCode).json({ success: false, error: err.message });
       return;
     }
+    console.error('[auth/reset-password error]', err);
     res.status(500).json({ success: false, error: err?.message || 'An error occurred while resetting password' });
   }
 });
