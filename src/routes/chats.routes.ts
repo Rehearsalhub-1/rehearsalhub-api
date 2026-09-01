@@ -110,16 +110,16 @@ function formatMessage(m: any) {
   };
 }
 
-function formatChat(c: any, currentUserId?: string) {
+function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string, any> = {}) {
   const participants: string[] = [];
   const details: Record<string, any> = {};
 
   if (Array.isArray(c.participants)) {
     for (const p of c.participants) {
-      const u = p.user || p;
+      const u = p.user || extraUsersMap[p.userId] || p;
       const uid = p.userId || u.id;
       if (uid) {
-        participants.push(uid);
+        if (!participants.includes(uid)) participants.push(uid);
         const name = getUserDisplayName(u);
         details[uid] = {
           id: uid,
@@ -133,21 +133,54 @@ function formatChat(c: any, currentUserId?: string) {
     }
   }
 
-  const lastMsg = Array.isArray(c.messages) && c.messages.length > 0 ? c.messages[0] : null;
-  const lastSender = lastMsg?.sender;
-  const lastSenderName = getUserDisplayName(lastSender || (lastMsg?.senderId ? details[lastMsg.senderId] : null));
+  // Extract from composite ID (e.g. uid1_uid2) if missing from participants list
+  if (typeof c.id === 'string' && c.id.includes('_')) {
+    const parts = c.id.split('_');
+    for (const uid of parts) {
+      if (uid && !participants.includes(uid)) {
+        participants.push(uid);
+        const u = extraUsersMap[uid];
+        const name = getUserDisplayName(u);
+        details[uid] = {
+          id: uid,
+          name,
+          avatar: u?.avatarUrl || u?.avatar || null,
+          email: u?.email || null,
+          firstName: u?.firstName || u?.first_name || null,
+          lastName: u?.lastName || u?.last_name || null,
+        };
+      }
+    }
+  }
 
-  const isDirect = c.type === 'direct' || (!c.type && participants.length <= 2);
+  const lastMsg = Array.isArray(c.messages) && c.messages.length > 0 ? c.messages[0] : null;
+  const lastSender = lastMsg?.sender || (lastMsg?.senderId ? extraUsersMap[lastMsg.senderId] || details[lastMsg.senderId] : null);
+  const lastSenderName = getUserDisplayName(lastSender);
+
+  let lastMsgText = lastMsg?.text || '';
+  if (typeof lastMsgText === 'string' && lastMsgText.startsWith('{') && lastMsgText.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(lastMsgText);
+      lastMsgText = parsed.text || lastMsgText;
+    } catch {}
+  }
+
+  const isDirect = (c.type || '').toLowerCase() === 'direct' || (!c.type && participants.length <= 2);
   let title = c.title || (isDirect ? 'Direct Message' : 'Group Chat');
   let avatar = c.avatar ? (typeof c.avatar === 'string' ? { uri: c.avatar } : c.avatar) : null;
 
-  // For direct chats, resolve the other participant's actual name and avatar!
+  // For direct chats, resolve the other participant's actual name and avatar
   if (isDirect && currentUserId) {
     const otherId = participants.find(id => id !== currentUserId) || participants[0];
     if (otherId && details[otherId]?.name && details[otherId].name !== 'Member') {
       title = details[otherId].name;
       if (details[otherId].avatar) {
         avatar = { uri: details[otherId].avatar };
+      }
+    } else if (otherId && extraUsersMap[otherId]?.firstName) {
+      title = getUserDisplayName(extraUsersMap[otherId]);
+      if (extraUsersMap[otherId]?.avatarUrl) {
+        avatar = { uri: extraUsersMap[otherId].avatarUrl };
       }
     }
   }
@@ -156,7 +189,7 @@ function formatChat(c: any, currentUserId?: string) {
     id: c.id,
     title,
     name: title,
-    type: c.type || (isDirect ? 'direct' : 'group'),
+    type: isDirect ? 'direct' : 'group',
     isGroup: !isDirect,
     avatar: avatar?.uri || (typeof avatar === 'string' ? avatar : null),
     organizationId: c.organizationId || null,
@@ -164,7 +197,7 @@ function formatChat(c: any, currentUserId?: string) {
     participants,
     participantDetails: details,
     lastMessage: lastMsg ? {
-      text: lastMsg.text || '',
+      text: lastMsgText,
       senderId: lastMsg.senderId,
       senderName: lastSenderName,
       timestamp: lastMsg.createdAt,
@@ -185,9 +218,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const chatRows = await prisma.chat.findMany({
       where: {
-        participants: {
-          some: { userId },
-        },
+        OR: [
+          { participants: { some: { userId } } },
+          { id: { contains: userId } },
+          { createdById: userId },
+          { messages: { some: { senderId: userId } } },
+        ],
       },
       include: {
         participants: {
@@ -202,7 +238,28 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const data = chatRows.map((c) => formatChat(c, userId));
+    // Collect any participant IDs that might not have a joined user relation
+    const missingUserIds = new Set<string>();
+    chatRows.forEach((c) => {
+      if (c.id.includes('_')) {
+        c.id.split('_').forEach((id) => {
+          if (!c.participants.some((p) => p.userId === id)) missingUserIds.add(id);
+        });
+      }
+      c.messages.forEach((m) => {
+        if (m.senderId && !c.participants.some((p) => p.userId === m.senderId)) missingUserIds.add(m.senderId);
+      });
+    });
+
+    const extraUsersMap: Record<string, any> = {};
+    if (missingUserIds.size > 0) {
+      const extraUsers = await prisma.user.findMany({
+        where: { id: { in: Array.from(missingUserIds) } },
+      });
+      extraUsers.forEach((u) => { extraUsersMap[u.id] = u; });
+    }
+
+    const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap));
     res.json({ success: true, count: data.length, data });
   } catch (err) {
     console.error('[chats:get]', err);
@@ -231,7 +288,7 @@ router.get('/:chatId', requireAuth, async (req: Request, res: Response) => {
     });
 
     if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
-    const isParticipant = chat.participants.some((p) => p.userId === userId);
+    const isParticipant = chat.participants.some((p) => p.userId === userId) || chat.id.includes(userId) || chat.createdById === userId;
     if (!isParticipant) return res.status(403).json({ success: false, error: 'Forbidden' });
 
     res.json({ success: true, data: formatChat(chat, userId) });
@@ -247,18 +304,24 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const auth = res.locals.auth;
     const { type = 'direct', title, name, memberIds = [], participants = [], organizationId, zoneId } = req.body;
     const rawParticipants = Array.from(new Set([...memberIds, ...participants, auth.userId]));
-    const chatTitle = title || name || (type === 'direct' ? 'Direct Message' : 'Group Chat');
+    const isDirectType = (type || '').toLowerCase() === 'direct';
+    const chatTitle = title || name || (isDirectType ? 'Direct Message' : 'Group Chat');
     const orgId = organizationId || zoneId || req.tenant?.effectiveZoneId || null;
 
     // For direct chats between 2 people, check if one already exists
-    if (type === 'direct' && rawParticipants.length === 2) {
+    if (isDirectType && rawParticipants.length === 2) {
       const [p1, p2] = rawParticipants;
       const existing = await prisma.chat.findFirst({
         where: {
-          type: 'direct',
-          AND: [
-            { participants: { some: { userId: p1 } } },
-            { participants: { some: { userId: p2 } } },
+          OR: [
+            { id: `${p1}_${p2}` },
+            { id: `${p2}_${p1}` },
+            {
+              AND: [
+                { participants: { some: { userId: p1 } } },
+                { participants: { some: { userId: p2 } } },
+              ],
+            },
           ],
         },
         include: {
@@ -272,12 +335,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    const chatId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const chatId = (isDirectType && rawParticipants.length === 2)
+      ? `${rawParticipants[0]}_${rawParticipants[1]}`
+      : `chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     const newChat = await prisma.chat.create({
       data: {
         id: chatId,
-        type,
+        type: isDirectType ? 'direct' : 'group',
         title: chatTitle,
         createdById: auth.userId,
         organizationId: orgId,
