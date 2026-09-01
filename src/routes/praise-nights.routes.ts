@@ -6,73 +6,95 @@ const router = Router();
 
 function shapeProgram(p: any) {
   const programSongsList = Array.isArray(p.programSongs)
-    ? p.programSongs.map((ps: any) => {
-        const s = ps.song || ps;
-        return {
-          id: s.id,
-          praiseNightId: p.id,
-          programId: p.id,
-          order: ps.order !== undefined ? ps.order : null,
-          title: s.title || 'Untitled Song',
-          key: s.key || null,
-          tempo: s.tempo || null,
-          lyrics: s.lyrics || '',
-          solfas: s.solfas || '',
-          solfa: s.solfas || '',
-          writer: s.writer || '',
-          leadSinger: s.leadSinger || 'Loveworld Singers',
-          conductor: s.conductor || '',
-          conductorGuide: s.conductor || '',
-          drummer: s.drummer || '',
-          leadKeyboardist: s.leadKeyboardist || '',
-          leadGuitarist: s.leadGuitarist || '',
-          bassGuitarist: s.bassGuitarist || '',
-          audioFile: s.audioFile || s.audioUrl || '',
-          audioUrl: s.audioUrl || s.audioFile || '',
-          audioUrls: s.audioUrls || null,
-          category: s.category || 'Previously ministered praise songs',
-          status: s.status || 'active',
-          isMaster: Boolean(s.isMaster),
-          isMinistered: Boolean(s.isMinistered),
-          rehearsalCount: s.rehearsalCount || 0,
-          organizationId: s.organizationId || null,
-          groupId: s.groupId || null,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        };
-      })
+    ? p.programSongs
+        .sort((a: any, b: any) => (a.order ?? 9999) - (b.order ?? 9999))
+        .map((ps: any, index: number) => {
+          const s = ps.song || ps;
+          return {
+            id: s.id,
+            praiseNightId: p.id,
+            programId: p.id,
+            order: ps.order !== undefined && ps.order !== null ? ps.order : index + 1,
+            title: s.title || 'Untitled Song',
+            key: s.key || null,
+            tempo: s.tempo || null,
+            lyrics: s.lyrics || '',
+            solfas: s.solfas || '',
+            solfa: s.solfas || '',
+            writer: s.writer || '',
+            leadSinger: s.leadSinger || s.lead_singer || 'Loveworld Singers',
+            conductor: s.conductor || '',
+            conductorGuide: s.conductor || '',
+            drummer: s.drummer || '',
+            leadKeyboardist: s.leadKeyboardist || s.lead_keyboardist || '',
+            leadGuitarist: s.leadGuitarist || s.lead_guitarist || '',
+            bassGuitarist: s.bassGuitarist || s.bass_guitarist || '',
+            audioFile: s.audioFile || s.audio_file || s.audioUrl || s.audio_url || '',
+            audioUrl: s.audioUrl || s.audio_url || s.audioFile || s.audio_file || '',
+            audioUrls: s.audioUrls || s.audio_urls || null,
+            category: s.category || 'Previously ministered praise songs',
+            status: s.status || 'unheard',
+            isMaster: Boolean(s.isMaster || s.is_master),
+            isMinistered: Boolean(s.isMinistered || s.is_ministered),
+            rehearsalCount: s.rehearsalCount || s.rehearsal_count || 0,
+            organizationId: s.organizationId || s.organization_id || null,
+            groupId: s.groupId || s.group_id || null,
+            createdAt: s.createdAt || s.created_at,
+            updatedAt: s.updatedAt || s.updated_at,
+          };
+        })
     : [];
+
+  const heardCount = programSongsList.filter((s: any) => s.status === 'heard').length;
 
   return {
     id: p.id,
     name: p.name,
     date: p.date,
     category: p.category || 'pre-rehearsal',
-    status: p.status || 'pre-rehearsal',
-    isActive: p.isActive,
-    isArchived: p.isArchived,
-    organizationId: p.organizationId,
-    groupId: p.groupId,
+    status: p.status || p.category || 'pre-rehearsal',
+    pageCategory: p.pageCategory || p.page_category || null,
+    isActive: typeof p.isActive === 'boolean' ? p.isActive : p.category === 'ongoing',
+    isArchived: typeof p.isArchived === 'boolean' ? p.isArchived : p.category === 'archive',
+    organizationId: p.organizationId || p.organization_id || null,
+    groupId: p.groupId || p.group_id || null,
     location: p.location || null,
-    bannerImage: p.bannerImage || null,
+    bannerImage: p.bannerImage || p.banner_image || null,
     songCount: programSongsList.length || (p.rehearsalCount || 0),
+    heardCount,
     songs: programSongsList,
-    createdAt: p.createdAt,
-    updatedAt: p.updatedAt,
+    createdAt: p.createdAt || p.created_at,
+    updatedAt: p.updatedAt || p.updated_at,
   };
 }
 
 // GET /programs or /praise-nights
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId, category } = req.query as { zoneId?: string; category?: string };
+    const { zoneId, category, groupId, subGroupId, includeChurch } = req.query as {
+      zoneId?: string;
+      category?: string;
+      groupId?: string;
+      subGroupId?: string;
+      includeChurch?: string;
+    };
     const auth = res.locals.auth;
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
     const targetZone = zoneId || req.tenant?.effectiveZoneId;
+    const targetGroup = groupId || subGroupId || null;
 
     const where: any = {};
     if (category && category !== 'all') {
       where.category = category;
+    }
+
+    // Isolate church/subgroup programs:
+    // If a specific church is requested, filter by that groupId.
+    // Otherwise, for general Repertoire view, only return main programs (groupId is null).
+    if (targetGroup) {
+      where.groupId = targetGroup;
+    } else if (includeChurch !== 'true') {
+      where.groupId = null;
     }
 
     if (targetZone && targetZone !== 'all' && targetZone !== 'global') {
@@ -212,17 +234,12 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
         name: (name || title || '').trim() || undefined,
         date: date || undefined,
         location: location !== undefined ? location : undefined,
-        description: description !== undefined ? description : undefined,
         status: nextStatus || undefined,
         category: nextCategory || undefined,
         isActive: nextIsActive,
         isArchived: nextIsArchived,
         bannerImage: bannerImage || banner || undefined,
         organizationId: organizationId || zoneId || undefined,
-        days: typeof days === 'number' ? days : undefined,
-        hours: typeof hours === 'number' ? hours : undefined,
-        minutes: typeof minutes === 'number' ? minutes : undefined,
-        seconds: typeof seconds === 'number' ? seconds : undefined,
       },
       include: {
         programSongs: {
