@@ -5,7 +5,44 @@ import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 const router = Router();
 
 function shapeProgram(p: any) {
-  const songsCount = Array.isArray(p.programSongs) ? p.programSongs.length : (p.rehearsalCount || 0);
+  const programSongsList = Array.isArray(p.programSongs)
+    ? p.programSongs.map((ps: any) => {
+        const s = ps.song || ps;
+        return {
+          id: s.id,
+          praiseNightId: p.id,
+          programId: p.id,
+          order: ps.order !== undefined ? ps.order : null,
+          title: s.title || 'Untitled Song',
+          key: s.key || null,
+          tempo: s.tempo || null,
+          lyrics: s.lyrics || '',
+          solfas: s.solfas || '',
+          solfa: s.solfas || '',
+          writer: s.writer || '',
+          leadSinger: s.leadSinger || 'Loveworld Singers',
+          conductor: s.conductor || '',
+          conductorGuide: s.conductor || '',
+          drummer: s.drummer || '',
+          leadKeyboardist: s.leadKeyboardist || '',
+          leadGuitarist: s.leadGuitarist || '',
+          bassGuitarist: s.bassGuitarist || '',
+          audioFile: s.audioFile || s.audioUrl || '',
+          audioUrl: s.audioUrl || s.audioFile || '',
+          audioUrls: s.audioUrls || null,
+          category: s.category || 'Previously ministered praise songs',
+          status: s.status || 'active',
+          isMaster: Boolean(s.isMaster),
+          isMinistered: Boolean(s.isMinistered),
+          rehearsalCount: s.rehearsalCount || 0,
+          organizationId: s.organizationId || null,
+          groupId: s.groupId || null,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        };
+      })
+    : [];
+
   return {
     id: p.id,
     name: p.name,
@@ -18,8 +55,8 @@ function shapeProgram(p: any) {
     groupId: p.groupId,
     location: p.location || null,
     bannerImage: p.bannerImage || null,
-    songCount: songsCount,
-    songs: Array.isArray(p.programSongs) ? p.programSongs.map((ps: any) => ps.song || ps) : [],
+    songCount: programSongsList.length || (p.rehearsalCount || 0),
+    songs: programSongsList,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   };

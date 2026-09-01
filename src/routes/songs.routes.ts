@@ -46,6 +46,9 @@ function formatSong(song: any) {
   const { audioUrl, audioUrls } = resolveAudio(song);
   return {
     id: song.id,
+    praiseNightId: song.praiseNightId || song.programId || null,
+    programId: song.praiseNightId || song.programId || null,
+    order: song.order !== undefined ? song.order : null,
     title: song.title || 'Untitled Song',
     key: song.key || null,
     tempo: song.tempo || null,
@@ -123,7 +126,9 @@ router.get('/ministered', requireAuth, getMinisteredSongsHandler);
 
 const getMinisteredSongByIdHandler = async (req: Request, res: Response) => {
   try {
-    const song = await prisma.song.findUnique({ where: { id: req.params.id } });
+    const song = await prisma.song.findUnique({
+      where: { id: req.params.id },
+    });
     if (!song) {
       res.status(404).json({ success: false, error: 'Song not found' });
       return;
@@ -161,8 +166,13 @@ const getSongsHandler = async (req: Request, res: Response) => {
         },
       });
 
-      if (program) {
-        songs = program.programSongs.map((ps) => ps.song);
+      if (program && Array.isArray(program.programSongs)) {
+        songs = program.programSongs.map((ps) => ({
+          ...ps.song,
+          order: ps.order,
+          praiseNightId: targetProgramId,
+          programId: targetProgramId,
+        }));
       }
     } else {
       // Query songs for this organization or public master library
