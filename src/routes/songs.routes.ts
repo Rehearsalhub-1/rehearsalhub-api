@@ -5,8 +5,45 @@ import { broadcast } from '../ws/wsServer';
 
 const router = Router();
 
+function resolveAudio(song: any): { audioUrl: string; audioUrls: Record<string, string> } {
+  const urlsObj: Record<string, string> = {};
+  if (song.audioUrls && typeof song.audioUrls === 'object') {
+    Object.assign(urlsObj, song.audioUrls);
+  }
+  if (song.audio_urls && typeof song.audio_urls === 'object') {
+    Object.assign(urlsObj, song.audio_urls);
+  }
+  if (song.sopranoUrl || song.soprano_url) urlsObj.soprano = song.sopranoUrl || song.soprano_url;
+  if (song.altoUrl || song.alto_url) urlsObj.alto = song.altoUrl || song.alto_url;
+  if (song.tenorUrl || song.tenor_url) urlsObj.tenor = song.tenorUrl || song.tenor_url;
+  if (song.leadVocalUrl || song.lead_vocal_url) urlsObj.lead = song.leadVocalUrl || song.lead_vocal_url;
+  if (song.instrumentalUrl || song.instrumental_url) urlsObj.instrumental = song.instrumentalUrl || song.instrumental_url;
+
+  const audio =
+    song.audioFile ||
+    song.audio_file ||
+    song.audioUrl ||
+    song.audio_url ||
+    song.url ||
+    urlsObj.full ||
+    urlsObj.main ||
+    urlsObj.master ||
+    urlsObj.lead ||
+    urlsObj.soprano ||
+    urlsObj.tenor ||
+    urlsObj.alto ||
+    (Object.values(urlsObj).find((v: any) => typeof v === 'string' && v.trim().length > 0) as string) ||
+    '';
+
+  if (audio && !urlsObj.full) {
+    urlsObj.full = audio;
+  }
+
+  return { audioUrl: audio, audioUrls: urlsObj };
+}
+
 function formatSong(song: any) {
-  const audio = song.audioFile || '';
+  const { audioUrl, audioUrls } = resolveAudio(song);
   return {
     id: song.id,
     title: song.title || 'Untitled Song',
@@ -23,9 +60,9 @@ function formatSong(song: any) {
     leadKeyboardist: song.leadKeyboardist || '',
     leadGuitarist: song.leadGuitarist || '',
     bassGuitarist: song.bassGuitarist || '',
-    audioFile: audio,
-    audioUrl: audio,
-    audioUrls: song.audioUrls || (audio ? { full: audio } : null),
+    audioFile: audioUrl,
+    audioUrl: audioUrl,
+    audioUrls: Object.keys(audioUrls).length > 0 ? audioUrls : (audioUrl ? { full: audioUrl } : null),
     category: song.category || 'Praise Night',
     status: song.status || 'active',
     isMaster: Boolean(song.isMaster),

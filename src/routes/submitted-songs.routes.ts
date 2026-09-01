@@ -120,18 +120,27 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 /** GET /submitted-songs/mine */
 router.get('/mine', requireAuth, async (_req: Request, res: Response) => {
   try {
-    const userId = res.locals.auth.userId;
+    const auth = res.locals.auth;
+    const userId = auth?.userId;
+    const email = auth?.email || '';
+
     let rows: any[] = [];
     try {
       rows = await prisma.submittedSong.findMany({
-        where: { userId },
+        where: {
+          OR: [
+            { userId },
+            ...(email ? [{ user: { email } }] : []),
+          ],
+        },
         include: { user: true },
         orderBy: { createdAt: 'desc' },
       });
     } catch {
       rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM submitted_songs WHERE user_id = $1 ORDER BY created_at DESC`,
-        userId
+        `SELECT * FROM submitted_songs WHERE user_id = $1 OR submitted_by_email = $2 ORDER BY created_at DESC`,
+        userId,
+        email
       ).catch(() => []);
     }
     res.json({ success: true, count: rows.length, data: rows.map(shapeSubmission) });

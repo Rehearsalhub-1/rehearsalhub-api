@@ -71,31 +71,47 @@ router.post('/chat', requireAuth, async (req, res) => {
       ...messages
     ];
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: apiMessages,
-        temperature: 0.7,
-        max_tokens: 1500,
-      }),
-    });
+    const modelsToTry = [
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+      'llama3-70b-8192',
+      'llama3-8b-8192',
+      'mixtral-8x7b-32768'
+    ];
 
-    const data = await response.json() as any;
+    let reply = '';
+    let lastError = '';
 
-    if (!response.ok) {
-      res.status(500).json({ success: false, error: data.error?.message || 'Failed to get AI response' });
-      return;
+    for (const model of modelsToTry) {
+      try {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: apiMessages,
+            temperature: 0.7,
+            max_tokens: 1500,
+          }),
+        });
+
+        const data = await response.json() as any;
+        if (response.ok && data.choices?.[0]?.message?.content) {
+          reply = data.choices[0].message.content.trim();
+          break;
+        } else {
+          lastError = data.error?.message || `Model ${model} failed`;
+        }
+      } catch (e: any) {
+        lastError = e?.message || 'Network error';
+      }
     }
 
-    const reply = data.choices?.[0]?.message?.content?.trim();
-
     if (!reply) {
-      res.status(500).json({ success: false, error: 'No reply from AI service.' });
+      res.status(500).json({ success: false, error: 'Could not connect to Kingdom Lexicon assistant. Please try again.' });
       return;
     }
 
