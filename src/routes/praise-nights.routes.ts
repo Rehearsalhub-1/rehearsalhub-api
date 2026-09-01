@@ -171,21 +171,89 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
   }
 });
 
+// PATCH /programs/:id or /praise-nights/:id — Full program update
+router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      title,
+      date,
+      location,
+      description,
+      category,
+      status,
+      isActive,
+      isArchived,
+      bannerImage,
+      banner,
+      organizationId,
+      zoneId,
+      days,
+      hours,
+      minutes,
+      seconds,
+    } = req.body;
+
+    const existing = await prisma.program.findUnique({ where: { id } });
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Program not found' });
+      return;
+    }
+
+    const nextStatus = status || (category ? category : existing.status);
+    const nextCategory = category || (status ? status : existing.category);
+    const nextIsActive = typeof isActive === 'boolean' ? isActive : nextCategory === 'ongoing';
+    const nextIsArchived = typeof isArchived === 'boolean' ? isArchived : nextCategory === 'archive';
+
+    const updated = await prisma.program.update({
+      where: { id },
+      data: {
+        name: (name || title || '').trim() || undefined,
+        date: date || undefined,
+        location: location !== undefined ? location : undefined,
+        description: description !== undefined ? description : undefined,
+        status: nextStatus || undefined,
+        category: nextCategory || undefined,
+        isActive: nextIsActive,
+        isArchived: nextIsArchived,
+        bannerImage: bannerImage || banner || undefined,
+        organizationId: organizationId || zoneId || undefined,
+        days: typeof days === 'number' ? days : undefined,
+        hours: typeof hours === 'number' ? hours : undefined,
+        minutes: typeof minutes === 'number' ? minutes : undefined,
+        seconds: typeof seconds === 'number' ? seconds : undefined,
+      },
+      include: {
+        programSongs: {
+          include: { song: true },
+        },
+      },
+    });
+
+    res.json({ success: true, message: 'Program updated successfully', data: shapeProgram(updated) });
+  } catch (err: any) {
+    console.error('[programs/:id:patch]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update program' });
+  }
+});
+
 // PATCH /programs/:id/status — Toggle program status
 router.patch('/:id/status', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
-    const { status } = req.body;
-    if (!status) {
+    const { status, category } = req.body;
+    const targetStatus = status || category;
+    if (!targetStatus) {
       res.status(400).json({ success: false, error: 'Missing status' });
       return;
     }
-    const isOngoing = status === 'ongoing';
-    const isArchive = status === 'archive' || status === 'archived';
+    const isOngoing = targetStatus === 'ongoing';
+    const isArchive = targetStatus === 'archive' || targetStatus === 'archived';
 
     const updated = await prisma.program.update({
       where: { id: req.params.id },
       data: {
-        status,
+        status: targetStatus,
         category: isOngoing ? 'ongoing' : isArchive ? 'archive' : 'pre-rehearsal',
         isActive: isOngoing,
         isArchived: isArchive,
@@ -197,7 +265,7 @@ router.patch('/:id/status', requireAuth, requireTenantAdmin, async (req: Request
       },
     });
 
-    res.json({ success: true, message: `Program status updated to ${status}`, data: shapeProgram(updated) });
+    res.json({ success: true, message: `Program status updated to ${targetStatus}`, data: shapeProgram(updated) });
   } catch (err) {
     console.error('[programs/:id/status]', err);
     res.status(500).json({ success: false, error: 'Failed to update program status' });
