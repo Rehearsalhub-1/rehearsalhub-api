@@ -6,14 +6,35 @@ import { broadcast } from '../ws/wsServer';
 
 const router = Router();
 
+function getUserDisplayName(u: any): string {
+  if (!u) return 'Member';
+  const first = (u.firstName || u.first_name || '').trim();
+  const last = (u.lastName || u.last_name || '').trim();
+  const full = [first, last].filter(Boolean).join(' ').trim();
+  if (full) return full;
+  if (u.name && u.name !== 'Member' && u.name !== 'User') return u.name;
+  if (u.displayName) return u.displayName;
+  if (u.username) return u.username;
+  if (u.email) {
+    const emailPrefix = u.email.split('@')[0];
+    if (emailPrefix) {
+      return emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+    }
+  }
+  if (u.phone) return u.phone;
+  return 'Member';
+}
+
 function formatMessage(m: any) {
   const sender = m.sender || {};
+  const senderName = getUserDisplayName(sender);
   return {
     id: m.id,
     chatId: m.chatId,
     senderId: m.senderId,
-    senderName: [sender.firstName, sender.lastName].filter(Boolean).join(' ') || sender.email || 'User',
-    senderAvatar: sender.avatarUrl || null,
+    senderName,
+    sender: senderName,
+    senderAvatar: sender.avatarUrl || sender.avatar || null,
     text: m.text || '',
     type: m.type || 'text',
     status: m.status || 'sent',
@@ -23,34 +44,67 @@ function formatMessage(m: any) {
 }
 
 function formatChat(c: any, currentUserId?: string) {
-  const participants = Array.isArray(c.participants) ? c.participants.map((p: any) => p.userId || p.id) : [];
+  const participants: string[] = [];
   const details: Record<string, any> = {};
 
   if (Array.isArray(c.participants)) {
     for (const p of c.participants) {
       const u = p.user || p;
-      if (u.id) {
-        details[u.id] = {
-          name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'Member',
-          avatar: u.avatarUrl || null,
+      const uid = p.userId || u.id;
+      if (uid) {
+        participants.push(uid);
+        const name = getUserDisplayName(u);
+        details[uid] = {
+          id: uid,
+          name,
+          avatar: u.avatarUrl || u.avatar || null,
           email: u.email || null,
+          firstName: u.firstName || u.first_name || null,
+          lastName: u.lastName || u.last_name || null,
         };
       }
     }
   }
 
   const lastMsg = Array.isArray(c.messages) && c.messages.length > 0 ? c.messages[0] : null;
+  const lastSender = lastMsg?.sender;
+  const lastSenderName = getUserDisplayName(lastSender || (lastMsg?.senderId ? details[lastMsg.senderId] : null));
+
+  const isDirect = c.type === 'direct' || (!c.type && participants.length <= 2);
+  let title = c.title || (isDirect ? 'Direct Message' : 'Group Chat');
+  let avatar = c.avatar ? (typeof c.avatar === 'string' ? { uri: c.avatar } : c.avatar) : null;
+
+  // For direct chats, resolve the other participant's actual name and avatar!
+  if (isDirect && currentUserId) {
+    const otherId = participants.find(id => id !== currentUserId) || participants[0];
+    if (otherId && details[otherId]?.name && details[otherId].name !== 'Member') {
+      title = details[otherId].name;
+      if (details[otherId].avatar) {
+        avatar = { uri: details[otherId].avatar };
+      }
+    }
+  }
 
   return {
     id: c.id,
-    title: c.title || 'Chat',
-    name: c.title || 'Chat',
-    type: c.type || 'direct',
+    title,
+    name: title,
+    type: c.type || (isDirect ? 'direct' : 'group'),
+    isGroup: !isDirect,
+    avatar: avatar?.uri || (typeof avatar === 'string' ? avatar : null),
     organizationId: c.organizationId || null,
     createdById: c.createdById,
     participants,
     participantDetails: details,
-    lastMessage: lastMsg?.text || null,
+    lastMessage: lastMsg ? {
+      text: lastMsg.text || '',
+      senderId: lastMsg.senderId,
+      senderName: lastSenderName,
+      timestamp: lastMsg.createdAt,
+      status: lastMsg.status || 'sent',
+    } : null,
+    lastMessageSenderId: lastMsg?.senderId || null,
+    lastMessageSenderName: lastSenderName,
     lastTimestamp: lastMsg?.createdAt || c.createdAt,
     unreadCount: 0,
     createdAt: c.createdAt,
@@ -75,6 +129,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
+          include: { sender: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -103,6 +158,7 @@ router.get('/:chatId', requireAuth, async (req: Request, res: Response) => {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
+          include: { sender: true },
         },
       },
     });
@@ -140,7 +196,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         },
         include: {
           participants: { include: { user: true } },
-          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+          messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
         },
       });
 
@@ -166,7 +222,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
       },
     });
 

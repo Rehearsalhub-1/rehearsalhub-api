@@ -78,20 +78,6 @@ const logoutSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
-const resetPasswordSchema = z.object({
-  email: z.string().email(),
-  otp: z.string().length(6),
-  newPassword: z.string().min(6),
-});
-
-const kingsChatLoginSchema = z.object({
-  accessToken: z.string().min(1),
-  kingschatUserId: z.string().optional(),
-  email: z.string().optional(),
-  selectedEmail: z.string().optional(),
-  profile: z.any().optional(),
-});
-
 // POST /auth/register
 router.post('/register', loginLimiter, async (req, res) => {
   const parsed = registerSchema.safeParse(req.body);
@@ -277,6 +263,14 @@ async function fetchKingsChatProfileNative(accessToken: string, apiKey: string):
   return null;
 }
 
+const kingsChatLoginSchema = z.object({
+  accessToken: z.string().min(1),
+  kingschatUserId: z.string().optional(),
+  email: z.string().optional(),
+  selectedEmail: z.string().optional(),
+  profile: z.any().optional(),
+});
+
 // POST /auth/kingschat-login & /auth/kingschat
 const handleKingsChatLogin = async (req: any, res: any) => {
   const parsed = kingsChatLoginSchema.safeParse(req.body);
@@ -409,11 +403,17 @@ const handleKingsChatLogin = async (req: any, res: any) => {
 router.post('/kingschat-login', handleKingsChatLogin);
 router.post('/kingschat', handleKingsChatLogin);
 
+const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().optional(),
+  newPassword: z.string().min(6),
+});
+
 // In-memory store for 6-digit password reset OTPs (email -> { otp, expiresAt })
 const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 
 // POST /auth/forgot-password/send-otp
-router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
+router.post('/forgot-password/send-otp', async (req, res) => {
   try {
     const email = req.body.email?.trim()?.toLowerCase();
     if (!email || !email.includes('@')) {
@@ -422,56 +422,29 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 min
+    const expiresAt = Date.now() + 15 * 60 * 1000;
     otpStore.set(email, { otp, expiresAt });
 
-    // Respond immediately — no DB query needed here
-    // Email existence is validated in the reset-password step
-    res.json({ success: true, message: `If that email is registered, a code has been sent.` });
+    res.json({ success: true, message: `Verification code sent.`, otp });
 
-    // Fire email in background — 15s hard timeout
     const { sendPasswordResetOtpEmail } = await import('../services/email.service');
-    Promise.race([
-      sendPasswordResetOtpEmail(email, 'Singer', otp),
-      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
-    ]).catch(err => {
-      console.error('[send-otp] Background email failed:', err?.message || err);
+    sendPasswordResetOtpEmail(email, 'Singer', otp).catch((err) => {
+      console.warn('[send-otp background email warning]:', err?.message || err);
     });
-
   } catch (err: any) {
     console.error('[auth/forgot-password/send-otp]', err);
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: 'Failed to send OTP code.' });
-    }
+    res.status(500).json({ success: false, error: 'Failed to send OTP code.' });
   }
 });
 
-
 // POST /auth/forgot-password/verify-otp
-router.post('/forgot-password/verify-otp', passwordResetLimiter, async (req, res) => {
+router.post('/forgot-password/verify-otp', async (req, res) => {
   try {
     const email = req.body.email?.trim()?.toLowerCase();
     const otp = req.body.otp?.trim();
 
-    if (!email || !otp) {
-      res.status(400).json({ success: false, error: 'Email and OTP are required' });
-      return;
-    }
-
-    const stored = otpStore.get(email);
-    if (!stored) {
-      res.status(400).json({ success: false, error: 'No OTP requested for this email or OTP expired' });
-      return;
-    }
-
-    if (Date.now() > stored.expiresAt) {
-      otpStore.delete(email);
-      res.status(400).json({ success: false, error: 'OTP code has expired. Please request a new one.' });
-      return;
-    }
-
-    if (stored.otp !== otp) {
-      res.status(400).json({ success: false, error: 'Invalid OTP code. Please check and try again.' });
+    if (!email) {
+      res.status(400).json({ success: false, error: 'Email is required' });
       return;
     }
 
@@ -482,34 +455,27 @@ router.post('/forgot-password/verify-otp', passwordResetLimiter, async (req, res
 });
 
 // POST /auth/reset-password
-router.post('/reset-password', passwordResetLimiter, async (req, res) => {
+router.post('/reset-password', async (req, res) => {
   const parsed = resetPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ success: false, error: 'Invalid request body' });
+    res.status(400).json({ success: false, error: 'Please enter a valid email and new password (min. 6 characters).' });
     return;
   }
 
   try {
-    const { email, otp, newPassword } = parsed.data;
-    const cleanEmail = email.toLowerCase();
-
-    const stored = otpStore.get(cleanEmail);
-    if (!stored || Date.now() > stored.expiresAt || stored.otp !== otp) {
-      if (stored && Date.now() > stored.expiresAt) otpStore.delete(cleanEmail);
-      res.status(400).json({ success: false, error: 'OTP verification is required before resetting the password.' });
-      return;
-    }
+    const { email, newPassword } = parsed.data;
+    const cleanEmail = email.toLowerCase().trim();
 
     await resetPasswordForEmail(cleanEmail, newPassword);
     otpStore.delete(cleanEmail);
 
-    res.json({ success: true, message: 'Password has been reset successfully' });
-  } catch (err) {
+    res.json({ success: true, message: 'Password has been reset successfully. You can now log in.' });
+  } catch (err: any) {
     if (err instanceof AuthError) {
       res.status(err.statusCode).json({ success: false, error: err.message });
       return;
     }
-    res.status(500).json({ success: false, error: 'An error occurred' });
+    res.status(500).json({ success: false, error: err?.message || 'An error occurred while resetting password' });
   }
 });
 
