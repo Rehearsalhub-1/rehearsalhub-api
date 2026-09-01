@@ -64,7 +64,7 @@ const registerSchema = z.object({
   password: z.string().min(8),
   first_name: z.string().min(1),
   last_name: z.string().min(1),
-  zone_code: z.string().min(6),
+  zone_code: z.string().min(2),
   designation: z.string().optional(),
   kingschat_id: z.string().optional(),
 }).strict();
@@ -421,8 +421,6 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
       return;
     }
 
-    const { sendPasswordResetOtpEmail } = await import('../services/email.service');
-
     const profile = await prisma.user.findFirst({ where: { email } });
 
     if (!profile) {
@@ -435,13 +433,27 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
 
     otpStore.set(email, { otp, expiresAt });
 
-    const singerName = profile.firstName || 'Singer';
-    await sendPasswordResetOtpEmail(email, singerName, otp);
-
+    // Respond immediately — do NOT block on email delivery
     res.json({ success: true, message: `OTP code sent to ${email}` });
+
+    // Send email in background with a hard 15s timeout
+    const emailTimeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Email send timeout')), 15000)
+    );
+    const { sendPasswordResetOtpEmail } = await import('../services/email.service');
+    const singerName = profile.firstName || 'Singer';
+    Promise.race([
+      sendPasswordResetOtpEmail(email, singerName, otp),
+      emailTimeout
+    ]).catch((err) => {
+      console.error('[auth/forgot-password/send-otp] Background email failed:', err?.message || err);
+    });
+
   } catch (err: any) {
     console.error('[auth/forgot-password/send-otp]', err);
-    res.status(500).json({ success: false, error: 'Failed to send OTP code' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to send OTP code' });
+    }
   }
 });
 
