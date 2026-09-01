@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { AccessToken } from 'livekit-server-sdk';
 import { requireAuth } from '../auth/auth.middleware';
 import prisma from '../lib/prisma';
@@ -19,19 +19,15 @@ async function canJoinRoom(room: string, userId: string): Promise<boolean> {
     where: {
       OR: [
         { id: room },
-        { rawData: { path: ['roomId'], equals: room } },
+        { roomId: room },
       ],
     },
   });
   if (!call) return true;
-  const raw = (call.rawData && typeof call.rawData === 'object') ? (call.rawData as Record<string, any>) : {};
-  const callerId = raw.callerId || raw.caller_id;
-  const receiverId = raw.receiverId || raw.receiver_id;
-  const participants = Array.isArray(raw.participants) ? raw.participants : [];
-  return callerId === userId || receiverId === userId || participants.includes(userId);
+  return call.callerId === userId || call.receiverId === userId;
 }
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const { room, participant } = req.query as { room?: string; participant?: string };
     if (!room || !participant) return res.status(400).json({ success: false, error: 'room and participant query params are required' });
@@ -45,7 +41,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const { room, participant } = req.body as { room?: string; participant?: string };
     if (!room || !participant) return res.status(400).json({ success: false, error: 'room and participant body fields are required' });

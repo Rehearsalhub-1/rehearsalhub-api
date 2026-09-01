@@ -11,6 +11,9 @@
     "migrate:auth-internal": "tsx auth_internal.ts",
     "verify:rls": "tsx verify_rls.ts",
     "secure:identity-rls": "tsx secure_identity_rls.ts",
+    "wire:relationships": "tsx scripts/wire_relationships.ts",
+    "restore:memberships": "tsx scripts/restore_memberships_fast.ts",
+    "fix:zones-chats-media": "tsx scripts/fix_zones_chats_media.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

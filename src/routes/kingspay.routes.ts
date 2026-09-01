@@ -1,15 +1,15 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
-import crypto from 'crypto';
 
 const router = Router();
 const KINGSPAY_API_KEY = process.env.KINGSPAY_API_KEY || '';
 
-router.post('/initialize', requireAuth, async (req, res) => {
+router.post('/initialize', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!KINGSPAY_API_KEY) return res.status(503).json({ success: false, error: 'Payments are not configured on this server.' });
-    const { amount, userId, userEmail, type, duration } = req.body;
+    const { amount, userId, type } = req.body;
     if (!amount || !userId || !type || userId !== res.locals.auth.userId) return res.status(400).json({ success: false, error: 'Missing required payment fields.' });
     res.status(501).json({ success: false, error: 'KingsPay transaction initialization is not implemented.' });
   } catch (err) {
@@ -18,11 +18,11 @@ router.post('/initialize', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/verify', requireAuth, async (_req, res) => {
+router.post('/verify', requireAuth, async (_req: Request, res: Response) => {
   res.status(501).json({ success: false, error: 'KingsPay payment verification is not implemented on this server.' });
 });
 
-router.post('/webhook', async (req, res) => {
+router.post('/webhook', async (req: Request, res: Response) => {
   try {
     const webhookSecret = process.env.KINGSPAY_WEBHOOK_SECRET;
     const signature = req.headers['x-kingspay-signature'];
@@ -35,30 +35,15 @@ router.post('/webhook', async (req, res) => {
     const { event, data } = req.body;
     if (event === 'charge.success') {
       const userId = data.metadata?.userId;
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30);
-      const profile = await prisma.user.findUnique({ where: { id: userId } });
-      if (profile) {
-        const prevRaw = (profile.rawData && typeof profile.rawData === 'object') ? (profile.rawData as Record<string, any>) : {};
-        const updatedSub = {
-          id: `sub_${profile.id}`,
-          userId: profile.id,
-          plan: 'premium',
-          status: 'active',
-          expiresAt: expiresAt.toISOString(),
-        };
-        await prisma.user.update({
-          where: { id: userId },
-          data: { rawData: { ...prevRaw, subscription: updatedSub } },
-        });
+      if (userId) {
+        console.log(`[kingspay/webhook] Charge succeeded for user ${userId}`);
       }
-      console.log(`[kingspay/webhook] Successfully upgraded user ${userId} to premium.`);
     }
 
     res.status(200).send('Webhook received');
   } catch (err) {
     console.error('[kingspay/webhook]', err);
-    res.status(500).send('Webhook processing failed');
+    res.status(500).send('Internal error');
   }
 });
 

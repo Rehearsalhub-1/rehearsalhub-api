@@ -1,6 +1,6 @@
 // ============================================================================
-// RehearsalHub — Canonical Multi-Tenant Schema v2
-// Architecture: Organization (HQ / Regional) -> Subgroup -> User & Memberships
+// RehearsalHub — Canonical Pure Relational Schema (3NF)
+// Architecture: Organization (Workspace) -> Group (Unit/Church) -> Memberships
 // ============================================================================
 
 generator client {
@@ -12,143 +12,47 @@ datasource db {
 }
 
 // ============================================================================
-// ENUMS
-// ============================================================================
-
-enum MemberRole {
-  SUPER_ADMIN
-  HQ_ADMIN
-  ZONE_ADMIN
-  SUBGROUP_ADMIN
-  MEMBER
-}
-
-enum MemberStatus {
-  ACTIVE
-  INACTIVE
-  SUSPENDED
-}
-
-enum SongStatus {
-  ACTIVE
-  INACTIVE
-  ARCHIVED
-}
-
-enum ProgramStatus {
-  PRE_REHEARSAL
-  ACTIVE
-  COMPLETED
-  ARCHIVED
-}
-
-enum CategoryType {
-  PROGRAM
-  SONG
-  MEDIA
-  PAGE
-}
-
-enum MediaType {
-  AUDIO
-  VIDEO
-  IMAGE
-  DOCUMENT
-}
-
-enum ChatType {
-  DIRECT
-  GROUP
-  ANNOUNCEMENT
-}
-
-enum MessageType {
-  TEXT
-  AUDIO
-  VIDEO
-  IMAGE
-  FILE
-}
-
-enum NotificationPriority {
-  LOW
-  NORMAL
-  HIGH
-  URGENT
-}
-
-enum RequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum SubmissionStatus {
-  PENDING
-  UNDER_REVIEW
-  APPROVED
-  REJECTED
-}
-
-enum TicketStatus {
-  OPEN
-  IN_PROGRESS
-  RESOLVED
-  CLOSED
-}
-
-enum TicketPriority {
-  LOW
-  NORMAL
-  HIGH
-  URGENT
-}
-
-// ============================================================================
-// 1. TENANCY & ORGANIZATIONS
+// 1. WORKSPACE & TENANCY (Organizations & Groups)
 // ============================================================================
 
 model Organization {
-  id             String   @id @default(cuid())
-  name           String?
-  code           String?  @unique
+  id             String    @id @default(cuid())
+  name           String
+  code           String?   @unique
   country        String?
   region         String?
-  isHq           Boolean  @default(false)  @map("is_hq")
-  invitationCode String?  @unique          @map("invitation_code")
-  isActive       Boolean  @default(true)   @map("is_active")
-  createdAt      DateTime @default(now())  @map("created_at")
-  updatedAt      DateTime @updatedAt       @map("updated_at")
-  rawData        Json?    @map("raw_data")
+  isHq           Boolean   @default(false) @map("is_hq")
+  invitationCode String?   @unique @map("invitation_code")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  subgroups              Subgroup[]
-  memberships            Membership[]
-  songs                  Song[]
-  programs               Program[]
-  categories             Category[]
-  mediaAssets            MediaAsset[]
-  broadcastNotifications BroadcastNotification[]
-  playlists              Playlist[]
-  adminRequests          AdminRequest[]
-  submittedSongs         SubmittedSong[]
-  supportTickets         SupportTicket[]
-  attendances            Attendance[]
-  chats                  Chat[]
+  groups         Group[]
+  memberships    Membership[]
+  songs          Song[]
+  programs       Program[]
+  categories     Category[]
+  mediaAssets    MediaAsset[]
+  playlists      Playlist[]
+  chats          Chat[]
+  notifications  Notification[]
+  attendances    Attendance[]
+  submittedSongs SubmittedSong[]
+  supportTickets SupportTicket[]
 
-  @@map("zones")
+  @@map("organizations")
 }
 
-model Subgroup {
+model Group {
   id               String       @id @default(cuid())
   organizationId   String       @map("organization_id")
   name             String
   description      String?
-  type             String?      @default("church")
+  type             String?      @default("church") // church, band, orchestra, choir
   status           String?      @default("active")
-  estimatedMembers Int?         @map("estimated_members")
-  createdAt        DateTime?    @default(now()) @map("created_at")
-  updatedAt        DateTime?    @updatedAt      @map("updated_at")
-  rawData          Json?        @map("raw_data")
+  estimatedMembers Int?         @default(0) @map("estimated_members")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
 
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   memberships      Membership[]
@@ -157,26 +61,24 @@ model Subgroup {
   mediaAssets      MediaAsset[]
 
   @@index([organizationId])
-  @@map("subgroups")
+  @@map("groups")
 }
 
 // ============================================================================
-// 2. IDENTITY & MEMBERSHIP
+// 2. IDENTITY & ACCESS CONTROL
 // ============================================================================
 
 model User {
   id               String    @id
   email            String?   @unique
-  name             String?
   firstName        String?   @map("first_name")
   lastName         String?   @map("last_name")
   phone            String?
   avatarUrl        String?   @map("avatar_url")
   kingschatId      String?   @map("kingschat_id")
-  profileCompleted Boolean?  @default(false) @map("profile_completed")
-  createdAt        DateTime? @default(now()) @map("created_at")
-  updatedAt        DateTime? @updatedAt      @map("updated_at")
-  rawData          Json?     @map("raw_data")
+  profileCompleted Boolean   @default(false) @map("profile_completed")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   credential       AuthCredential?
   refreshTokens    RefreshToken[]
@@ -184,21 +86,21 @@ model User {
 
   playlists             Playlist[]
   songHistory           SongHistory[]
-  mediaDoodles          MediaDoodle[]
-
   messagesAuthored       Message[]
   chatsCreated           Chat[]
   chatParticipations     ChatParticipant[]
+  notificationsSent      Notification[]         @relation("notification_sender")
   notificationDeliveries NotificationDelivery[]
-  broadcastsSent         BroadcastNotification[]
-
-  adminRequestsMade     AdminRequest[]       @relation("admin_request_user")
-  adminRequestsReviewed AdminRequest[]       @relation("admin_request_reviewer")
-  songsSubmitted        SubmittedSong[]      @relation("submitted_song_user")
+  submittedSongs         SubmittedSong[]        @relation("submitted_song_user")
   supportTickets        SupportTicket[]
-  attendances           Attendance[]         @relation("attendance_user")
-  attendancesRecorded   Attendance[]         @relation("attendance_recorder")
+  attendances           Attendance[]           @relation("attendance_user")
+  attendancesRecorded   Attendance[]           @relation("attendance_recorder")
   songRoleAssignments   SongRoleAssignment[]
+  callsMade             Call[]                 @relation("calls_made")
+  callsReceived         Call[]                 @relation("calls_received")
+  mediaDoodles          MediaDoodle[]
+  userSongNotes         UserSongNote[]
+  statuses              UserStatus[]
 
   @@map("profiles")
 }
@@ -207,33 +109,31 @@ model Membership {
   id             String       @id @default(cuid())
   userId         String       @map("user_id")
   organizationId String       @map("organization_id")
-  subgroupId     String?      @map("subgroup_id")
-  role           String?      @default("MEMBER")
-  voicePart      String?      @map("voice_part")
-  status         String?      @default("ACTIVE")
-  hasHqAccess    Boolean      @default(false) @map("has_hq_access")
-  permissions    Json?        @default("{}")
+  groupId        String?      @map("group_id")
+  role           String       @default("MEMBER") // 'ORG_ADMIN' | 'GROUP_ADMIN' | 'MEMBER'
+  voicePart      String?      @map("voice_part") // 'SOPRANO' | 'ALTO' | 'TENOR' | 'BASS'
+  status         String       @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'
   joinedAt       DateTime     @default(now()) @map("joined_at")
-  updatedAt      DateTime     @updatedAt      @map("updated_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
 
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subgroup       Subgroup?    @relation(fields: [subgroupId], references: [id], onDelete: SetNull)
+  group          Group?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@unique([userId, organizationId])
   @@index([organizationId])
-  @@index([organizationId, subgroupId])
+  @@index([organizationId, groupId])
   @@index([userId])
   @@map("memberships")
 }
 
 model AuthCredential {
-  userId       String    @id   @map("user_id")
-  passwordHash String         @map("password_hash")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime? @updatedAt      @map("updated_at")
+  userId       String   @id @map("user_id")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("auth_credentials")
 }
@@ -252,51 +152,50 @@ model RefreshToken {
 }
 
 // ============================================================================
-// 3. REPERTOIRE
+// 3. SONG REPERTOIRE (Master Songs & Custom Program Songs)
 // ============================================================================
 
 model Song {
   id              String        @id @default(cuid())
-  organizationId  String?       @map("organization_id")
-  subgroupId      String?       @map("subgroup_id")
-  title           String?
+  organizationId  String?       @map("organization_id") // Null if Global Master Library Song
+  groupId         String?       @map("group_id")
+  title           String
   key             String?
   tempo           String?
-  lyrics          String?
+  lyrics          String?       @db.Text
   writer          String?
   category        String?
-  audioFile       String?       @map("audio_file")
-  audioUrls       Json?         @map("audio_urls")
+  audioFile       String?       @map("audio_file") // Master full mix URL
+  audioUrls       Json?         @map("audio_urls") // Stem parts: { "full": "...", "BAND": "...", ... }
   conductor       String?
   leadSinger      String?       @map("lead_singer")
   drummer         String?
   leadKeyboardist String?       @map("lead_keyboardist")
   leadGuitarist   String?       @map("lead_guitarist")
   bassGuitarist   String?       @map("bass_guitarist")
-  solfas          String?
-  programId       String?       @map("praise_night_id")
-  status          String?       @default("active")
+  solfas          String?       @db.Text
+  isMaster        Boolean       @default(false) @map("is_master") // Public catalog accessible to all orgs
   isMinistered    Boolean       @default(false) @map("is_ministered")
-  rehearsalCount  Int           @default(0)     @map("rehearsal_count")
-  isActive        Boolean       @default(true)  @map("is_active")
-  categories      Json?
-  createdAt       DateTime?     @default(now()) @map("created_at")
-  updatedAt       DateTime?     @updatedAt      @map("updated_at")
-  rawData         Json?         @map("raw_data")
+  status          String        @default("active") // active, heard, unheard
+  rehearsalCount  Int           @default(0) @map("rehearsal_count")
+  isActive        Boolean       @default(true) @map("is_active")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subgroup        Subgroup?     @relation(fields: [subgroupId], references: [id], onDelete: SetNull)
-  program         Program?      @relation("song_program", fields: [programId], references: [id], onDelete: SetNull)
+  group           Group?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   roleAssignments SongRoleAssignment[]
   songCategories  SongCategory[]
   playlistItems   PlaylistItem[]
   programSongs    ProgramSong[]
-  mediaDoodles    MediaDoodle[]
   songHistory     SongHistory[]
+  mediaDoodles    MediaDoodle[]
+  userSongNotes   UserSongNote[]
 
   @@index([organizationId])
-  @@index([organizationId, subgroupId])
+  @@index([isMaster])
+  @@index([isMinistered])
   @@map("songs")
 }
 
@@ -304,7 +203,7 @@ model SongRoleAssignment {
   id     String @id @default(cuid())
   songId String @map("song_id")
   userId String @map("user_id")
-  role   String
+  role   String // LEAD_SINGER, CONDUCTOR, DRUMMER, etc.
 
   song   Song   @relation(fields: [songId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -315,33 +214,29 @@ model SongRoleAssignment {
 }
 
 // ============================================================================
-// 4. PROGRAMS
+// 4. PROGRAMS & REHEARSALS (Praise Nights & Services)
 // ============================================================================
 
 model Program {
   id             String        @id @default(cuid())
-  organizationId String?       @map("organization_id")
-  subgroupId     String?       @map("subgroup_id")
-  name           String?
+  organizationId String        @map("organization_id")
+  groupId        String?       @map("group_id")
+  name           String
   date           String?
-  category       String?
-  status         String?       @default("pre-rehearsal")
-  isActive       Boolean?      @default(false) @map("is_active")
-  isArchived     Boolean?      @default(false) @map("is_archived")
+  category       String?       @default("praise_night")
+  status         String        @default("pre-rehearsal") // pre-rehearsal, active, completed, archived
   location       String?
   bannerImage    String?       @map("banner_image")
-  songs          Json?
-  songIds        Json?         @map("song_ids")
-  rehearsalCount Int?          @default(0) @map("rehearsal_count")
-  createdAt      DateTime?     @default(now()) @map("created_at")
-  updatedAt      DateTime?     @updatedAt      @map("updated_at")
-  rawData        Json?         @map("raw_data")
+  isActive       Boolean       @default(false) @map("is_active")
+  isArchived     Boolean       @default(false) @map("is_archived")
+  rehearsalCount Int           @default(0) @map("rehearsal_count")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subgroup       Subgroup?     @relation(fields: [subgroupId], references: [id], onDelete: SetNull)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group          Group?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
   programSongs   ProgramSong[]
   attendances    Attendance[]
-  relatedSongs   Song[]        @relation("song_program")
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -352,7 +247,7 @@ model ProgramSong {
   id        String  @id @default(cuid())
   programId String  @map("program_id")
   songId    String  @map("song_id")
-  order     Int?
+  order     Int     @default(1)
 
   program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
   song      Song    @relation(fields: [songId], references: [id], onDelete: Cascade)
@@ -367,19 +262,16 @@ model ProgramSong {
 // ============================================================================
 
 model Playlist {
-  id             String        @id @default(cuid())
-  userId         String        @map("user_id")
-  organizationId String?       @map("organization_id")
-  title          String?
-  isPublic       Boolean?      @default(false) @map("is_public")
-  songs          Json?
-  songIds        Json?         @map("song_ids")
-  createdAt      DateTime?     @default(now()) @map("created_at")
-  updatedAt      DateTime?     @updatedAt      @map("updated_at")
-  rawData        Json?         @map("raw_data")
+  id             String         @id @default(cuid())
+  userId         String         @map("user_id")
+  organizationId String?        @map("organization_id")
+  title          String
+  isPublic       Boolean        @default(false) @map("is_public")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   items          PlaylistItem[]
 
   @@index([userId])
@@ -391,7 +283,7 @@ model PlaylistItem {
   id         String   @id @default(cuid())
   playlistId String   @map("playlist_id")
   songId     String   @map("song_id")
-  order      Int?
+  order      Int      @default(1)
 
   playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   song       Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
@@ -401,19 +293,18 @@ model PlaylistItem {
 }
 
 // ============================================================================
-// 6. TAXONOMY
+// 6. CATEGORIES & TAXONOMY
 // ============================================================================
 
 model Category {
-  id             String        @id @default(cuid())
-  organizationId String?       @map("zone_id")
-  name           String?
-  type           String?       @default("PROGRAM")
+  id             String         @id @default(cuid())
+  organizationId String?        @map("organization_id")
+  name           String
+  type           String         @default("PROGRAM") // PROGRAM, SONG, MEDIA
   color          String?
-  order          Int?
-  rawData        Json?         @map("raw_data")
+  order          Int?           @default(0)
 
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   songs          SongCategory[]
 
   @@unique([organizationId, name, type])
@@ -433,48 +324,44 @@ model SongCategory {
 }
 
 // ============================================================================
-// 7. MEDIA
+// 7. MEDIA ASSETS
 // ============================================================================
 
 model MediaAsset {
   id             String        @id @default(cuid())
   organizationId String?       @map("organization_id")
-  subgroupId     String?       @map("subgroup_id")
-  title          String?
-  type           String?       @default("AUDIO")
+  groupId        String?       @map("group_id")
+  title          String
+  url            String        @db.Text
+  thumbnail      String?       @db.Text
+  type           String        @default("AUDIO") // AUDIO, VIDEO, IMAGE, DOCUMENT
   folder         String?
-  size           Int?
+  size           BigInt?
   mimeType       String?       @map("mime_type")
-  rawData        Json?         @map("raw_data")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subgroup       Subgroup?     @relation(fields: [subgroupId], references: [id], onDelete: SetNull)
+  group          Group?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@map("media_assets")
 }
 
-model MediaComment {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("media_comments")
-}
-
 // ============================================================================
-// 8. MESSAGING
+// 8. MESSAGING & CHAT CHANNELS
 // ============================================================================
 
 model Chat {
-  id             String          @id @default(cuid())
-  organizationId String?         @map("organization_id")
-  type           String?         @default("direct")
-  createdById    String          @map("created_by")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  rawData        Json?           @map("raw_data")
+  id             String            @id @default(cuid())
+  organizationId String?           @map("organization_id")
+  type           String            @default("direct") // direct, group
+  title          String?
+  createdById    String            @map("created_by")
+  createdAt      DateTime          @default(now()) @map("created_at")
 
-  organization   Organization?   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy      User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  organization   Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
   participants   ChatParticipant[]
   messages       Message[]
 
@@ -496,65 +383,56 @@ model ChatParticipant {
 }
 
 model Message {
-  id        String      @id @default(cuid())
-  chatId    String      @map("chat_id")
-  senderId  String      @map("sender_id")
-  text      String?
-  type      String?     @default("text")
-  edited    Boolean?    @default(false)
-  status    String?
-  reactions Json?
-  rawData   Json?       @map("raw_data")
+  id        String   @id @default(cuid())
+  chatId    String   @map("chat_id")
+  senderId  String   @map("sender_id")
+  text      String?  @db.Text
+  type      String   @default("text") // text, song_share, media, system
+  edited    Boolean  @default(false)
+  status    String   @default("sent") // sent, delivered, read
+  createdAt DateTime @default(now()) @map("created_at")
 
-  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  sender    User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([chatId])
   @@map("messages")
 }
 
-model Call {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("calls")
-}
-
 // ============================================================================
-// 9. NOTIFICATIONS
+// 9. NOTIFICATIONS & DELIVERIES
 // ============================================================================
 
-model BroadcastNotification {
-  id             String               @id @default(cuid())
-  organizationId String?              @map("organization_id")
-  senderId       String?              @map("sender_id")
+model Notification {
+  id             String                 @id @default(cuid())
+  organizationId String?                @map("organization_id") // Null if Global Broadcast
+  senderId       String?                @map("sender_id")
   title          String
-  body           String
-  message        String?
-  type           String               @default("announcement")
+  body           String                 @db.Text
+  type           String                 @default("announcement") // announcement, reminder, system
   category       String?
-  priority       String?              @default("normal")
-  actionUrl      String?              @map("action_url")
-  createdAt      DateTime             @default(now()) @map("created_at")
-  rawData        Json?                @map("raw_data")
+  priority       String                 @default("normal") // low, normal, high, urgent
+  actionUrl      String?                @map("action_url")
+  createdAt      DateTime               @default(now()) @map("created_at")
 
-  organization   Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sender         User?                @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  organization   Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sender         User?                  @relation("notification_sender", fields: [senderId], references: [id], onDelete: SetNull)
   deliveries     NotificationDelivery[]
 
   @@index([organizationId, createdAt])
-  @@map("broadcast_notifications")
+  @@map("notifications")
 }
 
 model NotificationDelivery {
-  id             String                @id @default(cuid())
-  notificationId String                @map("notification_id")
-  userId         String                @map("user_id")
-  isRead         Boolean               @default(false) @map("is_read")
-  readAt         DateTime?             @map("read_at")
+  id             String       @id @default(cuid())
+  notificationId String       @map("notification_id")
+  userId         String       @map("user_id")
+  isRead         Boolean      @default(false) @map("is_read")
+  readAt         DateTime?    @map("read_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
 
-  notification   BroadcastNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
-  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([notificationId, userId])
   @@index([userId, isRead])
@@ -562,27 +440,26 @@ model NotificationDelivery {
 }
 
 // ============================================================================
-// 10. ATTENDANCE
+// 10. ATTENDANCE TRACKING
 // ============================================================================
 
 model Attendance {
   id             String        @id @default(cuid())
-  programId      String?       @map("rehearsal_id")
-  organizationId String?       @map("zone_id")
-  userId         String?       @map("user_id")
-  status         String?
-  scannedAt      DateTime?     @map("scanned_at")
-  checkInTime    DateTime?     @map("check_in_time")
-  qrCode         String?       @map("qr_code")
-  recordedById   String?       @map("recorded_by_admin_id")
+  organizationId String        @map("organization_id")
+  userId         String        @map("user_id")
+  programId      String?       @map("program_id")
+  status         String        @default("present")
   eventName      String?       @map("event_name")
-  createdAt      DateTime?     @default(now()) @map("created_at")
-  rawData        Json?         @map("raw_data")
+  checkInTime    DateTime?     @map("check_in_time")
+  scannedAt      DateTime?     @map("scanned_at")
+  qrCode         String?       @map("qr_code")
+  recordedById   String?       @map("recorded_by_id")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
-  program        Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User?         @relation("attendance_user", fields: [userId], references: [id], onDelete: SetNull)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User          @relation("attendance_user", fields: [userId], references: [id], onDelete: Cascade)
   recordedBy     User?         @relation("attendance_recorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  program        Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
 
   @@unique([programId, userId])
   @@index([organizationId, programId])
@@ -590,188 +467,145 @@ model Attendance {
 }
 
 // ============================================================================
-// 11. ADMIN WORKFLOWS
+// 11. WORKFLOWS & WORKSPACE ENTITIES
 // ============================================================================
 
-model AdminRequest {
+model SubmittedSong {
   id             String        @id @default(cuid())
-  userId         String?       @map("user_id")
-  organizationId String?       @map("zone_id")
-  requestedRole  String?       @map("requested_role")
-  status         String?       @default("pending")
-  reason         String?
-  reviewedById   String?       @map("reviewed_by")
-  reviewedAt     DateTime?     @map("reviewed_at")
-  createdAt      DateTime?     @default(now()) @map("created_at")
-  updatedAt      DateTime?     @updatedAt      @map("updated_at")
-  rawData        Json?         @map("raw_data")
+  organizationId String        @map("organization_id")
+  userId         String        @map("user_id")
+  title          String
+  lyrics         String?       @db.Text
+  audioUrl       String?       @map("audio_url")
+  notes          String?       @db.Text
+  status         String        @default("pending") // pending, under_review, approved, rejected
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  user           User?         @relation("admin_request_user", fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  reviewedBy     User?         @relation("admin_request_reviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User          @relation("submitted_song_user", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, status])
-  @@map("admin_requests")
-}
-
-model SubmittedSong {
-  id               String           @id @default(cuid())
-  userId           String?          @map("user_id")
-  zoneId           String?          @map("zone_id")
-  title            String?
-  status           String?          @default("pending")
-  submittedBy      String?          @map("submitted_by")
-  submittedByEmail String?          @map("submitted_by_email")
-  createdAt        DateTime?        @default(now()) @map("created_at")
-  rawData          Json?            @map("raw_data")
-
-  user             User?            @relation("submitted_song_user", fields: [userId], references: [id], onDelete: Cascade)
-  organization     Organization?    @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-
-  @@index([zoneId, status])
   @@map("submitted_songs")
 }
 
 model SupportTicket {
-  id             String         @id @default(cuid())
-  userId         String?        @map("user_id")
-  organizationId String?        @map("zone_id")
-  subject        String?
+  id             String        @id @default(cuid())
+  organizationId String?       @map("organization_id")
+  userId         String        @map("user_id")
+  subject        String
   category       String?
-  status         String?        @default("open")
-  priority       String?        @default("normal")
-  lastMessage    String?        @map("last_message")
-  lastTimestamp  DateTime?      @map("last_timestamp")
-  unreadByAdmin  Int?           @default(0) @map("unread_by_admin")
-  unreadByUser   Int?           @default(0) @map("unread_by_user")
-  createdAt      DateTime?      @default(now()) @map("created_at")
-  updatedAt      DateTime?      @updatedAt      @map("updated_at")
-  rawData        Json?          @map("raw_data")
+  status         String        @default("open") // open, in_progress, resolved, closed
+  priority       String        @default("normal") // low, normal, high, urgent
+  lastMessage    String?       @map("last_message")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
-  user           User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, status])
   @@map("support_tickets")
 }
 
-// ============================================================================
-// 12. PERSONAL WORKSPACE
-// ============================================================================
-
-model WatchHistory {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("watch_history")
-}
-
 model SongHistory {
-  id          String    @id @default(cuid())
-  userId      String?   @map("user_id")
-  songId      String?   @map("song_id")
-  rehearsalId String?   @map("rehearsal_id")
-  type        String?
-  title       String?
-  newValue    String?   @map("new_value")
-  oldValue    String?   @map("old_value")
-  createdBy   String?   @map("created_by")
+  id          String   @id @default(cuid())
+  songId      String   @map("song_id")
+  userId      String?  @map("user_id")
+  type        String?  // lyrics_edit, key_change, tempo_change
   description String?
-  createdAt   DateTime? @default(now()) @map("created_at")
-  rawData     Json?     @map("raw_data")
+  oldValue    String?  @map("old_value")
+  newValue    String?  @map("new_value")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  song        Song?     @relation(fields: [songId], references: [id], onDelete: SetNull)
+  song        Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  @@index([userId, createdAt])
+  @@index([songId, createdAt])
   @@map("song_history")
 }
 
-model UserSongNote {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
+// ============================================================================
+// 12. CALLS & DOODLES
+// ============================================================================
 
-  @@map("user_song_notes")
+model Call {
+  id           String   @id @default(cuid())
+  callerId     String   @map("caller_id")
+  receiverId   String   @map("receiver_id")
+  type         String   @default("voice") // voice, video
+  chatId       String?  @map("chat_id")
+  roomId       String?  @map("room_id")
+  callerName   String?  @map("caller_name")
+  callerAvatar String?  @map("caller_avatar")
+  status       String   @default("ringing") // ringing, active, ended, missed, rejected
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  caller       User     @relation("calls_made", fields: [callerId], references: [id], onDelete: Cascade)
+  receiver     User     @relation("calls_received", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([callerId])
+  @@index([receiverId])
+  @@map("calls")
 }
 
 model MediaDoodle {
-  id        String    @id @default(cuid())
-  userId    String?   @map("user_id")
-  songId    String?   @map("song_id")
-  data      Json?
-  createdAt DateTime? @default(now()) @map("created_at")
-  rawData   Json?     @map("raw_data")
+  id        String   @id @default(cuid())
+  songId    String   @map("song_id")
+  userId    String   @map("user_id")
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  song      Song?     @relation(fields: [songId], references: [id], onDelete: SetNull)
+  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@unique([songId, userId])
   @@map("media_doodles")
 }
 
-// ============================================================================
-// 13. AUDIOLAB
-// ============================================================================
+model UserSongNote {
+  id        String   @id @default(cuid())
+  songId    String   @map("song_id")
+  userId    String   @map("user_id")
+  notes     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-model AudioLabProject {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
+  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("audiolab_projects")
-}
-
-model AudioLabSession {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("audiolab_sessions")
-}
-
-// ============================================================================
-// 14. ANALYTICS & EVENTS
-// ============================================================================
-
-model AnalyticsEvent {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("analytics_events")
+  @@unique([songId, userId])
+  @@map("user_song_notes")
 }
 
 model Setting {
-  id        String    @id @default(cuid())
-  key       String
+  id        String   @id @default(cuid())
+  key       String   @unique
   value     Json
-  updatedAt DateTime? @updatedAt @map("updated_at")
-  rawData   Json?     @map("raw_data")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
 }
 
-model Presence {
-  id      String @id
-  rawData Json?  @map("raw_data")
-
-  @@map("presence")
-}
-
-model AchievementTemplate {
-  id      String @id @default(cuid())
-  rawData Json?  @map("raw_data")
-
-  @@map("achievement_templates")
-}
-
 model UserStatus {
-  id      String @id
-  rawData Json?  @map("raw_data")
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  mediaUrl  String   @map("media_url")
+  type      String   @default("image") // image, video
+  caption   String?
+  viewers   String[] @default([])
+  likes     String[] @default([])
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
   @@map("user_statuses")
 }
 
-model ActivityLog {
-  id      String @id
-  rawData Json?  @map("raw_data")
 
-  @@map("activity_logs")
-}

@@ -395,8 +395,9 @@ const handleKingsChatLogin = async (req: any, res: any) => {
         email: profile.email,
         firstName: profile.firstName,
         lastName: profile.lastName,
-        role: profile.role,
-        hasHqAccess: profile.hasHqAccess,
+        role: tokens.user.role || profile.role,
+        hasHqAccess: tokens.user.hasHqAccess ?? profile.hasHqAccess,
+        memberships: tokens.user.memberships || [],
       },
     });
   } catch (err: any) {

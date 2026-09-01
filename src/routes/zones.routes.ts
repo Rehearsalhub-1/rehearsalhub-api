@@ -9,7 +9,7 @@ router.get('/', async (_req, res) => {
   const rows = await prisma.organization.findMany({
     orderBy: { name: 'asc' },
     include: {
-      subgroups: {
+      groups: {
         select: { id: true, name: true, type: true, status: true },
       },
     },
@@ -21,7 +21,7 @@ router.get('/', async (_req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   const auth = res.locals.auth;
   const role = String(auth?.role || '').toLowerCase();
-  const isPlatformAdmin = role === 'super_admin' || role === 'boss' || role === 'admin' || role === 'hq_admin';
+  const isPlatformAdmin = role === 'super_admin' || role === 'boss' || role === 'admin' || role === 'hq_admin' || role === 'org_admin';
   if (!isPlatformAdmin) {
     return res.status(403).json({ success: false, error: 'Only Platform Administrators can create new organizations' });
   }
@@ -45,7 +45,6 @@ router.post('/', requireAuth, async (req, res) => {
         region: region?.trim() || null,
         isHq: Boolean(isHq),
         invitationCode: invCode,
-        rawData: { ...req.body, id },
       },
     });
 
@@ -55,11 +54,11 @@ router.post('/', requireAuth, async (req, res) => {
         create: {
           userId: adminUserId,
           organizationId: id,
-          role: isHq ? 'HQ_ADMIN' : 'ZONE_ADMIN',
+          role: 'ORG_ADMIN',
           status: 'ACTIVE',
         },
         update: {
-          role: isHq ? 'HQ_ADMIN' : 'ZONE_ADMIN',
+          role: 'ORG_ADMIN',
           status: 'ACTIVE',
         },
       });
@@ -77,7 +76,7 @@ router.get('/:zoneId', async (req, res) => {
   const zone = await prisma.organization.findUnique({
     where: { id: req.params.zoneId },
     include: {
-      subgroups: true,
+      groups: true,
     },
   });
   if (!zone) return res.status(404).json({ success: false, error: 'Organization not found' });

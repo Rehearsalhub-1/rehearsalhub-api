@@ -1,0 +1,638 @@
+[
+  {
+    "id": "1Oen12SzpUjaeN59nsID",
+    "organizationId": "zone-001",
+    "name": "Bsbshsj",
+    "description": "Jsjsjs",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-08-24T16:13:34.725Z",
+    "updatedAt": "2026-08-24T19:21:22.000Z",
+    "rawData": {
+      "name": "Bsbshsj",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-08-24T16:13:34.725Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+        "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+        "2LDikDyyaFUglU5Fq7xvCOUnl8S2_zone-001",
+        "w5VslcaEQOXRA2BfMxqsZxPK6502_zone-001",
+        "2LDikDyyaFUglU5Fq7xvCOUnl8S2",
+        "w5VslcaEQOXRA2BfMxqsZxPK6502",
+        "X9p532kH7bhOCOKn4fykcROEqIm1"
+      ],
+      "updatedAt": {
+        "_seconds": 1787599282,
+        "_nanoseconds": 296000000
+      },
+      "approvedAt": "2026-08-24T16:13:51.769Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T16:13:51.769Z",
+      "description": "Jsjsjs",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "ADMIN ADMIN",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "2KQUBEl1N5IrXacVLfzt",
+    "organizationId": "zone-international",
+    "name": "Christ Embassy Harare CBD",
+    "description": "Taking Gods' divine presence",
+    "type": "church",
+    "status": "pending",
+    "estimatedMembers": 10,
+    "createdAt": "2026-07-16T09:28:58.772Z",
+    "updatedAt": "2026-08-30T17:28:05.139Z",
+    "rawData": {
+      "name": "Christ Embassy Harare CBD",
+      "type": "church",
+      "status": "pending",
+      "zoneId": "zone-international",
+      "createdAt": "2026-07-16T09:28:58.772Z",
+      "memberIds": [
+        "bfGV6q0gpieGKE9GVWGKh4b63af2"
+      ],
+      "description": "Taking Gods' divine presence",
+      "coordinatorId": "bfGV6q0gpieGKE9GVWGKh4b63af2",
+      "coordinatorName": "Unknown",
+      "coordinatorEmail": "",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "7e3wmDevWOTJ9MdXJXm0",
+    "organizationId": "zone-009",
+    "name": "CHRIST EMBASSY ZIMBABWE",
+    "description": "Church Consolidated Mission (CCM)",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 190,
+    "createdAt": "2026-08-24T13:14:46.618Z",
+    "updatedAt": "2026-08-30T07:50:07.000Z",
+    "rawData": {
+      "name": "CHRIST EMBASSY ZIMBABWE",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-009",
+      "createdAt": "2026-08-24T13:14:46.618Z",
+      "memberIds": [
+        "XRVl4Z5R82WysirL0lYfjAY2uJx2",
+        "PPEQSmPDlhYSENeEgJlS1ntJQ2a2",
+        "ILoQcgshGcXnt9SRa33wyeZWysn2",
+        "RYBTo4g5j5No4CTTnWml4MlUvoI2",
+        "XYU6Qxq7HzZRVUmgm3Kmgng0t5h2",
+        "mem_1787586096630_z9Ts9gig30S8C0KMhp2QJoY659a2",
+        "JONxC0gZCSfMEFoatghJvLdxmA83",
+        "RBXNVm9HfbPZdCwMEnJgZIN1Vtl2",
+        "TIJnFro0pESVwdB3Sc95dntXOGq1",
+        "Vxqv2y25B2SNz8TTuJyG9v5FjX22",
+        "mem_1787588679890_waIQpAVm1Kg0diXgjueEJui7Veo1",
+        "mem_1787594095158_sEijNKFLM1P6iNUo8mAqsMhV9aC3",
+        "sEijNKFLM1P6iNUo8mAqsMhV9aC3",
+        "waIQpAVm1Kg0diXgjueEJui7Veo1",
+        "z9Ts9gig30S8C0KMhp2QJoY659a2",
+        "17q6QwTAkPhum893XLk1u3GcaUx2",
+        "0BA03rMNckaMQHczzekK8XQikXj1",
+        "mem_1787602146967_CJe20WPrQKb3oTFGJal2k3EYkp93",
+        "mem_1787602057687_LbeeEWKBEdcYBvHcqiR7CQvlNvH3",
+        "Z6HIqrrpVdU9bN5UZP9Ob5vSEj32",
+        "VRqWSaekYZM7eG2g60fCyPaqnBo2",
+        "1nvy8hrrziS36ryVWXty9vISbxw2",
+        "2LWxHwyEsihCYPwAi3cqRB4OIVi1",
+        "2VtkqcNHQ4NaV2b44uc8lEDoPpq2",
+        "4zvnbWYWbAP0chflduMJLReyaGX2",
+        "B3knjaEfDvTdtjRAdKEhIRPbJSy2",
+        "BDELBxVO6HaTcrckCBB9SWkuYXo1",
+        "CJe20WPrQKb3oTFGJal2k3EYkp93",
+        "DWoLN3BdOONE64fXKnqAhv333nC2",
+        "HQxBeIl4VHhCvgNUm9jj0zCE9Qu2",
+        "He8qxLL6ZVTG5rmrOObgZSiR46g1",
+        "LbeeEWKBEdcYBvHcqiR7CQvlNvH3",
+        "POavx8XMBBS4RScCwc8EFNsdFmh1",
+        "QtB5vqvI3QdmcNJ6wTWBTMU88802",
+        "RNUibwl8cxT17gQNqcnYZQs4Q4q1",
+        "XfIGxB6SUAWDzoCJcVzCLrDRVON2",
+        "ddSd0UqfV2WuR9YeAKN25CI1BF73",
+        "mem_1787665423172_fJsof9baPYTqFnu4F84TG0ZFc4y2",
+        "mem_1787668616247_j0lOVXtmeROBNPnwVR3stqcGA3F3",
+        "mem_1787654350576_yZNzp4XjhphaaISxTC4DGxTOgCE3",
+        "NfADz27JsGhHm4DnqXDEpjHvIqA2",
+        "BTmOxVrUUZd9sKNYMm2C5gw0fWq2",
+        "9fR97nORw0PT9oVmEdRyhuupR2l2",
+        "Y8D9dQKRHfT5uCImsEVOygrt2NU2",
+        "3U7h7JpGnnQCp69DmOSHlK6exNQ2",
+        "8jdZb7PGEMfcrDuvFIiijLtG0Re2",
+        "ByQbTW95KVh4vowvJ3GkO4YUHE82",
+        "mem_1787912945848_iL1zw76mP6SJOmSxNhPVnHiv0oY2",
+        "NjKFb4hL7dfb0QgF7u7wUXDUSbI3",
+        "C2JVMpj1hYYhncahKQosyoWk04p2",
+        "9u2M6zXloMVsZyokqWKctqOhrVx1"
+      ],
+      "updatedAt": {
+        "_seconds": 1788076207,
+        "_nanoseconds": 552000000
+      },
+      "approvedAt": "2026-08-24T13:16:01.559Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T13:16:01.559Z",
+      "description": "Church Consolidated Mission (CCM)",
+      "coordinatorId": "XRVl4Z5R82WysirL0lYfjAY2uJx2",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "Jay_Wiscot SA ZONE 5",
+      "coordinatorEmail": "jwiscoty@gmail.com",
+      "estimatedMembers": 190
+    }
+  },
+  {
+    "id": "QEy4OKNMSDJAUyLTc185",
+    "organizationId": "zone-001",
+    "name": "HQ",
+    "description": "HQ",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-06-08T09:34:01.770Z",
+    "updatedAt": "2026-06-08T13:56:48.000Z",
+    "rawData": {
+      "name": "HQ",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-06-08T09:34:01.770Z",
+      "memberIds": [
+        "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+        "HN0bMxfXDxhA8SDAFY1OZfksQBq2"
+      ],
+      "updatedAt": {
+        "_seconds": 1780927008,
+        "_nanoseconds": 336000000
+      },
+      "approvedAt": "2026-06-08T09:35:52.270Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-06-08T09:35:52.270Z",
+      "description": "HQ",
+      "coordinatorId": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "approvedByName": "irech style",
+      "coordinatorName": "Ephraim Udoji",
+      "coordinatorEmail": "ephraimloveworld1@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "XOYoPODgodx1Kk5cYNau",
+    "organizationId": "zone-052",
+    "name": "SUNDAY SERVICE",
+    "description": "Sunday service",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 31,
+    "createdAt": "2026-08-25T13:19:22.310Z",
+    "updatedAt": "2026-08-25T13:22:30.000Z",
+    "rawData": {
+      "name": "SUNDAY SERVICE",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-052",
+      "createdAt": "2026-08-25T13:19:22.310Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+        "mem_1787661065956_xBlibq9gEEeNRDAP1KPRRjPJuPV2",
+        "inrUe2sYrTevkYJHjtTK"
+      ],
+      "updatedAt": {
+        "_seconds": 1787664150,
+        "_nanoseconds": 79000000
+      },
+      "approvedAt": "2026-08-25T13:19:45.535Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-25T13:19:45.535Z",
+      "description": "Sunday service",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "ADMIN ADMIN",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 31
+    }
+  },
+  {
+    "id": "YDvP4anwpr21adaS5PLy",
+    "organizationId": "zone-orchestra",
+    "name": "Ce program",
+    "description": "Rehearsals",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 100,
+    "createdAt": "2026-08-24T10:46:35.260Z",
+    "updatedAt": "2026-08-24T10:49:36.000Z",
+    "rawData": {
+      "name": "Ce program",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-orchestra",
+      "createdAt": "2026-08-24T10:46:35.260Z",
+      "memberIds": [
+        "w2B1oVAFPcNSTkHewxn1xJ5OZYh1",
+        "4t6ZbclyYWcsaEzRSJiixz2427C2"
+      ],
+      "updatedAt": {
+        "_seconds": 1787568576,
+        "_nanoseconds": 846000000
+      },
+      "approvedAt": "2026-08-24T10:48:05.245Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T10:48:05.245Z",
+      "description": "Rehearsals",
+      "coordinatorId": "w2B1oVAFPcNSTkHewxn1xJ5OZYh1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "Unknown",
+      "coordinatorEmail": "",
+      "estimatedMembers": 100
+    }
+  },
+  {
+    "id": "Zcp4dDBwNg9sy1Fl57dD",
+    "organizationId": "zone-005",
+    "name": "Christ embassy",
+    "description": "Cell",
+    "type": "campus",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-04-04T12:01:30.000Z",
+    "updatedAt": "2026-08-24T15:56:06.000Z",
+    "rawData": {
+      "name": "Christ embassy",
+      "type": "campus",
+      "status": "active",
+      "zoneId": "zone-005",
+      "createdAt": {
+        "_seconds": 1775304090,
+        "_nanoseconds": 770000000
+      },
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+        "X9p532kH7bhOCOKn4fykcROEqIm1",
+        "4t6ZbclyYWcsaEzRSJiixz2427C2",
+        "EHQTgJOwZxSWe0GeaYed4uABmnp2",
+        "4wIX2dApibPdYVUR4zJb3g7sXGd2"
+      ],
+      "updatedAt": {
+        "_seconds": 1787586966,
+        "_nanoseconds": 101000000
+      },
+      "approvedAt": {
+        "_seconds": 1775304121,
+        "_nanoseconds": 867000000
+      },
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": {
+        "_seconds": 1775304121,
+        "_nanoseconds": 867000000
+      },
+      "description": "Cell",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "irech style",
+      "coordinatorName": "irech style",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "bfu4lfCqmOKBOkqRXZDZ",
+    "organizationId": "zone-001",
+    "name": "Teens",
+    "description": "Choir",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-04-13T10:23:14.000Z",
+    "updatedAt": "2026-06-29T16:29:16.000Z",
+    "rawData": {
+      "name": "Teens",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": {
+        "_seconds": 1776075794,
+        "_nanoseconds": 88000000
+      },
+      "memberIds": [
+        "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+        "N34G7wVDGOYo3gXQiIryeyktOQk1",
+        "IodoMeh1qhVe48t9N60ePw0HApA2",
+        "jxForVQrdubTChuO5NNinV7lPt03",
+        "KRPWLUkxWrXikYMG6aSaR6r6uWD3",
+        "V2wXQzOnuPRK90gJxUJB5K0lihN2",
+        "0D6ffcQifnQx9M3A48joPFlvHxv1",
+        "X6096ZEyknaAhflXDC12BCJydQ72",
+        "cB2x09GkVWZRPLPqud6BuNUDakq1",
+        "2WILzcTJT8MxpEfUCEgTVJoTxnK2",
+        "PYhbFe37CBcymt3Y5qnYjVK5zMt2",
+        "doVLQFQVNQV0DUUlLdUbtJFqlOv1",
+        "GNf2Aedm7vNwzSpMDW4h0K5lkIO2",
+        "MkdB8Zp0VSW9x6QZXy5ZyRhchbu2",
+        "ACJQhvWroUPCZ16kTUPcG9j9xhr1",
+        "RR0n4GtLq1TitiuTK6X5lEC9R1K2"
+      ],
+      "updatedAt": {
+        "_seconds": 1782750556,
+        "_nanoseconds": 190000000
+      },
+      "approvedAt": {
+        "_seconds": 1776075842,
+        "_nanoseconds": 47000000
+      },
+      "approvedBy": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "activatedAt": {
+        "_seconds": 1776075842,
+        "_nanoseconds": 47000000
+      },
+      "description": "Choir",
+      "coordinatorId": "h7TSoUvnExa4oaUjJ1dlU7q96XT2",
+      "approvedByName": "Ephraim Udoji",
+      "coordinatorName": "Ephraim Udoji",
+      "coordinatorEmail": "ephraimloveworld1@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "eq2iqdrHpkwB8yiBNk2K",
+    "organizationId": "zone-001",
+    "name": "Test 1",
+    "description": "hello",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 12,
+    "createdAt": "2026-04-02T14:55:03.000Z",
+    "updatedAt": "2026-06-03T14:37:17.000Z",
+    "rawData": {
+      "name": "Test 1",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": {
+        "_seconds": 1775141703,
+        "_nanoseconds": 280000000
+      },
+      "memberIds": [
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+        "ksk7ioTWYDNt2teRQyIZclYTxBW2"
+      ],
+      "updatedAt": {
+        "_seconds": 1780497437,
+        "_nanoseconds": 859000000
+      },
+      "approvedAt": {
+        "_seconds": 1775141803,
+        "_nanoseconds": 928000000
+      },
+      "approvedBy": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "activatedAt": {
+        "_seconds": 1775141803,
+        "_nanoseconds": 928000000
+      },
+      "description": "hello",
+      "coordinatorId": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "approvedByName": "ERIC STEPHEN",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "takeshopstores@gmail.com",
+      "estimatedMembers": 12
+    }
+  },
+  {
+    "id": "hoPWNhBlYemNopJzTXBm",
+    "organizationId": "zone-001",
+    "name": "JULY HSLHS PRE-REHEARSALS",
+    "description": "JULY HSLHS PRE-REHEARSALS",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-06-08T09:35:38.313Z",
+    "updatedAt": "2026-08-30T17:28:06.497Z",
+    "rawData": {
+      "name": "JULY HSLHS PRE-REHEARSALS",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-06-08T09:35:38.313Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+      ],
+      "approvedAt": "2026-06-08T09:35:56.189Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-06-08T09:35:56.189Z",
+      "description": "JULY HSLHS PRE-REHEARSALS",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "irech style",
+      "coordinatorName": "irech style",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "iuKR8GMRoPvJ0aAjCpQC",
+    "organizationId": "zone-001",
+    "name": "H",
+    "description": "Nns",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-08-24T10:41:03.285Z",
+    "updatedAt": "2026-08-30T17:28:06.687Z",
+    "rawData": {
+      "name": "H",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-001",
+      "createdAt": "2026-08-24T10:41:03.285Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+      ],
+      "approvedAt": "2026-08-24T10:41:41.151Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T10:41:41.151Z",
+      "description": "Nns",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "ADMIN ADMIN",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "mVyJV9ELhmtjeBqqYos9",
+    "organizationId": "zone-013",
+    "name": "cape twon 2",
+    "description": "hello",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 13,
+    "createdAt": "2026-03-31T13:47:48.000Z",
+    "updatedAt": "2026-08-30T17:28:06.866Z",
+    "rawData": {
+      "name": "cape twon 2",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-013",
+      "createdAt": {
+        "_seconds": 1774964868,
+        "_nanoseconds": 739000000
+      },
+      "memberIds": [
+        "8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+      ],
+      "approvedAt": "2026-05-17T09:51:08.835Z",
+      "approvedBy": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "activatedAt": "2026-05-17T09:51:08.835Z",
+      "description": "hello",
+      "coordinatorId": "8ILWjbl9IbgbuxBK9P23mB6pZBt1",
+      "approvedByName": "ERIC STEPHEN",
+      "coordinatorName": "ERIC STEPHEN",
+      "coordinatorEmail": "takeshopstores@gmail.com",
+      "estimatedMembers": 13
+    }
+  },
+  {
+    "id": "qV4mUGgwMfLoRC9ffCnc",
+    "organizationId": "zone-052",
+    "name": "Gjjj",
+    "description": "Gh",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-08-24T13:05:51.519Z",
+    "updatedAt": "2026-08-30T17:28:07.036Z",
+    "rawData": {
+      "name": "Gjjj",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-052",
+      "createdAt": "2026-08-24T13:05:51.519Z",
+      "memberIds": [
+        "w2B1oVAFPcNSTkHewxn1xJ5OZYh1"
+      ],
+      "approvedAt": "2026-08-24T13:34:02.255Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T13:34:02.255Z",
+      "description": "Gh",
+      "coordinatorId": "w2B1oVAFPcNSTkHewxn1xJ5OZYh1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "Unknown",
+      "coordinatorEmail": "",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "w7nhIWekLN3svMEFoYay",
+    "organizationId": "zone-017",
+    "name": "usa region 1",
+    "description": "hello",
+    "type": "church",
+    "status": "rejected",
+    "estimatedMembers": 14,
+    "createdAt": "2026-03-31T14:06:32.000Z",
+    "updatedAt": "2026-08-30T17:28:07.200Z",
+    "rawData": {
+      "name": "usa region 1",
+      "type": "church",
+      "status": "rejected",
+      "zoneId": "zone-017",
+      "createdAt": {
+        "_seconds": 1774965992,
+        "_nanoseconds": 436000000
+      },
+      "memberIds": [
+        "7USGTFO7lzV3qT9mWVmMIvjYbkC3"
+      ],
+      "rejectedAt": {
+        "_seconds": 1774966026,
+        "_nanoseconds": 575000000
+      },
+      "rejectedBy": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+      "description": "hello",
+      "coordinatorId": "7USGTFO7lzV3qT9mWVmMIvjYbkC3",
+      "coordinatorName": "ERIC STEPHEN",
+      "rejectionReason": "sorry",
+      "coordinatorEmail": "easstephen345@gmail.com",
+      "estimatedMembers": 14
+    }
+  },
+  {
+    "id": "xju00WjWL9rXcU6M4YIQ",
+    "organizationId": "zone-052",
+    "name": "SUNDAY SERVICE - 30TH AUG 2026",
+    "description": "Lead singer Est. Bro caleb",
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": 10,
+    "createdAt": "2026-08-24T13:33:41.025Z",
+    "updatedAt": "2026-08-25T15:23:12.000Z",
+    "rawData": {
+      "name": "SUNDAY SERVICE - 30TH AUG 2026",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-052",
+      "createdAt": "2026-08-24T13:33:41.025Z",
+      "memberIds": [
+        "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+        "X9p532kH7bhOCOKn4fykcROEqIm1",
+        "HLPt9QnAMrYc9UaMtlhut0FoG2n2",
+        "mem_1787661065956_xBlibq9gEEeNRDAP1KPRRjPJuPV2",
+        "T1mpg4nXD31kBndgXpOQ",
+        "tZYfZIRaVsUdUsMsZ10D",
+        "IpUhOjWHFWJNX9ghlNeY",
+        "TNfNE4tLeZc2TtFrENy5uNC2dd82",
+        "mem_1785961887949_w2B1oVAFPcNSTkHewxn1xJ5OZYh1",
+        "inrUe2sYrTevkYJHjtTK",
+        "gtG9jDoZM5OvTmze9LUA",
+        "mem_1783152689609_IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+      ],
+      "updatedAt": {
+        "_seconds": 1787671392,
+        "_nanoseconds": 565000000
+      },
+      "approvedAt": "2026-08-24T13:33:58.100Z",
+      "approvedBy": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "activatedAt": "2026-08-24T13:33:58.100Z",
+      "description": "Lead singer Est. Bro caleb",
+      "coordinatorId": "IS6DHsWw8Zh1yEzsmpHHq1u255u1",
+      "approvedByName": "ADMIN ADMIN",
+      "coordinatorName": "ADMIN ADMIN",
+      "coordinatorEmail": "styleirech@gmail.com",
+      "estimatedMembers": 10
+    }
+  },
+  {
+    "id": "sg_1788151424417_vlv1",
+    "organizationId": "zone-038",
+    "name": "NY",
+    "description": null,
+    "type": "church",
+    "status": "active",
+    "estimatedMembers": null,
+    "createdAt": "2026-08-31T04:43:44.421Z",
+    "updatedAt": "2026-08-31T04:56:31.891Z",
+    "rawData": {
+      "id": "sg_1788151424417_vlv1",
+      "name": "NY",
+      "type": "church",
+      "status": "active",
+      "zoneId": "zone-038",
+      "createdAt": "2026-08-31T04:43:44.417Z",
+      "createdBy": "fjKn6C6OjZdnQSW1udz7oLzDYBk2",
+      "memberIds": [
+        "fjKn6C6OjZdnQSW1udz7oLzDYBk2"
+      ],
+      "description": "church",
+      "coordinatorId": "fjKn6C6OjZdnQSW1udz7oLzDYBk2",
+      "coordinatorName": "hi why",
+      "estimatedMembers": 14
+    }
+  }
+]

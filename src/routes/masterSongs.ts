@@ -1,64 +1,54 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { mergeRawRow } from '../lib/rawRow';
 import { requireAuth } from '../auth/auth.middleware';
 
 const router = Router();
 
 function requireMasterEditor(req: Request, res: Response, next: any): void {
   const role = String(res.locals.auth?.role || '').toLowerCase();
-  if (role !== 'hq_admin' && role !== 'admin') {
+  if (role !== 'hq_admin' && role !== 'admin' && role !== 'super_admin' && role !== 'org_admin') {
     res.status(403).json({ success: false, error: 'Forbidden' });
     return;
   }
   next();
 }
 
-// GET /master-songs
+// GET /master-songs — Returns the 822 official Public Master Songs
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const rows = await prisma.song.findMany({
+    const songs = await prisma.song.findMany({
       where: {
-        OR: [
-          { isMinistered: true },
-          { category: 'Ministered Songs' },
-          { organizationId: 'zone-001' },
-        ],
+        isMaster: true,
       },
       orderBy: { title: 'asc' },
     });
 
-    const songs = rows.map((r) => {
-      const m = mergeRawRow(r);
-      return {
-        id: String(m.id),
-        title: typeof m.title === 'string' ? m.title : '',
-        key: typeof m.key === 'string' ? m.key : null,
-        tempo: typeof m.tempo === 'string' ? m.tempo : null,
-        lyrics: typeof m.lyrics === 'string' ? m.lyrics : null,
-        writer: typeof m.writer === 'string' ? m.writer : null,
-        solfa: typeof m.solfa === 'string' ? m.solfa : null,
-        category: typeof m.category === 'string' ? m.category : null,
-        categories: Array.isArray(m.categories) ? m.categories : (m.category ? [m.category] : []),
-        imageUrl: typeof m.imageUrl === 'string' ? m.imageUrl : null,
-        audioFile: typeof m.audioFile === 'string' ? m.audioFile : null,
-        audioUrls: m.audioUrls && typeof m.audioUrls === 'object' ? m.audioUrls : null,
-        conductor: typeof m.conductor === 'string' ? m.conductor : null,
-        leadSinger: typeof m.leadSinger === 'string' ? m.leadSinger : null,
-        drummer: typeof m.drummer === 'string' ? m.drummer : null,
-        bassGuitarist: typeof m.bassGuitarist === 'string' ? m.bassGuitarist : null,
-        leadKeyboardist: typeof m.leadKeyboardist === 'string' ? m.leadKeyboardist : null,
-        customParts: m.customParts && typeof m.customParts === 'object' ? m.customParts : null,
-        sourceType: typeof m.sourceType === 'string' ? m.sourceType : null,
-        isHqOnly: !!m.isHqOnly || !!m.is_hq_only || m.status === 'hidden' || m.status === 'hq_only',
-        isHistory: !!m.isHistory || !!m.is_history || m.status === 'history' || m.status === 'archived',
-        status: typeof m.status === 'string' ? m.status : (m.isHistory || m.is_history ? 'history' : (m.isHqOnly || m.is_hq_only ? 'hidden' : 'active')),
-        publishedAt: m.publishedAt || null,
-        updatedAt: m.updatedAt || null,
-      };
-    });
+    const formattedSongs = songs.map((s) => ({
+      id: s.id,
+      title: s.title || '',
+      key: s.key || null,
+      tempo: s.tempo || null,
+      lyrics: s.lyrics || null,
+      writer: s.writer || null,
+      solfas: s.solfas || null,
+      category: s.category || 'Master Library',
+      audioFile: s.audioFile || null,
+      audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
+      conductor: s.conductor || null,
+      leadSinger: s.leadSinger || null,
+      drummer: s.drummer || null,
+      bassGuitarist: s.bassGuitarist || null,
+      leadKeyboardist: s.leadKeyboardist || null,
+      leadGuitarist: s.leadGuitarist || null,
+      status: s.status || 'active',
+      isMaster: true,
+      isMinistered: s.isMinistered,
+      rehearsalCount: s.rehearsalCount,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
 
-    res.json({ success: true, count: songs.length, data: songs });
+    res.json({ success: true, count: formattedSongs.length, data: formattedSongs });
   } catch (error) {
     console.error('Error fetching master songs:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch master songs' });
@@ -70,7 +60,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const song = await prisma.song.findUnique({ where: { id: req.params.id } });
     if (!song) return res.status(404).json({ success: false, error: 'Song not found' });
-    res.json({ success: true, data: mergeRawRow(song) });
+    res.json({ success: true, data: song });
   } catch (error) {
     console.error('Error fetching song:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch song' });
@@ -82,7 +72,6 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
   try {
     const body = req.body || {};
     const songId = body.id || `master_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date();
 
     const row = await prisma.song.create({
       data: {
@@ -92,7 +81,7 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
         tempo: body.tempo || null,
         lyrics: body.lyrics || null,
         writer: body.writer || null,
-        category: body.category || 'Ministered Songs',
+        category: body.category || 'Master Library',
         audioFile: body.audioFile || body.audio_file || null,
         audioUrls: body.audioUrls || body.audio_urls || null,
         conductor: body.conductor || null,
@@ -100,17 +89,18 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
         drummer: body.drummer || null,
         bassGuitarist: body.bassGuitarist || body.bass_guitarist || null,
         leadKeyboardist: body.leadKeyboardist || body.lead_keyboardist || null,
-        categories: Array.isArray(body.categories) ? body.categories : (body.category ? [body.category] : []),
+        leadGuitarist: body.leadGuitarist || body.lead_guitarist || null,
+        solfas: body.solfas || body.solfa || null,
+        isMaster: true,
         isMinistered: true,
-        organizationId: 'zone-001',
-        rawData: { ...body, id: songId, createdAt: now.toISOString() },
+        status: body.status || 'active',
       },
     });
 
     res.status(201).json({ success: true, message: 'Master song created', data: row });
   } catch (err) {
     console.error('[master POST]', err);
-    res.status(500).json({ success: false, error: 'Something went wrong' });
+    res.status(500).json({ success: false, error: 'Failed to create master song' });
   }
 });
 
@@ -123,12 +113,7 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     const existing = await prisma.song.findUnique({ where: { id: songId } });
     if (!existing) return res.status(404).json({ success: false, error: 'Master song not found' });
 
-    const prevRaw = (existing.rawData || {}) as Record<string, unknown>;
-    const data: Record<string, any> = {
-      updatedAt: new Date(),
-      rawData: { ...prevRaw, ...body },
-    };
-
+    const data: Record<string, any> = {};
     if (body.title !== undefined) data.title = body.title;
     if (body.key !== undefined) data.key = body.key;
     if (body.tempo !== undefined) data.tempo = body.tempo;
@@ -142,13 +127,15 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     if (body.drummer !== undefined) data.drummer = body.drummer;
     if (body.bassGuitarist !== undefined || body.bass_guitarist !== undefined) data.bassGuitarist = body.bassGuitarist || body.bass_guitarist;
     if (body.leadKeyboardist !== undefined || body.lead_keyboardist !== undefined) data.leadKeyboardist = body.leadKeyboardist || body.lead_keyboardist;
-    if (body.categories !== undefined) data.categories = body.categories;
+    if (body.leadGuitarist !== undefined || body.lead_guitarist !== undefined) data.leadGuitarist = body.leadGuitarist || body.lead_guitarist;
+    if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
+    if (body.status !== undefined) data.status = body.status;
 
     const updated = await prisma.song.update({ where: { id: songId }, data });
     res.json({ success: true, message: 'Master song updated', data: updated });
   } catch (err) {
     console.error('[master PATCH]', err);
-    res.status(500).json({ success: false, error: 'Something went wrong' });
+    res.status(500).json({ success: false, error: 'Failed to update master song' });
   }
 });
 
@@ -159,7 +146,7 @@ router.delete('/:id', requireAuth, requireMasterEditor, async (req: Request, res
     res.json({ success: true, message: 'Master song deleted' });
   } catch (err) {
     console.error('[master DELETE]', err);
-    res.status(500).json({ success: false, error: 'Something went wrong' });
+    res.status(500).json({ success: false, error: 'Failed to delete master song' });
   }
 });
 

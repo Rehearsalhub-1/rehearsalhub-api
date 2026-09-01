@@ -375,104 +375,18 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   if (!parsed.success) {
     res.status(400).json({ success: false, error: 'Invalid request body' });
     return;
-  }
-
-  const existing = await prisma.profile.findUnique({ where: { id: userId } });
+  }  const existing = await prisma.user.findUnique({ where: { id: userId } });
   if (!existing) {
     res.status(404).json({ success: false, error: 'Profile not found' });
     return;
   }
 
   const body = parsed.data as Record<string, any>;
-  const raw = asRaw(existing.rawData) as Record<string, any>;
-
   const firstName = body.first_name || body.firstName;
   const lastName = body.last_name || body.lastName;
-  const middleName = body.middle_name || body.middleName;
   const phone = body.phone_number || body.phoneNumber;
-  const zoneCode = body.zone_code || body.zoneCode || body.zone_id || body.zoneId;
   const kingschatId = body.kingschat_id || body.kingschatId;
   const avatar = body.profile_image_url || body.avatar_url || body.avatar;
-  const hasHq = body.has_hq_access !== undefined ? body.has_hq_access : body.hasHqAccess;
-  const hiddenFeatures = body.hidden_features !== undefined ? body.hidden_features : body.hiddenFeatures;
-
-  if (firstName !== undefined) raw.first_name = firstName;
-  if (lastName !== undefined) raw.last_name = lastName;
-  if (middleName !== undefined) raw.middle_name = middleName;
-  if (phone !== undefined) raw.phone_number = phone;
-  if (body.gender !== undefined) raw.gender = body.gender;
-  if (body.birthday !== undefined) raw.birthday = body.birthday;
-  if (body.region !== undefined) raw.region = body.region;
-  if (isHqAdmin && zoneCode !== undefined) {
-    raw.zone_code = zoneCode;
-    raw.zoneCode = zoneCode;
-    raw.zoneId = zoneCode;
-  }
-  if (body.church !== undefined) raw.church = body.church;
-  if (kingschatId !== undefined) raw.kingschat_id = kingschatId;
-  if (body.designation !== undefined) raw.designation = body.designation;
-  if (avatar !== undefined) {
-    raw.profile_image_url = avatar;
-    raw.avatar = avatar;
-  }
-  if (body.username !== undefined || body.alias !== undefined) {
-    const candidate = String(body.username ?? body.alias ?? '').trim().toLowerCase().replace(/^@/, '');
-    if (candidate) {
-      const takenRows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id FROM profiles
-         WHERE id != $1
-           AND (lower(raw_data->>'username') = $2 OR lower(raw_data->>'alias') = $2)
-         LIMIT 1`,
-        userId,
-        candidate,
-      );
-
-      if (takenRows.length > 0) {
-        res.status(409).json({ success: false, error: `The username @${candidate} is already in use. Please choose another username.` });
-        return;
-      }
-      raw.username = candidate;
-      raw.alias = candidate;
-    } else {
-      delete raw.username;
-      delete raw.alias;
-    }
-  }
-  if (body.status !== undefined) raw.status = body.status;
-  if (body.is_banned !== undefined) raw.is_banned = Boolean(body.is_banned);
-  if (body.is_suspended !== undefined) raw.is_suspended = Boolean(body.is_suspended);
-  if (body.is_active !== undefined) raw.is_active = Boolean(body.is_active);
-  if (isHqAdmin && body.zone_code !== undefined) {
-    raw.zone_code = body.zone_code;
-    raw.zoneId = body.zone_code;
-  }
-  if (hiddenFeatures !== undefined) {
-    raw.hidden_features = hiddenFeatures;
-    raw.hiddenFeatures = hiddenFeatures;
-  }
-  if (body.can_access_archive !== undefined || body.canAccessArchive !== undefined) {
-    const val = Boolean(body.can_access_archive ?? body.canAccessArchive);
-    raw.can_access_archive = val;
-    raw.canAccessArchive = val;
-  }
-  if (body.can_access_pre_rehearsal !== undefined || body.canAccessPreRehearsal !== undefined) {
-    const val = Boolean(body.can_access_pre_rehearsal ?? body.canAccessPreRehearsal);
-    raw.can_access_pre_rehearsal = val;
-    raw.canAccessPreRehearsal = val;
-  }
-  if (body.canAnnotate !== undefined || body.can_annotate !== undefined || (body as any).canUseAnnotation !== undefined) {
-    const val = Boolean(body.canAnnotate ?? body.can_annotate ?? (body as any).canUseAnnotation);
-    raw.canAnnotate = val;
-    raw.canUseAnnotation = val;
-    raw.canUseBrush = val;
-  }
-  if (isHqAdmin && body.role !== undefined) {
-    raw.role = body.role;
-  }
-  if (isHqAdmin && hasHq !== undefined) {
-    raw.hasHqAccess = hasHq;
-    raw.has_hq_access = hasHq;
-  }
 
   // If password is provided, hash and update in auth_credentials
   if (body.password) {
@@ -498,11 +412,10 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   const updateFields: Record<string, any> = {
     ...(firstName !== undefined ? { firstName } : {}),
     ...(lastName !== undefined ? { lastName } : {}),
+    ...(phone !== undefined ? { phone } : {}),
     ...(kingschatId !== undefined ? { kingschatId } : {}),
     ...(avatar !== undefined ? { avatarUrl: avatar } : {}),
     ...(body.email !== undefined ? { email: body.email.trim().toLowerCase() } : {}),
-    rawData: raw,
-    updatedAt: new Date().toISOString(),
   };
 
   const updated = await prisma.user.update({
@@ -579,13 +492,12 @@ router.patch('/:userId/role', requireAuth, requireTenantAdmin, async (req, res) 
       return;
     }
 
-    const hasHqAccess = role === 'hq_admin';
-    const memberRole = role === 'hq_admin' ? 'HQ_ADMIN' : role === 'zone_admin' ? 'ZONE_ADMIN' : 'MEMBER';
+    const memberRole = role === 'hq_admin' ? 'ORG_ADMIN' : role === 'zone_admin' ? 'ORG_ADMIN' : 'MEMBER';
 
     await prisma.membership.upsert({
       where: { userId_organizationId: { userId, organizationId: 'zone-001' } },
-      create: { userId, organizationId: 'zone-001', role: memberRole as any, hasHqAccess },
-      update: { role: memberRole as any, hasHqAccess },
+      create: { userId, organizationId: 'zone-001', role: memberRole },
+      update: { role: memberRole },
     });
 
     res.json({ success: true, message: `Role updated to ${role}` });
@@ -607,44 +519,38 @@ router.post('/:userId/approve', requireAuth, requireTenantAdmin, async (req, res
     const existing = await prisma.user.findUnique({ where: { id: userId } });
     if (!existing) { res.status(404).json({ success: false, error: 'Profile not found' }); return; }
 
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, pending_hq_approval: false, is_active: true, status: 'active', approved_by: auth.userId, approved_at: new Date().toISOString() };
     await prisma.user.update({
       where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
+      data: { profileCompleted: true },
     });
 
     await prisma.membership.upsert({
       where: { userId_organizationId: { userId, organizationId: 'zone-001' } },
-      create: { userId, organizationId: 'zone-001', role: 'MEMBER', hasHqAccess: true },
-      update: { hasHqAccess: true },
+      create: { userId, organizationId: 'zone-001', role: 'MEMBER' },
+      update: { status: 'ACTIVE' },
     });
 
     // Notify user their account is approved
     const notifId = crypto.randomUUID();
-    await prisma.broadcastNotification.create({
+    await prisma.notification.create({
       data: {
         id: notifId,
         type: 'join_request_approved',
         title: '🎉 Your HQ account has been approved',
         body: 'Your request to join the HQ group has been approved by an admin. You can now log in to the Rehearsal Hub Portal.',
-        message: 'Your request to join the HQ group has been approved by an admin. You can now log in to the Rehearsal Hub Portal.',
         category: 'join_request',
-        priority: 'HIGH',
+        priority: 'high',
         organizationId: 'zone-001',
         senderId: auth.userId,
-        createdAt: new Date(),
-        rawData: { type: 'join_request_approved', approvedBy: auth.userId, approvedAt: new Date().toISOString(), status: 'approved', zoneCode: raw.zone_code || null, targetUserId: userId } as any,
       },
     }).catch(() => {});
 
     // Dispatch email notification via Nodemailer
-    const targetEmail = typeof existing.email === 'string' ? existing.email : (typeof raw.email === 'string' ? raw.email : '');
+    const targetEmail = existing.email;
     if (targetEmail) {
-      const singerName = [existing.firstName, existing.lastName].filter(Boolean).join(' ') || (typeof raw.first_name === 'string' ? raw.first_name : 'Singer');
-      const zoneName = typeof raw.zone_code === 'string' ? raw.zone_code : undefined;
+      const singerName = [existing.firstName, existing.lastName].filter(Boolean).join(' ') || 'Singer';
       const { sendAccountApprovalEmail } = await import('../services/email.service');
-      sendAccountApprovalEmail(targetEmail, singerName, zoneName).catch(() => {});
+      sendAccountApprovalEmail(targetEmail, singerName, 'Loveworld Singers HQ').catch(() => {});
     }
 
     res.json({ success: true, message: 'Account approved successfully' });
@@ -667,15 +573,8 @@ router.post('/:userId/reject', requireAuth, requireTenantAdmin, async (req, res)
     if (!existing) { res.status(404).json({ success: false, error: 'Profile not found' }); return; }
 
     const { reason } = req.body;
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, pending_hq_approval: false, is_active: false, rejected: true, rejected_by: auth.userId, rejected_at: new Date().toISOString(), rejection_reason: reason || null };
-    await prisma.user.update({
-      where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
-    });
-
     const notifId = crypto.randomUUID();
-    await prisma.broadcastNotification.create({
+    await prisma.notification.create({
       data: {
         id: notifId,
         type: 'join_request_rejected',
@@ -683,15 +582,10 @@ router.post('/:userId/reject', requireAuth, requireTenantAdmin, async (req, res)
         body: reason
           ? `Your HQ join request was not approved. Reason: ${reason}`
           : 'Your request to join the HQ group was not approved at this time. Please contact your zone admin.',
-        message: reason
-          ? `Your HQ join request was not approved. Reason: ${reason}`
-          : 'Your request to join the HQ group was not approved at this time. Please contact your zone admin.',
         category: 'join_request',
-        priority: 'NORMAL',
+        priority: 'normal',
         organizationId: 'zone-001',
         senderId: auth.userId,
-        createdAt: new Date(),
-        rawData: { type: 'join_request_rejected', rejectedBy: auth.userId, rejectedAt: new Date().toISOString(), reason: reason || null, status: 'rejected', targetUserId: userId },
       },
     }).catch(() => {});
 
@@ -710,14 +604,9 @@ router.post('/:userId/suspend', requireAuth, async (req, res) => {
     if (auth.role !== 'hq_admin' && auth.role !== 'admin') {
       res.status(403).json({ success: false, error: 'Forbidden' }); return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!existing) return res.status(404).json({ success: false, error: 'Profile not found' });
-
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, status: 'suspended', is_suspended: true, is_active: false, suspended_by: auth.userId, suspended_at: new Date().toISOString() };
-    await prisma.profile.update({
-      where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
+    await prisma.membership.updateMany({
+      where: { userId },
+      data: { status: 'SUSPENDED' },
     });
 
     res.json({ success: true, message: 'Member account suspended' });
@@ -734,14 +623,9 @@ router.post('/:userId/ban', requireAuth, async (req, res) => {
     if (auth.role !== 'hq_admin' && auth.role !== 'admin') {
       res.status(403).json({ success: false, error: 'Forbidden' }); return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!existing) return res.status(404).json({ success: false, error: 'Profile not found' });
-
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, status: 'banned', is_banned: true, is_active: false, banned_by: auth.userId, banned_at: new Date().toISOString() };
-    await prisma.profile.update({
-      where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
+    await prisma.membership.updateMany({
+      where: { userId },
+      data: { status: 'INACTIVE' },
     });
 
     res.json({ success: true, message: 'Member banned from platform' });
@@ -758,14 +642,9 @@ router.post('/:userId/reactivate', requireAuth, async (req, res) => {
     if (auth.role !== 'hq_admin' && auth.role !== 'admin') {
       res.status(403).json({ success: false, error: 'Forbidden' }); return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!existing) return res.status(404).json({ success: false, error: 'Profile not found' });
-
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, status: 'active', is_banned: false, is_suspended: false, is_active: true, reactivated_by: auth.userId, reactivated_at: new Date().toISOString() };
-    await prisma.profile.update({
-      where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
+    await prisma.membership.updateMany({
+      where: { userId },
+      data: { status: 'ACTIVE' },
     });
 
     res.json({ success: true, message: 'Member account reactivated' });
@@ -784,14 +663,8 @@ router.post('/:userId/remove-from-zone', requireAuth, async (req, res) => {
     if (!isHqAdmin && !isZoneAdmin) {
       res.status(403).json({ success: false, error: 'Forbidden' }); return;
     }
-    const existing = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!existing) return res.status(404).json({ success: false, error: 'Profile not found' });
-
-    const raw = asRaw(existing.rawData);
-    const updatedRaw = { ...raw, zone_code: null, zoneId: null, zoneName: 'Unassigned', removed_from_zone_at: new Date().toISOString() };
-    await prisma.profile.update({
-      where: { id: userId },
-      data: { rawData: updatedRaw, updatedAt: new Date().toISOString() },
+    await prisma.membership.deleteMany({
+      where: { userId },
     });
 
     res.json({ success: true, message: 'Member removed from zone' });

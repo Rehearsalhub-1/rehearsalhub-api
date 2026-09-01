@@ -1,57 +1,50 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
-import { mergeRawRow } from '../lib/rawRow';
 import { canManageAllTenants } from '../auth/permissions';
 
 const router = Router();
 const idSchema = z.string().min(1).max(200);
 
 /** GET /settings/:id */
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const parsed = idSchema.safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid id' });
-    const row = await prisma.setting.findUnique({ where: { id: parsed.data } });
+    const row = await prisma.setting.findUnique({ where: { key: parsed.data } });
     if (!row) return res.json({ success: true, data: null });
-    const merged = mergeRawRow(row);
+    const val = typeof row.value === 'object' ? (row.value as any) : {};
     res.json({
       success: true,
       data: {
-        id: row.id,
-        latitude: typeof merged.latitude === 'number' ? merged.latitude : Number(merged.latitude) || undefined,
-        longitude: typeof merged.longitude === 'number' ? merged.longitude : Number(merged.longitude) || undefined,
-        radius: typeof merged.radius === 'number' ? merged.radius : Number(merged.radius) || undefined,
-        activeEventName: (merged.activeEventName as string | undefined) || (merged.active_event_name as string | undefined),
-        ...merged,
+        id: row.key,
+        ...val,
       },
     });
   } catch (err) {
     console.error('[settings/:id:get]', err);
-    res.status(500).json({ success: false, error: 'Something went wrong' });
+    res.status(500).json({ success: false, error: 'Failed to load settings' });
   }
 });
 
 /** PUT /settings/:id */
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!canManageAllTenants(res.locals.auth?.role)) return res.status(403).json({ success: false, error: 'Forbidden' });
     const parsed = idSchema.safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid id' });
 
-    const id = parsed.data;
+    const key = parsed.data;
     const bodyData = req.body || {};
-    const now = new Date().toISOString();
-    const existing = await prisma.setting.findUnique({ where: { id } });
-    const mergedData = { ...(existing ? mergeRawRow(existing) : {}), ...bodyData, id, updatedAt: now };
 
-    if (existing) {
-      await prisma.setting.update({ where: { id }, data: { key: id, value: mergedData } });
-    } else {
-      await prisma.setting.create({ data: { id, key: id, value: mergedData } });
-    }
-    res.json({ success: true, data: mergedData });
+    const updated = await prisma.setting.upsert({
+      where: { key },
+      update: { value: bodyData },
+      create: { key, value: bodyData },
+    });
+
+    res.json({ success: true, data: updated.value });
   } catch (err) {
     console.error('[settings/:id:put]', err);
     res.status(500).json({ success: false, error: 'Failed to update settings' });
@@ -59,25 +52,27 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 /** PATCH /settings/:id */
-router.patch('/:id', requireAuth, async (req, res) => {
+router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const role = String(res.locals.auth?.role || '').toLowerCase();
     if (role !== 'admin' && role !== 'hq_admin' && role !== 'super_admin') return res.status(403).json({ success: false, error: 'Forbidden' });
     const parsed = idSchema.safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid id' });
 
-    const id = parsed.data;
+    const key = parsed.data;
     const bodyData = req.body || {};
-    const now = new Date().toISOString();
-    const existing = await prisma.setting.findUnique({ where: { id } });
-    const mergedData = { ...(existing ? mergeRawRow(existing) : {}), ...bodyData, id, updatedAt: now };
 
-    if (existing) {
-      await prisma.setting.update({ where: { id }, data: { key: id, value: mergedData } });
-    } else {
-      await prisma.setting.create({ data: { id, key: id, value: mergedData } });
-    }
-    res.json({ success: true, data: mergedData });
+    const existing = await prisma.setting.findUnique({ where: { key } });
+    const prevVal = existing && typeof existing.value === 'object' ? (existing.value as any) : {};
+    const nextVal = { ...prevVal, ...bodyData };
+
+    const updated = await prisma.setting.upsert({
+      where: { key },
+      update: { value: nextVal },
+      create: { key, value: nextVal },
+    });
+
+    res.json({ success: true, data: updated.value });
   } catch (err) {
     console.error('[settings/:id:patch]', err);
     res.status(500).json({ success: false, error: 'Failed to update settings' });

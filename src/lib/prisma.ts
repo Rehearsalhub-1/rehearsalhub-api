@@ -5,8 +5,7 @@ import pg from 'pg';
 
 export type ExtendedPrismaClient = PrismaClient & {
   profile: PrismaClient['user'];
-  notification: PrismaClient['broadcastNotification'];
-  activityLog: PrismaClient['analyticsEvent'];
+  notification: PrismaClient['notification'];
   zone: PrismaClient['organization'];
 };
 
@@ -15,17 +14,16 @@ function createPrismaClient(): ExtendedPrismaClient {
   const pool = new pg.Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
-    max: 10,
-    idleTimeoutMillis: 8000,          // shorter than Supabase's 10s kill timer
-    connectionTimeoutMillis: 10000,
+    max: 20,
+    idleTimeoutMillis: 60000,
+    connectionTimeoutMillis: 25000,
     keepAlive: true,
-    keepAliveInitialDelayMillis: 5000,
+    keepAliveInitialDelayMillis: 10000,
     allowExitOnIdle: false,
   });
 
-  // Catch transient idle socket terminations from cloud pooler (Supabase/PgBouncer)
   pool.on('error', (err) => {
-    console.warn('[pg-pool] Handled idle connection drop:', err?.message || err);
+    console.warn('[pg-pool] Connection error:', err?.message || err);
   });
 
   const adapter = new PrismaPg(pool);
@@ -37,8 +35,6 @@ function createPrismaClient(): ExtendedPrismaClient {
   return new Proxy(client, {
     get(target, prop, receiver) {
       if (prop === 'profile') return (target as any).user;
-      if (prop === 'notification') return (target as any).broadcastNotification;
-      if (prop === 'activityLog') return (target as any).analyticsEvent;
       if (prop === 'zone') return (target as any).organization;
       return Reflect.get(target, prop, receiver);
     },

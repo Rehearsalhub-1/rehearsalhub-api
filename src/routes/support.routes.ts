@@ -1,89 +1,61 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
-import { mergeRawRow } from '../lib/rawRow';
+import { canManageTenant } from '../auth/permissions';
 import { broadcast } from '../ws/wsServer';
-import { canManageTenant, isHQRole } from '../auth/permissions';
 
 const router = Router();
 
-function isSupportAdmin(role: unknown): boolean {
-  return canManageTenant(role);
-}
-
-async function getAccessibleTicket(ticketId: string, userId: string, role: unknown) {
-  const ticket = await prisma.supportTicket.findUnique({ where: { id: ticketId } });
-  if (!ticket) return { ticket: null, forbidden: false };
-  if (isSupportAdmin(role) || ticket.userId === userId) return { ticket, forbidden: false };
-  return { ticket: null, forbidden: true };
-}
-
-function shapeTicket(row: any) {
-  const merged = mergeRawRow(row);
-  const raw = (row.rawData && typeof row.rawData === 'object') ? (row.rawData as Record<string, any>) : {};
-
-  let lastMessageText = row.lastMessage || raw.lastMessage || raw.last_message || 'No messages yet';
-  if (typeof lastMessageText === 'object' && lastMessageText && 'text' in (lastMessageText as any)) {
-    lastMessageText = (lastMessageText as any).text;
-  }
-
-  let lastTimestamp = row.lastTimestamp ? new Date(row.lastTimestamp).toISOString() : (raw.lastTimestamp || raw.updatedAt || new Date().toISOString());
-
+function shapeTicket(t: any) {
   return {
-    ...merged,
-    id: row.id,
-    ticketId: row.id,
-    userId: row.userId || raw.userId || 'singer',
-    userName: row.userName || raw.userName || raw.user_name || 'Member',
-    userEmail: row.userEmail || raw.userEmail || '',
-    subject: row.subject || raw.subject || 'Support Inquiry',
-    category: row.category || raw.category || 'general',
-    status: row.status || raw.status || 'open',
-    priority: row.priority || raw.priority || 'normal',
-    zoneId: row.zoneId || raw.zoneId || null,
-    lastMessage: typeof lastMessageText === 'string' ? lastMessageText : 'No messages yet',
-    lastTimestamp,
-    unreadByAdmin: row.unreadByAdmin || 0,
-    unreadByUser: row.unreadByUser || 0,
-    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+    id: t.id,
+    userId: t.userId,
+    userName: t.user ? [t.user.firstName, t.user.lastName].filter(Boolean).join(' ') || 'Member' : 'Member',
+    userEmail: t.user?.email || '',
+    userAvatar: t.user?.avatarUrl || null,
+    subject: t.subject || 'Support Request',
+    category: t.category || 'General',
+    status: t.status || 'open',
+    priority: t.priority || 'normal',
+    lastMessage: t.lastMessage || '',
+    organizationId: t.organizationId || null,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
   };
 }
 
-/** GET /support — List support tickets */
-router.get('/', requireAuth, async (req, res) => {
+async function getAccessibleTicket(ticketId: string, userId: string, role?: string) {
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    include: { user: true },
+  });
+  if (!ticket) return { ticket: null, forbidden: false };
+  const isAdmin = canManageTenant(role);
+  if (!isAdmin && ticket.userId !== userId) {
+    return { ticket: null, forbidden: true };
+  }
+  return { ticket, forbidden: false };
+}
+
+/** GET /support — List tickets */
+router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const isHqAdmin = isHQRole(auth.role);
-
-    const { zoneId } = req.query;
-    const effectiveZoneId = (zoneId && zoneId !== 'all') ? String(zoneId) : null;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
 
     let rows: any[];
     if (isHqAdmin) {
-      if (effectiveZoneId) {
-        const withoutHyphen = effectiveZoneId.replace(/-/g, '').toLowerCase();
-        const withHyphen = effectiveZoneId.includes('-') ? effectiveZoneId.toLowerCase() : effectiveZoneId.toLowerCase().replace(/^zone(\d+)$/, 'zone-$1');
-
-        rows = await prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM support_tickets
-           WHERE lower(replace(COALESCE(zone_id, ''), '-', '')) = $1
-              OR lower(COALESCE(zone_id, '')) = $2
-           ORDER BY last_timestamp DESC
-           LIMIT 150`,
-          withoutHyphen,
-          withHyphen,
-        );
-      } else {
-        rows = await prisma.supportTicket.findMany({
-          orderBy: { lastTimestamp: 'desc' },
-          take: 150,
-        });
-      }
+      rows = await prisma.supportTicket.findMany({
+        include: { user: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 150,
+      });
     } else {
       rows = await prisma.supportTicket.findMany({
         where: { userId: auth.userId },
-        orderBy: { lastTimestamp: 'desc' },
+        include: { user: true },
+        orderBy: { updatedAt: 'desc' },
         take: 50,
       });
     }
@@ -96,7 +68,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 /** GET /support/:ticketId — Get single ticket */
-router.get('/:ticketId', requireAuth, async (req, res) => {
+router.get('/:ticketId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { ticket, forbidden } = await getAccessibleTicket(
       req.params.ticketId,
@@ -118,11 +90,10 @@ router.get('/:ticketId', requireAuth, async (req, res) => {
 });
 
 /** GET /support/:ticketId/messages — Get ticket messages */
-router.get('/:ticketId/messages', requireAuth, async (req, res) => {
+router.get('/:ticketId/messages', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { ticketId } = req.params;
     const { ticket, forbidden } = await getAccessibleTicket(
-      ticketId,
+      req.params.ticketId,
       res.locals.auth.userId,
       res.locals.auth.role,
     );
@@ -134,107 +105,63 @@ router.get('/:ticketId/messages', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'Support ticket not found' });
       return;
     }
-    const messageRows = await prisma.message.findMany({
-      where: { chatId: ticketId },
+
+    const messages = await prisma.message.findMany({
+      where: { chatId: req.params.ticketId },
+      include: { sender: true },
+      orderBy: { createdAt: 'asc' },
     });
 
-    const data = messageRows
-      .map((m) => {
-        const merged = mergeRawRow(m);
-        const raw = (m.rawData && typeof m.rawData === 'object') ? (m.rawData as Record<string, any>) : {};
-        const rawTime = raw.createdAt || raw.timestamp || raw.time || raw.created_at || (m as any).createdAt;
-        let isoTimestamp = new Date().toISOString();
-        if (rawTime) {
-          if (rawTime instanceof Date) isoTimestamp = rawTime.toISOString();
-          else if (typeof rawTime === 'string') {
-            const d = new Date(rawTime);
-            if (!isNaN(d.getTime())) isoTimestamp = d.toISOString();
-          } else if (typeof rawTime === 'number') {
-            const ms = rawTime > 1e11 ? rawTime : rawTime * 1000;
-            isoTimestamp = new Date(ms).toISOString();
-          } else if (typeof rawTime === 'object' && rawTime._seconds !== undefined) {
-            isoTimestamp = new Date(rawTime._seconds * 1000).toISOString();
-          }
-        }
-        return {
-          ...merged,
-          id: m.id,
-          ticketId: m.chatId,
-          senderId: m.senderId,
-          senderName: (raw.senderName as string) || (m as any).senderName || 'Support User',
-          senderType: raw.senderType || (m.senderId === 'admin' ? 'admin' : 'user'),
-          text: m.text || raw.text || raw.message || '',
-          message: m.text || raw.text || raw.message || '',
-          timestamp: isoTimestamp,
-        };
-      })
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    const formatted = messages.map((m) => ({
+      id: m.id,
+      chatId: m.chatId,
+      senderId: m.senderId,
+      senderName: m.sender ? [m.sender.firstName, m.sender.lastName].filter(Boolean).join(' ') || m.sender.email : 'Support Admin',
+      senderAvatar: m.sender?.avatarUrl || null,
+      text: m.text || '',
+      type: m.type || 'text',
+      status: m.status,
+      createdAt: m.createdAt,
+    }));
 
-    res.json({ success: true, count: data.length, data });
+    res.json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
-    console.error('[support:messages:get]', err);
-    res.status(500).json({ success: false, error: 'Failed to load support messages' });
+    console.error('[support:messages]', err);
+    res.status(500).json({ success: false, error: 'Failed to load ticket messages' });
   }
 });
 
-/** POST /support — Create new support ticket */
-router.post('/', requireAuth, async (req: any, res) => {
+/** POST /support — Create support ticket */
+router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { subject, category = 'general', priority = 'normal', message, initialMessage } = req.body;
-    const firstText = message || initialMessage || subject || 'Need assistance with rehearsal hub';
+    const { subject, category = 'General', priority = 'normal', message, text, initialMessage } = req.body;
+    const firstText = (message || text || initialMessage || subject || 'Need support').trim();
 
-    const ticketId = crypto.randomUUID();
+    const ticketId = `ticket_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const messageId = crypto.randomUUID();
-    const now = new Date();
 
-    const userProf = await prisma.profile.findUnique({ where: { id: auth.userId } });
-    const rawP = (userProf?.rawData && typeof userProf.rawData === 'object') ? (userProf.rawData as Record<string, any>) : {};
-    const userName = [userProf?.firstName, userProf?.lastName].filter(Boolean).join(' ') || rawP.first_name || auth.email || 'Singer';
-    const userEmail = userProf?.email || rawP.email || auth.email || '';
-
-    const ticketRaw = {
-      id: ticketId,
-      userId: auth.userId,
-      userName,
-      userEmail,
-      subject: subject || 'Support Request',
-      category,
-      status: 'open',
-      priority,
-      zoneId: auth.zoneId || null,
-      lastMessage: firstText,
-      lastTimestamp: now.toISOString(),
-      createdAt: now.toISOString(),
-    };
-
-    const priorityUpper = (priority ? String(priority).toUpperCase() : 'NORMAL') as any;
-
-    await prisma.supportTicket.create({
+    const ticket = await prisma.supportTicket.create({
       data: {
         id: ticketId,
         userId: auth.userId,
         subject: subject || 'Support Request',
         category,
-        status: 'OPEN',
-        priority: priorityUpper,
+        status: 'open',
+        priority,
         organizationId: auth.zoneId || null,
         lastMessage: firstText,
-        lastTimestamp: now,
-        unreadByAdmin: 1,
-        createdAt: now,
-        updatedAt: now,
-        rawData: ticketRaw,
       },
     });
 
-    // Ensure chat exists or create support message
+    // Create chat container and first message
     await prisma.chat.upsert({
       where: { id: ticketId },
       update: {},
       create: {
         id: ticketId,
-        type: 'DIRECT',
+        type: 'direct',
+        title: `Support: ${subject || 'Ticket'}`,
         createdById: auth.userId,
         participants: {
           create: [{ userId: auth.userId }],
@@ -247,14 +174,13 @@ router.post('/', requireAuth, async (req: any, res) => {
         id: messageId,
         chatId: ticketId,
         senderId: auth.userId,
-        type: 'TEXT',
+        type: 'text',
         text: firstText,
-        rawData: { id: messageId, ticketId, senderId: auth.userId, senderName: userName, text: firstText, senderType: 'user', createdAt: now.toISOString() },
       },
     });
 
-    broadcast('support', ticketId, { type: 'new_ticket', ticket: ticketRaw });
-    res.status(201).json({ success: true, data: ticketRaw });
+    broadcast('support', ticketId, { type: 'new_ticket', ticket });
+    res.status(201).json({ success: true, data: shapeTicket(ticket) });
   } catch (err) {
     console.error('[support:create]', err);
     res.status(500).json({ success: false, error: 'Failed to create support ticket' });
@@ -262,7 +188,7 @@ router.post('/', requireAuth, async (req: any, res) => {
 });
 
 /** POST /support/:ticketId/messages — Reply to support ticket */
-router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
+router.post('/:ticketId/messages', requireAuth, async (req: Request, res: Response) => {
   try {
     const { ticketId } = req.params;
     const auth = res.locals.auth;
@@ -275,52 +201,22 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
       res.status(404).json({ success: false, error: 'Support ticket not found' });
       return;
     }
-    const text = req.body.text?.trim() || req.body.message?.trim() || req.body.content?.trim();
-
+    const text = (req.body.text || req.body.message || req.body.content || '').trim();
     if (!text) {
       res.status(400).json({ success: false, error: 'Message text is required' });
       return;
     }
 
     const messageId = crypto.randomUUID();
-    const now = new Date();
     const isAdmin = canManageTenant(auth.role);
-    const senderType = isAdmin ? 'admin' : 'user';
-    const senderName = req.body.senderName || (isAdmin ? 'HQ Support Admin' : 'Member');
-
-    const msgPayload = {
-      id: messageId,
-      ticketId,
-      senderId: auth.userId,
-      senderName,
-      senderType,
-      text,
-      message: text,
-      timestamp: now.toISOString(),
-      createdAt: now.toISOString(),
-    };
-
-    await prisma.chat.upsert({
-      where: { id: ticketId },
-      update: {},
-      create: {
-        id: ticketId,
-        type: 'DIRECT',
-        createdById: auth.userId,
-        participants: {
-          create: [{ userId: auth.userId }],
-        },
-      },
-    });
 
     await prisma.message.create({
       data: {
         id: messageId,
         chatId: ticketId,
         senderId: auth.userId,
-        type: 'TEXT',
+        type: 'text',
         text,
-        rawData: msgPayload,
       },
     });
 
@@ -328,11 +224,17 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
       where: { id: ticketId },
       data: {
         lastMessage: text,
-        lastTimestamp: now,
-        updatedAt: now,
-        status: isAdmin ? 'IN_PROGRESS' : 'OPEN',
+        status: isAdmin ? 'in_progress' : 'open',
       },
     });
+
+    const msgPayload = {
+      id: messageId,
+      chatId: ticketId,
+      senderId: auth.userId,
+      text,
+      createdAt: new Date().toISOString(),
+    };
 
     broadcast('support', ticketId, msgPayload);
     res.status(201).json({ success: true, data: msgPayload });
@@ -343,54 +245,27 @@ router.post('/:ticketId/messages', requireAuth, async (req: any, res) => {
 });
 
 /** PATCH /support/:ticketId/status — Update ticket status */
-router.patch('/:ticketId/status', requireAuth, async (req, res) => {
+router.patch('/:ticketId/status', requireAuth, async (req: Request, res: Response) => {
   try {
     const { ticketId } = req.params;
     const auth = res.locals.auth;
     const { status } = req.body;
-    const validStatuses = ['open', 'in_progress', 'resolved', 'closed'];
 
-    if (!validStatuses.includes(status)) {
-      res.status(400).json({ success: false, error: 'Invalid status' });
+    if (!canManageTenant(auth.role)) {
+      res.status(403).json({ success: false, error: 'Only admins can change ticket status' });
       return;
     }
 
-    const { ticket, forbidden } = await getAccessibleTicket(ticketId, auth.userId, auth.role);
-    if (forbidden || !ticket || !isSupportAdmin(auth.role)) {
-      res.status(forbidden ? 403 : 404).json({ success: false, error: forbidden ? 'Forbidden' : 'Support ticket not found' });
-      return;
-    }
-
-    await prisma.supportTicket.update({
+    const updated = await prisma.supportTicket.update({
       where: { id: ticketId },
-      data: {
-        status: String(status).toUpperCase() as any,
-        updatedAt: new Date(),
-      },
+      data: { status },
     });
 
-    res.json({ success: true, message: `Ticket status updated to ${status}` });
+    broadcast('support', ticketId, { type: 'status_change', ticketId, status });
+    res.json({ success: true, data: shapeTicket(updated) });
   } catch (err) {
+    console.error('[support:status]', err);
     res.status(500).json({ success: false, error: 'Failed to update ticket status' });
-  }
-});
-
-/** DELETE /support/:ticketId — Delete support ticket */
-router.delete('/:ticketId', requireAuth, async (req, res) => {
-  try {
-    const auth = res.locals.auth;
-    if (auth.role !== 'hq_admin' && auth.role !== 'admin') {
-      res.status(403).json({ success: false, error: 'Forbidden' });
-      return;
-    }
-
-    const { ticketId } = req.params;
-    await prisma.message.deleteMany({ where: { chatId: ticketId } });
-    await prisma.supportTicket.delete({ where: { id: ticketId } });
-
-    res.json({ success: true, message: 'Support ticket deleted' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to delete support ticket' });
   }
 });
 

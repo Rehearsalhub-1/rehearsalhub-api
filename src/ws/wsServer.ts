@@ -163,20 +163,15 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
             where: { id: msg.id },
             include: { participants: true },
           });
-          const participants = Array.isArray(chat?.participants) ? chat!.participants.map(p => p.userId) : [];
-          const rawChat = chat?.rawData && typeof chat.rawData === 'object' ? chat.rawData as Record<string, any> : {};
-          const rawParticipants = Array.isArray(rawChat.participants) ? rawChat.participants.map(String) : [];
-          if (!chat || (chat.createdById !== socket.userId && !participants.includes(socket.userId) && !rawParticipants.includes(socket.userId))) {
+          const participants = Array.isArray(chat?.participants) ? chat!.participants.map((p) => p.userId) : [];
+          if (!chat || (chat.createdById !== socket.userId && !participants.includes(socket.userId))) {
             socket.send(JSON.stringify({ type: 'error', error: 'Forbidden subscription' }));
             return;
           }
         }
         if (callResources.has(msg.resource) && msg.id !== 'all' && msg.id !== socket.userId) {
           const call = await prisma.call.findUnique({ where: { id: msg.id } });
-          const rawCall = call?.rawData && typeof call.rawData === 'object' ? call.rawData as Record<string, any> : {};
-          const callerId = rawCall.callerId || rawCall.caller_id;
-          const receiverId = rawCall.receiverId || rawCall.receiver_id;
-          if (!call || (callerId !== socket.userId && receiverId !== socket.userId)) {
+          if (!call || (call.callerId !== socket.userId && call.receiverId !== socket.userId)) {
             socket.send(JSON.stringify({ type: 'error', error: 'Forbidden subscription' }));
             return;
           }

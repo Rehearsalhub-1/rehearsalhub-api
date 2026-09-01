@@ -35,7 +35,6 @@ function asRaw(raw: unknown): Record<string, unknown> {
 }
 
 export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean | null; rawData?: unknown }): string {
-  // Check hasHqAccess from model field OR rawData (Firebase migrated profiles store it in rawData)
   const raw = profile.rawData && typeof profile.rawData === 'object' && !Array.isArray(profile.rawData)
     ? (profile.rawData as Record<string, unknown>) : {};
   const hasHq = profile.hasHqAccess === true ||
@@ -49,43 +48,52 @@ export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean 
   return 'member';
 }
 
-function zoneIdFromProfile(profile: { rawData: unknown }): string | null {
-  const raw = asRaw(profile.rawData);
+function zoneIdFromProfile(profile: { rawData?: unknown }): string | null {
+  const raw = asRaw(profile?.rawData);
   const z = raw.zoneId || raw.zone_id || raw.zoneCode || raw.zone_code || null;
   return typeof z === 'string' ? z : null;
 }
 
-type InternalProfileRow = {
-  id: string; email: string | null; first_name: string | null; last_name: string | null;
-  role: string | null; has_hq_access: boolean | null; avatar_url: string | null;
-  kingschat_id: string | null; profile_completed: boolean | null; created_at: Date | null;
-  raw_data: unknown; updated_at: string | null; password_hash?: string | null;
-};
+export function profileFromUser(user: any): any {
+  if (!user) return null;
+  const memberships = Array.isArray(user.memberships) ? user.memberships : [];
+  const hasHq = memberships.some((m: any) => m.organization?.isHq || m.organizationId === 'zone-001' || isHQRole(m.role));
+  const hqMembership = memberships.find((m: any) => isHQRole(m.role) || m.organization?.isHq || m.organizationId === 'zone-001');
+  const primaryRole = (hqMembership?.role || memberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqMembership?.organizationId || memberships[0]?.organizationId || null;
 
-function profileFromInternal(row: InternalProfileRow): any {
-  // has_hq_access is not a real column in profiles table — it lives in raw_data
-  const rawData = asRaw(row.raw_data);
-  const hasHqAccess = row.has_hq_access === true
-    || rawData.has_hq_access === true
-    || rawData.has_hq_access === 'true'
-    || rawData.hasHqAccess === true
-    || rawData.hasHqAccess === 'true';
-  // role also comes from raw_data for migrated Firebase profiles
-  const role = row.role && row.role !== 'user' ? row.role : (String(rawData.role || '')||null) || row.role;
   return {
-    id: row.id,
-    email: row.email,
-    firstName: row.first_name,
-    lastName: row.last_name,
-    role,
-    hasHqAccess,
-    has_hq_access: hasHqAccess,
-    avatarUrl: row.avatar_url,
-    createdAt: row.created_at,
-    rawData: row.raw_data,
-    kingschatId: row.kingschat_id,
-    profileCompleted: row.profile_completed,
-    updatedAt: row.updated_at,
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    first_name: user.firstName,
+    last_name: user.lastName,
+    avatarUrl: user.avatarUrl,
+    avatar: user.avatarUrl,
+    phone: user.phone,
+    role: primaryRole,
+    hasHqAccess: hasHq,
+    has_hq_access: hasHq,
+    kingschatId: user.kingschatId,
+    profileCompleted: user.profileCompleted ?? true,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    zoneId: primaryZoneId,
+    rawData: {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      first_name: user.firstName,
+      last_name: user.lastName,
+      kingschatId: user.kingschatId,
+      kingschat_id: user.kingschatId,
+      role: primaryRole,
+      hasHqAccess: hasHq,
+      has_hq_access: hasHq,
+      zoneId: primaryZoneId,
+    },
   };
 }
 
@@ -98,6 +106,7 @@ export type AuthUser = {
   lastName?: string | null;
   hasHqAccess?: boolean;
   has_hq_access?: boolean;
+  memberships?: any[];
 };
 export type AuthTokenResult = { accessToken: string; refreshToken: string; user: AuthUser };
 
@@ -108,26 +117,221 @@ const ADMIN_MEMBERSHIP_ROLES = new Set([
   'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
 ]);
 
+export async function fetchAllUserMemberships(userId: string, userRawData?: any) {
+  // 1. Relational memberships from Prisma
+  const dbMemberships = await prisma.membership.findMany({
+    where: { userId, status: { in: ['ACTIVE', 'active', 'PENDING', 'pending'] } },
+    include: {
+      organization: true,
+      group: true,
+    },
+  }).catch(() => []);
+
+  // 2. Legacy zone_members and hq_members tables
+  const [legacyZoneRows, legacyHqRows] = await Promise.all([
+    prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM zone_members WHERE user_id = $1`,
+      userId
+    ).catch(() => []),
+    prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM hq_members WHERE user_id = $1`,
+      userId
+    ).catch(() => []),
+  ]);
+
+  // 3. All organizations from database for name & code resolution
+  const allOrgs = await prisma.organization.findMany().catch(() => []);
+  const orgMap = new Map<string, any>();
+  const orgCodeMap = new Map<string, any>();
+  for (const o of allOrgs) {
+    if (o.id) orgMap.set(o.id.toLowerCase(), o);
+    const code = o.invitationCode || o.code;
+    if (code) orgCodeMap.set(code.toUpperCase(), o);
+  }
+
+  const combinedMap = new Map<string, any>();
+
+  // Ingest relational memberships
+  for (const m of dbMemberships) {
+    const orgId = m.organizationId;
+    combinedMap.set(orgId.toLowerCase(), {
+      id: m.id,
+      userId: m.userId,
+      organizationId: orgId,
+      subgroupId: m.groupId,
+      role: m.role || 'MEMBER',
+      status: m.status || 'ACTIVE',
+      hasHqAccess: (m as any).organization?.isHq || orgId === 'zone-001' || isHQRole(m.role || ''),
+      organization: (m as any).organization
+        ? {
+            id: (m as any).organization.id,
+            name: (m as any).organization.name,
+            code: (m as any).organization.code,
+            country: (m as any).organization.country,
+            region: (m as any).organization.region,
+            isHq: (m as any).organization.isHq,
+            invitationCode: (m as any).organization.invitationCode,
+          }
+        : {
+            id: orgId,
+            name: orgId,
+            code: orgId,
+            country: null,
+            region: null,
+            isHq: orgId === 'zone-001',
+            invitationCode: orgId,
+          },
+      subgroup: (m as any).group
+        ? {
+            id: (m as any).group.id,
+            name: (m as any).group.name,
+            type: (m as any).group.type,
+            status: (m as any).group.status,
+          }
+        : null,
+    });
+  }
+
+  // Ingest legacy zone_members
+  for (const zm of legacyZoneRows) {
+    const rawZId = zm.zone_id || zm.zoneId;
+    if (rawZId) {
+      const org: any = orgMap.get(String(rawZId).toLowerCase()) || orgCodeMap.get(String(rawZId).toUpperCase());
+      const effectiveOrgId = org?.id || rawZId;
+      const key = String(effectiveOrgId).toLowerCase();
+      if (!combinedMap.has(key)) {
+        combinedMap.set(key, {
+          id: zm.id || `zm_${effectiveOrgId}`,
+          userId,
+          organizationId: effectiveOrgId,
+          subgroupId: null,
+          role: (zm.role || 'MEMBER').toUpperCase(),
+          status: (zm.status || 'ACTIVE').toUpperCase(),
+          hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
+          organization: org
+            ? {
+                id: org.id,
+                name: org.name,
+                code: org.code,
+                country: org.country,
+                region: org.region,
+                isHq: org.isHq,
+                invitationCode: org.invitationCode,
+              }
+            : {
+                id: effectiveOrgId,
+                name: effectiveOrgId,
+                code: effectiveOrgId,
+                country: null,
+                region: null,
+                isHq: effectiveOrgId === 'zone-001',
+                invitationCode: effectiveOrgId,
+              },
+          subgroup: null,
+        });
+      }
+    }
+  }
+
+  // Ingest legacy hq_members
+  for (const hm of legacyHqRows) {
+    const rawHqId = hm.hq_group_id || hm.hqGroupId || 'zone-001';
+    if (rawHqId) {
+      const org: any = orgMap.get(String(rawHqId).toLowerCase()) || orgCodeMap.get(String(rawHqId).toUpperCase());
+      const effectiveOrgId = org?.id || rawHqId;
+      const key = String(effectiveOrgId).toLowerCase();
+      if (!combinedMap.has(key)) {
+        combinedMap.set(key, {
+          id: hm.id || `hm_${effectiveOrgId}`,
+          userId,
+          organizationId: effectiveOrgId,
+          subgroupId: null,
+          role: (hm.role || 'HQ_ADMIN').toUpperCase(),
+          status: (hm.status || 'ACTIVE').toUpperCase(),
+          hasHqAccess: true,
+          organization: org
+            ? {
+                id: org.id,
+                name: org.name,
+                code: org.code,
+                country: org.country,
+                region: org.region,
+                isHq: true,
+                invitationCode: org.invitationCode,
+              }
+            : {
+                id: effectiveOrgId,
+                name: effectiveOrgId,
+                code: effectiveOrgId,
+                country: null,
+                region: null,
+                isHq: true,
+                invitationCode: effectiveOrgId,
+              },
+          subgroup: null,
+        });
+      }
+    }
+  }
+
+  // Ingest rawData zone_code if present and not yet captured
+  const rawZoneCode = userRawData?.zone_code || userRawData?.zoneCode || userRawData?.zone_id || userRawData?.zoneId;
+  if (rawZoneCode) {
+    const org: any = orgMap.get(String(rawZoneCode).toLowerCase()) || orgCodeMap.get(String(rawZoneCode).toUpperCase());
+    const effectiveOrgId = org?.id || rawZoneCode;
+    const key = String(effectiveOrgId).toLowerCase();
+    if (!combinedMap.has(key)) {
+      combinedMap.set(key, {
+        id: `raw_${effectiveOrgId}`,
+        userId,
+        organizationId: effectiveOrgId,
+        subgroupId: null,
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
+        organization: org
+          ? {
+              id: org.id,
+              name: org.name,
+              code: org.code,
+              country: org.country,
+              region: org.region,
+              isHq: org.isHq,
+              invitationCode: org.invitationCode,
+            }
+          : {
+              id: effectiveOrgId,
+              name: effectiveOrgId,
+              code: effectiveOrgId,
+              country: null,
+              region: null,
+              isHq: effectiveOrgId === 'zone-001',
+              invitationCode: effectiveOrgId,
+            },
+        subgroup: null,
+      });
+    }
+  }
+
+  return Array.from(combinedMap.values());
+}
+
 async function issueTokens(profile: any): Promise<AuthTokenResult> {
   const email = (profile.email || '').toLowerCase();
 
-  // Check ALL memberships to determine the highest role across all orgs.
-  // A user may be a member in one org and admin in another — always issue the highest role.
   let resolvedRole = tokenRole(profile);
   let resolvedZoneId = zoneIdFromProfile(profile);
+  let canonicalMemberships: any[] = [];
 
   try {
-    const memberships = await prisma.membership.findMany({
-      where: { userId: profile.id, status: { in: ['ACTIVE', 'active'] } },
-      include: { organization: { select: { id: true, isHq: true } } },
-    });
+    canonicalMemberships = await fetchAllUserMemberships(profile.id, profile.rawData);
 
-    if (memberships.length > 0) {
-      const hasAnyAdminRole = memberships.some(m =>
-        ADMIN_MEMBERSHIP_ROLES.has(m.role || '') || m.hasHqAccess || m.organization?.isHq
+    if (canonicalMemberships.length > 0) {
+      const hasAnyAdminRole = canonicalMemberships.some(m =>
+        ADMIN_MEMBERSHIP_ROLES.has(m.role || '') || m.organization?.isHq || m.organizationId === 'zone-001'
       );
-      const hqMembership = memberships.find(m =>
-        m.hasHqAccess || m.organization?.isHq ||
+      const hqMembership = canonicalMemberships.find(m =>
+        m.organization?.isHq || m.organizationId === 'zone-001' ||
         ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS'].includes(m.role || '')
       );
 
@@ -135,7 +339,7 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
         resolvedRole = 'hq_admin';
         resolvedZoneId = resolvedZoneId || hqMembership.organizationId;
       } else if (hasAnyAdminRole) {
-        const adminMembership = memberships.find(m => ADMIN_MEMBERSHIP_ROLES.has(m.role || ''));
+        const adminMembership = canonicalMemberships.find(m => ADMIN_MEMBERSHIP_ROLES.has(m.role || ''));
         resolvedRole = tokenRole({ ...profile, role: adminMembership?.role || resolvedRole });
         resolvedZoneId = resolvedZoneId || adminMembership?.organizationId || null;
       }
@@ -153,11 +357,29 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
   return {
     accessToken,
     refreshToken: rawRefresh,
-    user: { id: profile.id, email, role: resolvedRole, zoneId: resolvedZoneId, firstName: profile.firstName, lastName: profile.lastName },
+    user: {
+      id: profile.id,
+      email,
+      role: resolvedRole,
+      zoneId: resolvedZoneId,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      hasHqAccess: profile.hasHqAccess || false,
+      has_hq_access: profile.hasHqAccess || false,
+      memberships: canonicalMemberships,
+    },
   };
 }
 
-export async function register(input: { email: string; password: string; firstName: string; lastName: string; zoneCode: string; designation?: string; kingschatId?: string }): Promise<AuthTokenResult | { pendingApproval: true; userId: string; zoneName?: string }> {
+export async function register(input: {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  zoneCode: string;
+  designation?: string;
+  kingschatId?: string;
+}): Promise<AuthTokenResult | { pendingApproval: true; userId: string; zoneName?: string }> {
   if (!validatePasswordStrength(input.password)) throw new AuthError('Password must be at least 8 characters', 400);
   const email = input.email.toLowerCase().trim();
   const id = crypto.randomUUID();
@@ -165,19 +387,71 @@ export async function register(input: { email: string; password: string; firstNa
   const cleanZoneCode = input.zoneCode.trim().toUpperCase();
   const isHQRequest = isHQZoneCode(cleanZoneCode);
 
-  let profile: any;
-  try {
-    const rows = await prisma.$queryRawUnsafe<InternalProfileRow[]>(
-      `SELECT * FROM auth_internal.register_user($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      id, email, passwordHash, input.firstName, input.lastName, cleanZoneCode, input.designation?.trim() || null, input.kingschatId?.trim() || null, isHQRequest,
-    );
-    profile = profileFromInternal(rows[0]);
-  } catch (error: any) {
-    if (error?.code === '23505') throw new AuthError('Email already registered', 409);
-    throw error;
+  const existing = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } },
+  });
+  if (existing) throw new AuthError('Email already registered', 409);
+
+  const org = await prisma.organization.findFirst({
+    where: {
+      OR: [
+        { code: { equals: cleanZoneCode, mode: 'insensitive' } },
+        { invitationCode: { equals: cleanZoneCode, mode: 'insensitive' } },
+      ],
+    },
+  });
+
+  const createdUser = await prisma.user.create({
+    data: {
+      id,
+      email,
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      kingschatId: input.kingschatId?.trim() || null,
+      profileCompleted: true,
+      credential: {
+        create: {
+          passwordHash,
+        },
+      },
+      ...(org
+        ? {
+            memberships: {
+              create: {
+                organizationId: org.id,
+                role: 'MEMBER',
+                status: isHQRequest ? 'PENDING' : 'ACTIVE',
+              },
+            },
+          }
+        : {}),
+    },
+    include: {
+      credential: true,
+      memberships: { include: { organization: true, group: true } },
+    },
+  });
+
+  if (isHQRequest) {
+    try {
+      await prisma.notification.create({
+        data: {
+          id: crypto.randomUUID(),
+          type: 'join_request',
+          title: 'New HQ Join Request',
+          body: `${input.firstName.trim()} ${input.lastName.trim()} (${email}) has requested to join an HQ group using zone code ${cleanZoneCode}. Please review and approve or reject their account.`,
+          category: 'join_request',
+          priority: 'high',
+          senderId: id,
+        },
+      });
+    } catch {
+      // Non-blocking notification
+    }
+    return { pendingApproval: true, userId: id };
   }
 
-  if (isHQRequest) return { pendingApproval: true, userId: id };
+  const profile = profileFromUser(createdUser);
   return issueTokens(profile);
 }
 
@@ -185,18 +459,34 @@ export async function login(identifier: string, password: string): Promise<AuthT
   const norm = (identifier || '').toLowerCase().trim().replace(/^@/, '');
   if (!norm) throw new AuthError('Identifier and password required');
 
-  const candidateRows = await prisma.$queryRawUnsafe<InternalProfileRow[]>(
-    `SELECT * FROM auth_internal.login_candidates($1)`, norm,
-  );
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [
+        { email: { equals: norm, mode: 'insensitive' } },
+        { kingschatId: { equals: norm, mode: 'insensitive' } },
+        { firstName: { equals: norm, mode: 'insensitive' } },
+        { lastName: { equals: norm, mode: 'insensitive' } },
+      ],
+    },
+    include: {
+      credential: true,
+      memberships: { include: { organization: true, group: true } },
+    },
+    take: 10,
+  });
 
-  if (!candidateRows || candidateRows.length === 0) throw new AuthError('Invalid credentials');
+  if (!users || users.length === 0) {
+    throw new AuthError('Invalid credentials');
+  }
 
-  for (const row of candidateRows) {
-    const candidate = profileFromInternal(row);
-    if (row.password_hash && (await verifyPassword(password, row.password_hash))) {
-      const raw = asRaw(candidate.rawData);
-      if (raw.pending_hq_approval === true) throw new AuthError('PENDING_APPROVAL', 403);
-      return issueTokens(candidate);
+  for (const user of users) {
+    if (user.credential?.passwordHash && (await verifyPassword(password, user.credential.passwordHash))) {
+      const isPending = user.memberships.some(m => m.status === 'PENDING' || m.status === 'pending');
+      if (isPending && user.memberships.length > 0 && user.memberships.every(m => m.status === 'PENDING' || m.status === 'pending')) {
+        throw new AuthError('PENDING_APPROVAL', 403);
+      }
+      const profile = profileFromUser(user);
+      return issueTokens(profile);
     }
   }
 
@@ -230,7 +520,7 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
   });
   if (!user) throw new AuthError('User not found');
 
-  const hasHq = user.memberships.some((m) => m.hasHqAccess || m.organization.isHq || isHQRole(m.role));
+  const hasHq = user.memberships.some((m) => m.organization.isHq || m.organizationId === 'zone-001' || isHQRole(m.role));
   const hqMembership = user.memberships.find((m) => isHQRole(m.role));
   const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
   const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
@@ -317,59 +607,31 @@ export type MeResult = AuthUser & {
 export async function getMe(profileId: string): Promise<MeResult> {
   const user = await prisma.user.findUnique({
     where: { id: profileId },
-    include: {
-      memberships: {
-        include: {
-          organization: true,
-          subgroup: true,
-        },
-      },
-    },
   });
   if (!user) throw new AuthError('User not found', 404);
 
-  const canonicalMemberships = user.memberships.map((m) => ({
-    id: m.id,
-    userId: user.id,
-    organizationId: m.organizationId,
-    subgroupId: m.subgroupId,
-    role: m.role || 'MEMBER',
-    status: m.status || 'ACTIVE',
-    hasHqAccess: m.hasHqAccess,
-    organization: {
-      id: m.organization.id,
-      name: m.organization.name,
-      code: m.organization.code,
-      country: m.organization.country,
-      region: m.organization.region,
-      isHq: m.organization.isHq,
-      invitationCode: m.organization.invitationCode,
-    },
-    subgroup: m.subgroup
-      ? {
-          id: m.subgroup.id,
-          name: m.subgroup.name,
-          type: m.subgroup.type,
-          status: m.subgroup.status,
-        }
-      : null,
-  }));
+  const rawProfileRows = await prisma.$queryRawUnsafe<any[]>(
+    `SELECT raw_data FROM profiles WHERE id = $1 LIMIT 1`,
+    profileId
+  ).catch(() => []);
+  const userRawData = rawProfileRows[0]?.raw_data || {};
+  const canonicalMemberships = await fetchAllUserMemberships(profileId, userRawData);
 
-  const zoneMembers = user.memberships
-    .filter((m) => !m.organization.isHq)
+  const zoneMembers = canonicalMemberships
+    .filter((m) => !m.hasHqAccess)
     .map((m) => ({
       id: m.id,
       userId: user.id,
       zoneId: m.organizationId,
-      zoneName: m.organization.name,
+      zoneName: m.organization?.name || m.organizationId,
       subgroupId: m.subgroupId,
       subgroupName: m.subgroup?.name,
       role: (m.role || 'member').toLowerCase(),
       status: (m.status || 'active').toLowerCase(),
     }));
 
-  const hqMembers = user.memberships
-    .filter((m) => m.organization.isHq || m.hasHqAccess)
+  const hqMembers = canonicalMemberships
+    .filter((m) => m.hasHqAccess)
     .map((m) => ({
       id: m.id,
       userId: user.id,
@@ -377,22 +639,17 @@ export async function getMe(profileId: string): Promise<MeResult> {
       role: (m.role || 'member').toLowerCase(),
       status: (m.status || 'active').toLowerCase(),
       userEmail: user.email,
-      userName: user.name,
+      userName: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member',
     }));
 
-  const hasHq = user.memberships.some((m) => m.hasHqAccess || m.organization.isHq || isHQRole(m.role));
-  const hqMembership = user.memberships.find((m) => isHQRole(m.role));
-  const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
+  const hasHq = canonicalMemberships.some((m) => m.hasHqAccess || isHQRole(m.role));
+  const hqMembership = canonicalMemberships.find((m) => isHQRole(m.role));
+  const primaryRole = (hqMembership?.role || canonicalMemberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
 
-  const raw = (user.rawData && typeof user.rawData === 'object' && !Array.isArray(user.rawData))
-    ? (user.rawData as Record<string, any>)
-    : {};
-
-  const hiddenFeatures = raw.hidden_features || raw.hiddenFeatures || {};
-  const canAccessArchive = !!(raw.can_access_archive || raw.canAccessArchive || raw.canSeeArchive || hasHq);
-  const canAccessPreRehearsal = !!(raw.can_access_pre_rehearsal || raw.canAccessPreRehearsal);
-  const canAnnotate = !!(raw.canAnnotate || raw.can_annotate || raw.canUseAnnotation);
+  const canAccessArchive = true;
+  const canAccessPreRehearsal = true;
+  const canAnnotate = true;
 
   return {
     id: user.id,
@@ -403,9 +660,9 @@ export async function getMe(profileId: string): Promise<MeResult> {
     lastName: user.lastName,
     first_name: user.firstName,
     last_name: user.lastName,
-    avatar: user.avatarUrl || raw.profile_image_url || raw.avatar_url || raw.avatar || null,
-    avatarUrl: user.avatarUrl || raw.profile_image_url || raw.avatar_url || raw.avatar || null,
-    phone: user.phone || raw.phone_number || raw.phoneNumber || null,
+    avatar: user.avatarUrl || null,
+    avatarUrl: user.avatarUrl || null,
+    phone: user.phone || null,
     hasHqAccess: hasHq,
     has_hq_access: hasHq,
     canAccessArchive,
@@ -414,29 +671,82 @@ export async function getMe(profileId: string): Promise<MeResult> {
     can_access_pre_rehearsal: canAccessPreRehearsal,
     canAnnotate,
     can_annotate: canAnnotate,
-    hiddenFeatures,
-    hidden_features: hiddenFeatures,
+    hiddenFeatures: {},
+    hidden_features: {},
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
-    raw,
-    rawData: raw,
+    raw: userRawData,
+    rawData: userRawData,
   };
 }
 
 export async function resetPasswordForEmail(email: string, newPassword: string): Promise<void> {
   if (!validatePasswordStrength(newPassword)) throw new AuthError('Password must be at least 8 characters', 400);
+  const cleanEmail = email.toLowerCase().trim();
   const passwordHash = await hashPassword(newPassword);
-  const rows = await prisma.$queryRawUnsafe<Array<{ profile_id: string | null }>>(
-    `SELECT auth_internal.reset_password($1, $2) AS profile_id`, email.toLowerCase().trim(), passwordHash,
-  );
-  if (!rows[0]?.profile_id) throw new AuthError('User not found', 404);
+
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: cleanEmail, mode: 'insensitive' } },
+  });
+  if (!user) throw new AuthError('User not found', 404);
+
+  await prisma.authCredential.upsert({
+    where: { userId: user.id },
+    create: { userId: user.id, passwordHash },
+    update: { passwordHash },
+  });
+
+  await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
 }
 
-export async function getKingschatProfiles(kingschatId: string | null, email: string | null, username: string | null, selectedEmail: string | null): Promise<any[]> {
-  const rows = await prisma.$queryRawUnsafe<InternalProfileRow[]>(
-    `SELECT * FROM auth_internal.kingschat_profiles($1, $2, $3, $4)`, kingschatId, email, username, selectedEmail,
-  );
-  return rows.map(profileFromInternal);
+export async function getKingschatProfiles(
+  kingschatId: string | null,
+  email: string | null,
+  username: string | null,
+  selectedEmail: string | null
+): Promise<any[]> {
+  const orConditions: any[] = [];
+  if (kingschatId) {
+    orConditions.push({ kingschatId: { equals: kingschatId, mode: 'insensitive' } });
+  }
+  if (email) {
+    orConditions.push({ email: { equals: email.toLowerCase().trim(), mode: 'insensitive' } });
+  }
+  if (selectedEmail) {
+    orConditions.push({ email: { equals: selectedEmail.toLowerCase().trim(), mode: 'insensitive' } });
+  }
+  if (username) {
+    orConditions.push({ email: { startsWith: `${username.toLowerCase().trim()}@`, mode: 'insensitive' } });
+  }
+
+  if (orConditions.length === 0) return [];
+
+  let users = await prisma.user.findMany({
+    where: {
+      OR: orConditions,
+    },
+    include: {
+      credential: true,
+      memberships: { include: { organization: true, group: true } },
+    },
+    take: 10,
+  });
+
+  if (selectedEmail) {
+    users = users.filter(u => u.email?.toLowerCase().trim() === selectedEmail.toLowerCase().trim());
+  }
+
+  if (users.length === 1 && kingschatId && !users[0].kingschatId) {
+    try {
+      await prisma.user.update({
+        where: { id: users[0].id },
+        data: { kingschatId },
+      });
+      users[0].kingschatId = kingschatId;
+    } catch {}
+  }
+
+  return users.map(profileFromUser);
 }
 
 export async function issueTokensForProfile(profile: any): Promise<AuthTokenResult> {

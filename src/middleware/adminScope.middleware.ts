@@ -42,7 +42,6 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
           userId: auth.userId,
           OR: [
             { organization: { isHq: true } },
-            { hasHqAccess: true },
             { organizationId: 'zone-001' },
           ],
         },
@@ -121,11 +120,11 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
       const subgroupMembership = await prisma.membership.findFirst({
         where: {
           userId: auth.userId,
-          subgroupId: { not: null },
+          groupId: { not: null },
           role: { in: ['SUBGROUP_ADMIN', 'subgroup_admin', 'church_coordinator', 'CHURCH_COORDINATOR', 'subgroup_coordinator', 'SUBGROUP_COORDINATOR'] },
           status: { not: 'INACTIVE' },
         },
-        include: { organization: true, subgroup: true },
+        include: { organization: true, group: true },
       });
 
       if (!subgroupMembership) {
@@ -139,7 +138,7 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
         isSubgroupAdmin: true,
         adminOrgId: subgroupMembership.organizationId,
         effectiveZoneId: subgroupMembership.organizationId,
-        effectiveSubgroupId: subgroupMembership.subgroupId, // LOCKED
+        effectiveSubgroupId: subgroupMembership.groupId, // LOCKED
         isGlobalView: false,
       };
 
