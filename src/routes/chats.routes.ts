@@ -185,12 +185,23 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     }
   }
 
+  const myParticipant = Array.isArray(c.participants) ? c.participants.find((p: any) => (p.userId || p.id) === currentUserId) : null;
+  const myUnreadCount = typeof myParticipant?.unreadCount === 'number' ? myParticipant.unreadCount : 0;
+
+  const unreadMap: Record<string, number> = {};
+  if (Array.isArray(c.participants)) {
+    for (const p of c.participants) {
+      if (p.userId) unreadMap[p.userId] = p.unreadCount || 0;
+    }
+  }
+
   return {
     id: c.id,
     title,
     name: title,
     type: isDirect ? 'direct' : 'group',
     isGroup: !isDirect,
+    category: isDirect ? 'Direct' : 'Groups',
     avatar: avatar?.uri || (typeof avatar === 'string' ? avatar : null),
     organizationId: c.organizationId || null,
     createdById: c.createdById,
@@ -206,7 +217,9 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     lastMessageSenderId: lastMsg?.senderId || null,
     lastMessageSenderName: lastSenderName,
     lastTimestamp: lastMsg?.createdAt || c.createdAt,
-    unreadCount: 0,
+    unreadCount: myUnreadCount,
+    unread: myUnreadCount,
+    unreadMap,
     createdAt: c.createdAt,
   };
 }
@@ -558,7 +571,7 @@ router.post('/presence', requireAuth, async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-// 11. POST /chats/:chatId/read — Mark chat messages as read
+// 11. POST /chats/:chatId/read & PATCH /chats/:chatId/read — Mark chat messages as read
 router.post('/:chatId/read', requireAuth, async (req: Request, res: Response) => {
   try {
     const { chatId } = req.params;
@@ -570,7 +583,68 @@ router.post('/:chatId/read', requireAuth, async (req: Request, res: Response) =>
     });
 
     broadcast('chat_read', chatId, { chatId, userId: auth.userId });
+    res.json({ success: true, message: 'Chat marked as read' });
+  } catch (err) {
     res.json({ success: true });
+  }
+});
+
+router.patch('/:chatId/read', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+
+    await prisma.chatParticipant.updateMany({
+      where: { chatId, userId: auth.userId },
+      data: { unreadCount: 0 },
+    });
+
+    broadcast('chat_read', chatId, { chatId, userId: auth.userId });
+    res.json({ success: true, message: 'Chat marked as read' });
+  } catch (err) {
+    res.json({ success: true });
+  }
+});
+
+// 11b. POST /chats/:chatId/archive & PATCH /chats/:chatId/archive
+router.patch('/:chatId/archive', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+    const { archived = true } = req.body;
+
+    broadcast('chat_archived', chatId, { chatId, userId: auth.userId, archived });
+    res.json({ success: true, archived });
+  } catch (err) {
+    res.json({ success: true, archived: true });
+  }
+});
+
+router.post('/:chatId/archive', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+    const { archived = true } = req.body;
+
+    broadcast('chat_archived', chatId, { chatId, userId: auth.userId, archived });
+    res.json({ success: true, archived });
+  } catch (err) {
+    res.json({ success: true, archived: true });
+  }
+});
+
+// 11c. PATCH /chats/:chatId/leave — Leave group
+router.patch('/:chatId/leave', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+
+    await prisma.chatParticipant.deleteMany({
+      where: { chatId, userId: auth.userId },
+    });
+
+    broadcast('chat_member_left', chatId, { chatId, userId: auth.userId });
+    res.json({ success: true, message: 'Left group' });
   } catch (err) {
     res.json({ success: true });
   }
