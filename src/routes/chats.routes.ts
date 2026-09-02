@@ -321,36 +321,38 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const chatTitle = title || name || (isDirectType ? 'Direct Message' : 'Group Chat');
     const orgId = organizationId || zoneId || req.tenant?.effectiveZoneId || null;
 
-    // For direct chats between 2 people, check if one already exists
-    if (isDirectType && rawParticipants.length === 2) {
-      const [p1, p2] = rawParticipants;
-      const existing = await prisma.chat.findFirst({
-        where: {
-          OR: [
-            { id: `${p1}_${p2}` },
-            { id: `${p2}_${p1}` },
+    // Respect client-requested ID if provided (e.g. from NewChatScreen)
+    const requestedId = (req.body.id && typeof req.body.id === 'string' && req.body.id.trim()) ? req.body.id.trim() : null;
+    const sorted = [...rawParticipants].sort();
+    const chatId = requestedId || (isDirectType && sorted.length === 2
+      ? `${sorted[0]}_${sorted[1]}`
+      : `chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+
+    // Check if chat already exists by ID or direct participants
+    const existing = await prisma.chat.findFirst({
+      where: {
+        OR: [
+          { id: chatId },
+          ...(isDirectType && sorted.length === 2 ? [
+            { id: `${sorted[1]}_${sorted[0]}` },
             {
               AND: [
-                { participants: { some: { userId: p1 } } },
-                { participants: { some: { userId: p2 } } },
+                { participants: { some: { userId: sorted[0] } } },
+                { participants: { some: { userId: sorted[1] } } },
               ],
             },
-          ],
-        },
-        include: {
-          participants: { include: { user: true } },
-          messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
-        },
-      });
+          ] : []),
+        ],
+      },
+      include: {
+        participants: { include: { user: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
+      },
+    });
 
-      if (existing) {
-        return res.json({ success: true, data: formatChat(existing, auth.userId) });
-      }
+    if (existing) {
+      return res.json({ success: true, data: formatChat(existing, auth.userId) });
     }
-
-    const chatId = (isDirectType && rawParticipants.length === 2)
-      ? `${rawParticipants[0]}_${rawParticipants[1]}`
-      : `chat_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     const newChat = await prisma.chat.create({
       data: {
@@ -700,25 +702,92 @@ router.patch('/messages/:messageId/status', requireAuth, async (req: Request, re
 router.patch('/:chatId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { chatId } = req.params;
-    const { title, name } = req.body;
+    const auth = res.locals.auth;
+    const { title, name, participants, memberIds, admins, block, unblock, clearFor, disappearingTimer, joinLink, joinLinkCode } = req.body;
 
-    const updated = await prisma.chat.update({
+    const chat = await prisma.chat.findUnique({
       where: { id: chatId },
-      data: {
-        title: (title || name || '').trim() || undefined,
-      },
       include: {
         participants: { include: { user: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
 
-    const formatted = formatChat(updated, res.locals.auth.userId);
+    if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
+
+    // Handle block / unblock directly from chat room
+    if (block) {
+      const otherUser = chat.participants.find(p => p.userId !== auth.userId)?.userId;
+      if (otherUser) {
+        const key = `blocked_users_${auth.userId}`;
+        const setting = await prisma.setting.findUnique({ where: { key } });
+        const list: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+        if (!list.includes(otherUser)) {
+          list.push(otherUser);
+          await prisma.setting.upsert({ where: { key }, create: { key, value: list }, update: { value: list } });
+        }
+      }
+    }
+    if (unblock) {
+      const otherUser = chat.participants.find(p => p.userId !== auth.userId)?.userId;
+      if (otherUser) {
+        const key = `blocked_users_${auth.userId}`;
+        const setting = await prisma.setting.findUnique({ where: { key } });
+        const list: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+        const filtered = list.filter(id => id !== otherUser);
+        await prisma.setting.upsert({ where: { key }, create: { key, value: filtered }, update: { value: filtered } });
+      }
+    }
+
+    // Handle new participants
+    const incomingParticipants = participants || memberIds;
+    if (Array.isArray(incomingParticipants) && incomingParticipants.length > 0) {
+      for (const uid of incomingParticipants) {
+        await prisma.chatParticipant.upsert({
+          where: { chatId_userId: { chatId, userId: uid } },
+          create: { chatId, userId: uid },
+          update: {},
+        });
+      }
+    }
+
+    // Handle title update
+    const newTitle = (title || name || '').trim();
+    if (newTitle) {
+      await prisma.chat.update({
+        where: { id: chatId },
+        data: { title: newTitle },
+      });
+    }
+
+    // Handle disappearingTimer / joinLink
+    if (disappearingTimer !== undefined || joinLink !== undefined || admins !== undefined) {
+      const key = `chat_settings_${chatId}`;
+      const existing = await prisma.setting.findUnique({ where: { key } });
+      const currentVal = (existing?.value as any) || {};
+      const updatedVal = {
+        ...currentVal,
+        ...(disappearingTimer !== undefined ? { disappearingTimer } : {}),
+        ...(joinLink !== undefined ? { joinLink, joinLinkCode } : {}),
+        ...(admins !== undefined ? { admins } : {}),
+      };
+      await prisma.setting.upsert({ where: { key }, create: { key, value: updatedVal }, update: { value: updatedVal } });
+    }
+
+    const updatedChat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      include: {
+        participants: { include: { user: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+
+    const formatted = formatChat(updatedChat, auth.userId);
     broadcast('chat', chatId, formatted);
     res.json({ success: true, data: formatted });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[chats:patch]', err);
-    res.status(500).json({ success: false, error: 'Failed to update chat' });
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update chat' });
   }
 });
 
