@@ -673,15 +673,20 @@ export type MeResult = AuthUser & {
 };
 
 export async function getMe(profileId: string): Promise<MeResult> {
-  const [user, metaRow] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: profileId },
-    }),
-    prisma.setting.findUnique({ where: { key: `profile_meta_${profileId}` } }),
-  ]);
+  const user = await prisma.user.findUnique({
+    where: { id: profileId },
+  });
   if (!user) throw new AuthError('User not found', 404);
 
-  const meta = (metaRow?.value as Record<string, any>) || {};
+  let meta: Record<string, any> = {};
+  try {
+    const metaRow = await prisma.setting.findUnique({ where: { key: `profile_meta_${profileId}` } });
+    if (metaRow?.value && typeof metaRow.value === 'object') {
+      meta = metaRow.value as Record<string, any>;
+    }
+  } catch {
+    // Non-blocking fallback if settings table is not present
+  }
   const canonicalMemberships = await fetchAllUserMemberships(profileId);
 
   const zoneMembers = canonicalMemberships

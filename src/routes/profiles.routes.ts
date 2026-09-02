@@ -270,15 +270,19 @@ const handleGetDirectory = async (req: any, res: any) => {
       take: Math.min(parseInt(limit as string) || 500, 1000),
     });
 
-    const metaKeys = users.map(u => `profile_meta_${u.id}`);
-    const metaSettings = await prisma.setting.findMany({
-      where: { key: { in: metaKeys } },
-    });
     const metaMap = new Map<string, any>();
-    metaSettings.forEach(s => {
-      const uId = s.key.replace('profile_meta_', '');
-      metaMap.set(uId, s.value);
-    });
+    try {
+      const metaKeys = users.map(u => `profile_meta_${u.id}`);
+      const metaSettings = await prisma.setting.findMany({
+        where: { key: { in: metaKeys } },
+      });
+      metaSettings.forEach(s => {
+        const uId = s.key.replace('profile_meta_', '');
+        metaMap.set(uId, s.value);
+      });
+    } catch {
+      // Non-blocking fallback if settings table is missing
+    }
 
     res.json({ success: true, count: users.length, data: users.map(u => formatUserProfile(u, metaMap.get(u.id) || {})) });
   } catch (err) {
@@ -296,24 +300,29 @@ router.get('/:userId', requireAuth, async (req, res) => {
   if (userId === 'me' || !userId) {
     userId = res.locals.auth.userId;
   }
-  const [user, metaRow] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        memberships: {
-          include: { organization: true, group: true },
-        },
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      memberships: {
+        include: { organization: true, group: true },
       },
-    }),
-    prisma.setting.findUnique({ where: { key: `profile_meta_${userId}` } }),
-  ]);
+    },
+  });
 
   if (!user) {
     res.status(404).json({ success: false, error: 'Profile not found' });
     return;
   }
 
-  const meta = (metaRow?.value as Record<string, any>) || {};
+  let meta: Record<string, any> = {};
+  try {
+    const metaRow = await prisma.setting.findUnique({ where: { key: `profile_meta_${userId}` } });
+    if (metaRow?.value && typeof metaRow.value === 'object') {
+      meta = metaRow.value as Record<string, any>;
+    }
+  } catch {
+    // Non-blocking fallback if settings table is missing
+  }
   res.json({ success: true, data: formatUserProfile(user, meta) });
 });
 
@@ -380,28 +389,33 @@ router.patch('/:userId', requireAuth, async (req, res) => {
 
   // Save profile metadata (username, middleName, gender, birthday, region, church, etc.)
   const metaKey = `profile_meta_${userId}`;
-  const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
-  const currentMeta = (existingMeta?.value as Record<string, any>) || {};
+  let updatedMeta: Record<string, any> = {};
+  try {
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+    const currentMeta = (existingMeta?.value as Record<string, any>) || {};
 
-  const updatedMeta = {
-    ...currentMeta,
-    ...(body.username !== undefined ? { username: body.username } : {}),
-    ...(body.alias !== undefined ? { alias: body.alias } : {}),
-    ...(body.middle_name !== undefined ? { middle_name: body.middle_name } : {}),
-    ...(body.middleName !== undefined ? { middle_name: body.middleName } : {}),
-    ...(body.gender !== undefined ? { gender: body.gender } : {}),
-    ...(body.birthday !== undefined ? { birthday: body.birthday } : {}),
-    ...(body.region !== undefined ? { region: body.region } : {}),
-    ...(body.church !== undefined ? { church: body.church } : {}),
-    ...(body.designation !== undefined ? { designation: body.designation } : {}),
-    ...(body.administration !== undefined ? { administration: body.administration } : {}),
-  };
+    updatedMeta = {
+      ...currentMeta,
+      ...(body.username !== undefined ? { username: body.username } : {}),
+      ...(body.alias !== undefined ? { alias: body.alias } : {}),
+      ...(body.middle_name !== undefined ? { middle_name: body.middle_name } : {}),
+      ...(body.middleName !== undefined ? { middle_name: body.middleName } : {}),
+      ...(body.gender !== undefined ? { gender: body.gender } : {}),
+      ...(body.birthday !== undefined ? { birthday: body.birthday } : {}),
+      ...(body.region !== undefined ? { region: body.region } : {}),
+      ...(body.church !== undefined ? { church: body.church } : {}),
+      ...(body.designation !== undefined ? { designation: body.designation } : {}),
+      ...(body.administration !== undefined ? { administration: body.administration } : {}),
+    };
 
-  await prisma.setting.upsert({
-    where: { key: metaKey },
-    create: { key: metaKey, value: updatedMeta },
-    update: { value: updatedMeta },
-  });
+    await prisma.setting.upsert({
+      where: { key: metaKey },
+      create: { key: metaKey, value: updatedMeta },
+      update: { value: updatedMeta },
+    });
+  } catch {
+    // Non-blocking fallback if settings table is missing
+  }
 
   if (body.zone_code || body.zoneCode || body.zoneId || body.organizationId || body.voice_part || body.voicePart) {
     const rawZone = body.zone_code || body.zoneCode || body.zoneId || body.organizationId;

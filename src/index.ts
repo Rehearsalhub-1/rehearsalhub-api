@@ -52,6 +52,17 @@ process.on('uncaughtException', (error) => {
   console.error('[API Uncaught Exception]:', error);
 });
 
+// Auto-heal settings table in PostgreSQL if missing
+prisma.$executeRawUnsafe(`
+  CREATE TABLE IF NOT EXISTS settings (
+    id TEXT PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,
+    value JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+`).catch((err: any) => console.warn('[settings table auto-create]:', err?.message));
+
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
