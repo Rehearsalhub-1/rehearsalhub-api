@@ -54,8 +54,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-/** GET /attendance/mine — Current user's records */
-router.get('/mine', requireAuth, async (req: Request, res: Response) => {
+/** GET /attendance/mine & /attendance/personal — Current user's records */
+const handleGetMyAttendance = async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
     const rows = await prisma.attendance.findMany({
@@ -69,7 +69,10 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
     console.error('[attendance/mine]', err);
     res.status(500).json({ success: false, error: 'Failed to fetch personal attendance' });
   }
-});
+};
+
+router.get('/mine', requireAuth, handleGetMyAttendance);
+router.get('/personal', requireAuth, handleGetMyAttendance);
 
 /** POST /attendance/check-in & POST /attendance */
 const handleCheckIn = async (req: Request, res: Response) => {
