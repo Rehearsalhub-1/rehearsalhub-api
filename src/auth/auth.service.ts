@@ -559,11 +559,35 @@ export async function logout(jti: string, exp: number, profileId: string, rawRef
 }
 
 export type MeResult = AuthUser & {
+  uid?: string;
+  userId?: string;
+  name?: string;
+  displayName?: string;
+  username?: string | null;
+  alias?: string | null;
+  middleName?: string | null;
+  middle_name?: string | null;
+  gender?: string | null;
+  birthday?: string | null;
+  region?: string | null;
+  church?: string | null;
+  designation?: string | null;
+  administration?: string | null;
+  voicePart?: string | null;
+  voice_part?: string | null;
+  zoneCode?: string | null;
+  zone_code?: string | null;
+  zoneName?: string | null;
+  zone_name?: string | null;
+  zone_id?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   avatar?: string | null;
   avatarUrl?: string | null;
+  profile_image_url?: string | null;
   phone?: string | null;
+  phoneNumber?: string | null;
+  phone_number?: string | null;
   canAccessArchive?: boolean;
   can_access_archive?: boolean;
   canAccessPreRehearsal?: boolean;
@@ -599,17 +623,38 @@ export type MeResult = AuthUser & {
     } | null;
   }>;
   legacyMemberships?: {
-    zoneMembers: Array<Record<string, unknown>>;
-    hqMembers: Array<Record<string, unknown>>;
+    zoneMembers: Array<{
+      id: string;
+      userId: string;
+      zoneId: string;
+      zoneName: string;
+      subgroupId: string | null;
+      subgroupName?: string;
+      role: string;
+      status: string;
+    }>;
+    hqMembers: Array<{
+      id: string;
+      userId: string;
+      hqGroupId: string;
+      role: string;
+      status: string;
+      userEmail?: string | null;
+      userName?: string;
+    }>;
   };
 };
 
 export async function getMe(profileId: string): Promise<MeResult> {
-  const user = await prisma.user.findUnique({
-    where: { id: profileId },
-  });
+  const [user, metaRow] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: profileId },
+    }),
+    prisma.setting.findUnique({ where: { key: `profile_meta_${profileId}` } }),
+  ]);
   if (!user) throw new AuthError('User not found', 404);
 
+  const meta = (metaRow?.value as Record<string, any>) || {};
   const canonicalMemberships = await fetchAllUserMemberships(profileId);
 
   const zoneMembers = canonicalMemberships
@@ -641,6 +686,19 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const hqMembership = canonicalMemberships.find((m) => isHQRole(m.role));
   const primaryRole = (hqMembership?.role || canonicalMemberships[0]?.role || 'member').toLowerCase();
   const primaryZoneId = hqMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
+  const primaryOrg = canonicalMemberships[0]?.organization;
+  const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
+  const zoneName = primaryOrg?.name || primaryZoneId;
+
+  const username = meta.username || meta.alias || (user.email ? user.email.split('@')[0] : null);
+  const middleName = meta.middle_name || meta.middleName || null;
+  const gender = meta.gender || null;
+  const birthday = meta.birthday || null;
+  const region = meta.region || primaryOrg?.region || null;
+  const church = meta.church || canonicalMemberships[0]?.subgroup?.name || null;
+  const designation = meta.designation || 'Member';
+  const administration = meta.administration || (primaryRole === 'admin' ? 'Admin' : 'Member');
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member';
 
   const canAccessArchive = true;
   const canAccessPreRehearsal = true;
@@ -648,16 +706,40 @@ export async function getMe(profileId: string): Promise<MeResult> {
 
   return {
     id: user.id,
+    uid: user.id,
+    userId: user.id,
     email: user.email || '',
     role: primaryRole,
     zoneId: primaryZoneId,
+    zone_id: primaryZoneId,
+    zoneCode,
+    zone_code: zoneCode,
+    zoneName,
+    zone_name: zoneName,
     firstName: user.firstName,
     lastName: user.lastName,
     first_name: user.firstName,
     last_name: user.lastName,
+    middleName,
+    middle_name: middleName,
+    username,
+    alias: username,
+    name: fullName,
+    displayName: fullName,
+    gender,
+    birthday,
+    region,
+    church,
+    designation,
+    administration,
+    voicePart: designation,
+    voice_part: designation,
     avatar: user.avatarUrl || null,
     avatarUrl: user.avatarUrl || null,
+    profile_image_url: user.avatarUrl || null,
     phone: user.phone || null,
+    phoneNumber: user.phone || null,
+    phone_number: user.phone || null,
     hasHqAccess: hasHq,
     has_hq_access: hasHq,
     canAccessArchive,
@@ -670,8 +752,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
     hidden_features: {},
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
-    raw: {},
-    rawData: {},
+    raw: meta,
+    rawData: meta,
   };
 }
 
