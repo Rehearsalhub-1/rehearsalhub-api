@@ -875,7 +875,7 @@ router.get('/users/blocked', requireAuth, async (req: Request, res: Response) =>
     if (blockedIds.length > 0) {
       users = await prisma.user.findMany({
         where: { id: { in: blockedIds } },
-        select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true, role: true },
+        select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true },
       });
     }
 
