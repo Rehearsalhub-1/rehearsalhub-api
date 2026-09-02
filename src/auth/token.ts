@@ -2,7 +2,7 @@ import jwt, { JwtPayload, JsonWebTokenError, TokenExpiredError } from 'jsonwebto
 import crypto from 'crypto';
 
 const secret = process.env.JWT_SECRET!;
-const expiresIn = process.env.JWT_EXPIRES_IN ?? '15m';
+const expiresIn = process.env.JWT_EXPIRES_IN ?? '365d';
 
 export interface AccessTokenPayload extends JwtPayload {
   sub: string;

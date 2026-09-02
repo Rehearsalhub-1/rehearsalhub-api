@@ -23,7 +23,7 @@ export class AuthError extends Error {
   }
 }
 
-const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '30', 10);
+const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '365', 10);
 function refreshExpiresAt(): Date {
   const d = new Date();
   d.setDate(d.getDate() + REFRESH_EXPIRES_DAYS);
