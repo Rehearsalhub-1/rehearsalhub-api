@@ -26,8 +26,13 @@ function formatUserProfile(u: any, metaInput?: any) {
   const designation = meta.designation || primaryMembership?.voicePart || 'Member';
   const administration = meta.administration || (primaryMembership?.role === 'ADMIN' ? 'Admin' : 'Member');
 
+  const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'Member';
   return {
     id: u.id,
+    uid: u.id,
+    userId: u.id,
+    name: fullName,
+    displayName: fullName,
     firstName: u.firstName,
     lastName: u.lastName,
     first_name: u.firstName,
@@ -287,7 +292,10 @@ router.get('/directory', requireAuth, handleGetDirectory);
 
 // GET /profiles/:userId
 router.get('/:userId', requireAuth, async (req, res) => {
-  const { userId } = req.params;
+  let { userId } = req.params;
+  if (userId === 'me' || !userId) {
+    userId = res.locals.auth.userId;
+  }
   const [user, metaRow] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
