@@ -8,14 +8,23 @@ import { broadcast } from '../ws/wsServer';
 
 const router = Router();
 
-function formatUserProfile(u: any) {
-  if (!u) return null;
-  const activeMemberships = u.memberships || [];
-  const primaryMembership = activeMemberships[0] || null;
+function formatUserProfile(u: any, metaInput?: any) {
+  const meta: Record<string, any> = (metaInput && typeof metaInput === 'object' && !Array.isArray(metaInput)) ? metaInput : {};
+  const activeMemberships = (u.memberships || []).filter((m: any) => m.status === 'ACTIVE');
+  const primaryMembership = activeMemberships[0];
 
   const phone = u.phone || null;
   const avatar = u.avatarUrl || null;
   const zoneCode = primaryMembership?.organization?.code || primaryMembership?.organizationId || null;
+
+  const username = meta.username || meta.alias || (u.email ? u.email.split('@')[0] : null);
+  const middleName = meta.middle_name || meta.middleName || null;
+  const gender = meta.gender || null;
+  const birthday = meta.birthday || null;
+  const region = meta.region || primaryMembership?.organization?.region || null;
+  const church = meta.church || primaryMembership?.group?.name || null;
+  const designation = meta.designation || primaryMembership?.voicePart || 'Member';
+  const administration = meta.administration || (primaryMembership?.role === 'ADMIN' ? 'Admin' : 'Member');
 
   return {
     id: u.id,
@@ -23,22 +32,29 @@ function formatUserProfile(u: any) {
     lastName: u.lastName,
     first_name: u.firstName,
     last_name: u.lastName,
-    middle_name: null,
+    middle_name: middleName,
+    middleName,
     email: u.email,
-    username: u.email ? u.email.split('@')[0] : null,
+    username,
+    alias: username,
     phone,
     phoneNumber: phone,
     phone_number: phone,
     avatar,
     avatarUrl: avatar,
     profile_image_url: avatar,
+    gender,
+    birthday,
+    region,
+    church,
+    designation,
+    voicePart: designation,
+    voice_part: designation,
+    administration,
     kingschatId: u.kingschatId,
     kingschat_id: u.kingschatId,
     profileCompleted: u.profileCompleted ?? false,
     profile_completed: u.profileCompleted ?? false,
-    designation: primaryMembership?.voicePart || 'Member',
-    voicePart: primaryMembership?.voicePart || 'Member',
-    administration: primaryMembership?.role === 'ADMIN' ? 'Admin' : 'Member',
     role: (primaryMembership?.role || 'MEMBER').toLowerCase(),
     hasHqAccess: primaryMembership?.organization?.isHq || false,
     has_hq_access: primaryMembership?.organization?.isHq || false,
@@ -47,7 +63,6 @@ function formatUserProfile(u: any) {
     zoneId: primaryMembership?.organizationId || null,
     zone_id: primaryMembership?.organizationId || null,
     zoneName: primaryMembership?.organization?.name || null,
-    church: primaryMembership?.group?.name || null,
     canAnnotate: true,
     can_annotate: true,
     canAccessArchive: true,
@@ -250,7 +265,17 @@ const handleGetDirectory = async (req: any, res: any) => {
       take: Math.min(parseInt(limit as string) || 500, 1000),
     });
 
-    res.json({ success: true, count: users.length, data: users.map(formatUserProfile) });
+    const metaKeys = users.map(u => `profile_meta_${u.id}`);
+    const metaSettings = await prisma.setting.findMany({
+      where: { key: { in: metaKeys } },
+    });
+    const metaMap = new Map<string, any>();
+    metaSettings.forEach(s => {
+      const uId = s.key.replace('profile_meta_', '');
+      metaMap.set(uId, s.value);
+    });
+
+    res.json({ success: true, count: users.length, data: users.map(u => formatUserProfile(u, metaMap.get(u.id) || {})) });
   } catch (err) {
     console.error('[profiles/directory]', err);
     res.status(500).json({ success: false, error: 'Failed to fetch directory' });
@@ -263,21 +288,25 @@ router.get('/directory', requireAuth, handleGetDirectory);
 // GET /profiles/:userId
 router.get('/:userId', requireAuth, async (req, res) => {
   const { userId } = req.params;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      memberships: {
-        include: { organization: true, group: true },
+  const [user, metaRow] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        memberships: {
+          include: { organization: true, group: true },
+        },
       },
-    },
-  });
+    }),
+    prisma.setting.findUnique({ where: { key: `profile_meta_${userId}` } }),
+  ]);
 
   if (!user) {
     res.status(404).json({ success: false, error: 'Profile not found' });
     return;
   }
 
-  res.json({ success: true, data: formatUserProfile(user) });
+  const meta = (metaRow?.value as Record<string, any>) || {};
+  res.json({ success: true, data: formatUserProfile(user, meta) });
 });
 
 // PATCH /profiles/:userId
@@ -341,6 +370,31 @@ router.patch('/:userId', requireAuth, async (req, res) => {
     ...(body.email !== undefined ? { email: body.email.trim().toLowerCase() } : {}),
   };
 
+  // Save profile metadata (username, middleName, gender, birthday, region, church, etc.)
+  const metaKey = `profile_meta_${userId}`;
+  const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+  const currentMeta = (existingMeta?.value as Record<string, any>) || {};
+
+  const updatedMeta = {
+    ...currentMeta,
+    ...(body.username !== undefined ? { username: body.username } : {}),
+    ...(body.alias !== undefined ? { alias: body.alias } : {}),
+    ...(body.middle_name !== undefined ? { middle_name: body.middle_name } : {}),
+    ...(body.middleName !== undefined ? { middle_name: body.middleName } : {}),
+    ...(body.gender !== undefined ? { gender: body.gender } : {}),
+    ...(body.birthday !== undefined ? { birthday: body.birthday } : {}),
+    ...(body.region !== undefined ? { region: body.region } : {}),
+    ...(body.church !== undefined ? { church: body.church } : {}),
+    ...(body.designation !== undefined ? { designation: body.designation } : {}),
+    ...(body.administration !== undefined ? { administration: body.administration } : {}),
+  };
+
+  await prisma.setting.upsert({
+    where: { key: metaKey },
+    create: { key: metaKey, value: updatedMeta },
+    update: { value: updatedMeta },
+  });
+
   if (body.zone_code || body.zoneCode || body.zoneId || body.organizationId || body.voice_part || body.voicePart) {
     const rawZone = body.zone_code || body.zoneCode || body.zoneId || body.organizationId;
     const voicePart = body.voice_part || body.voicePart;
@@ -392,7 +446,7 @@ router.patch('/:userId', requireAuth, async (req, res) => {
     },
   });
 
-  const formatted = formatUserProfile(updated);
+  const formatted = formatUserProfile(updated, updatedMeta);
   broadcast('profile', userId, formatted);
   res.json({ success: true, message: 'Profile updated', data: formatted });
 });

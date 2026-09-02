@@ -456,6 +456,43 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res:
   }
 });
 
+/** POST /subgroups/songs — Create a new subgroup song */
+router.post('/songs', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const body = req.body || {};
+    const { title, key, writer, category, tempo, leadSinger, lyrics, audioFile, audioUrl, subGroupId, zoneId } = body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, error: 'Song title is required' });
+    }
+
+    const id = `sgsong_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const effectiveOrgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+
+    const created = await prisma.song.create({
+      data: {
+        id,
+        title: title.trim(),
+        key: key ? String(key).trim() : null,
+        writer: writer ? String(writer).trim() : (auth.firstName || 'Member'),
+        category: category ? String(category).trim() : 'Church Songs',
+        tempo: tempo ? String(tempo).trim() : null,
+        leadSinger: leadSinger ? String(leadSinger).trim() : null,
+        lyrics: lyrics ? String(lyrics).trim() : null,
+        audioFile: audioFile || audioUrl || null,
+        organizationId: effectiveOrgId,
+        groupId: subGroupId || null,
+        status: 'active',
+      },
+    });
+
+    res.status(201).json({ success: true, message: 'Song created successfully', data: created });
+  } catch (err: any) {
+    console.error('[subgroups:songs:create]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to create subgroup song' });
+  }
+});
+
 /** PATCH /subgroups/songs/:id — Update subgroup song */
 router.patch('/songs/:id', requireAuth, async (req: Request, res: Response) => {
   try {

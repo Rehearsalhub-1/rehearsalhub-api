@@ -55,4 +55,63 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/** POST /favorites — Add a song to favorites */
+router.post('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = res.locals.auth.userId as string;
+    const { songId } = req.body;
+    if (!songId) return res.status(400).json({ success: false, error: 'songId is required' });
+
+    const favPlaylistId = `favorites_${userId}`;
+    await prisma.playlist.upsert({
+      where: { id: favPlaylistId },
+      update: {},
+      create: {
+        id: favPlaylistId,
+        title: 'Favorites',
+        userId,
+        isPublic: false,
+      },
+    });
+
+    await prisma.playlistItem.upsert({
+      where: {
+        playlistId_songId: { playlistId: favPlaylistId, songId: String(songId) },
+      },
+      update: {},
+      create: {
+        playlistId: favPlaylistId,
+        songId: String(songId),
+        order: 1,
+      },
+    });
+
+    res.json({ success: true, message: 'Song added to favorites' });
+  } catch (err: any) {
+    console.error('[favorites/post]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to add favorite' });
+  }
+});
+
+/** DELETE /favorites/:songId — Remove a song from favorites */
+router.delete('/:songId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = res.locals.auth.userId as string;
+    const { songId } = req.params;
+
+    const favPlaylistId = `favorites_${userId}`;
+    await prisma.playlistItem.deleteMany({
+      where: {
+        playlistId: favPlaylistId,
+        songId: String(songId),
+      },
+    });
+
+    res.json({ success: true, message: 'Song removed from favorites' });
+  } catch (err: any) {
+    console.error('[favorites/delete]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to remove favorite' });
+  }
+});
+
 export default router;
