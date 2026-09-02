@@ -231,17 +231,15 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
 
+    // Fetch deleted / hidden chats for this user
+    const deletedKey = `deleted_chats_${userId}`;
+    const deletedRow = await prisma.setting.findUnique({ where: { key: deletedKey } });
+    const deletedChatIds: string[] = Array.isArray(deletedRow?.value) ? (deletedRow?.value as string[]) : [];
+
     const chatRows = await prisma.chat.findMany({
       where: {
-        OR: [
-          { participants: { some: { userId } } },
-          {
-            AND: [
-              { type: 'direct' },
-              { id: { contains: userId } },
-            ],
-          },
-        ],
+        id: { notIn: deletedChatIds },
+        participants: { some: { userId } },
       },
       include: {
         participants: {
@@ -826,19 +824,39 @@ router.delete('/:chatId', requireAuth, async (req: Request, res: Response) => {
     const { chatId } = req.params;
     const auth = res.locals.auth;
 
-    const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+    const chat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      include: { participants: true },
+    });
     if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
 
-    if (chat.createdById === auth.userId) {
-      await prisma.chat.delete({ where: { id: chatId } });
-      broadcast('chat_deleted', chatId, { chatId });
-    } else {
-      await prisma.chatParticipant.deleteMany({
-        where: { chatId, userId: auth.userId },
-      });
+    // Always delete this user's participation
+    await prisma.chatParticipant.deleteMany({
+      where: { chatId, userId: auth.userId },
+    });
+
+    // Save in user's deleted/hidden list
+    const key = `deleted_chats_${auth.userId}`;
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const list: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+    if (!list.includes(chatId)) {
+      list.push(chatId);
+      await prisma.setting.upsert({ where: { key }, create: { key, value: list }, update: { value: list } });
     }
 
-    res.json({ success: true, message: 'Chat removed' });
+    // If direct chat, or created by user, or 0 participants left, delete the entire chat and messages
+    const isDirect = chat.type === 'direct' || !chat.type;
+    const remainingCount = await prisma.chatParticipant.count({ where: { chatId } });
+    if (isDirect || chat.createdById === auth.userId || remainingCount === 0) {
+      await prisma.message.deleteMany({ where: { chatId } }).catch(() => {});
+      await prisma.chatParticipant.deleteMany({ where: { chatId } }).catch(() => {});
+      await prisma.chat.delete({ where: { id: chatId } }).catch(() => {});
+      broadcast('chat_deleted', chatId, { chatId });
+    } else {
+      broadcast('chat_member_left', chatId, { chatId, userId: auth.userId });
+    }
+
+    res.json({ success: true, message: 'Chat removed successfully' });
   } catch (err) {
     console.error('[chats:delete]', err);
     res.status(500).json({ success: false, error: 'Failed to delete chat' });
