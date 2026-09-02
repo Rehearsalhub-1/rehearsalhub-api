@@ -542,6 +542,24 @@ router.patch('/:chatId/messages/:messageId', requireAuth, async (req: Request, r
   }
 });
 
+// DELETE /chats/:chatId/messages — Clear messages in chat
+router.delete('/:chatId/messages', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+
+    await prisma.message.deleteMany({
+      where: { chatId },
+    });
+
+    broadcast('chat_cleared', chatId, { chatId, clearedBy: auth.userId });
+    res.json({ success: true, message: 'Chat messages cleared' });
+  } catch (err: any) {
+    console.error('[chats:messages:clear]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to clear chat' });
+  }
+});
+
 // 7. DELETE /chats/:chatId/messages/:messageId — Delete message
 router.delete('/:chatId/messages/:messageId', requireAuth, async (req: Request, res: Response) => {
   try {
