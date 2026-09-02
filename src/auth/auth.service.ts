@@ -610,12 +610,7 @@ export async function getMe(profileId: string): Promise<MeResult> {
   });
   if (!user) throw new AuthError('User not found', 404);
 
-  const rawProfileRows = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT raw_data FROM profiles WHERE id = $1 LIMIT 1`,
-    profileId
-  ).catch(() => []);
-  const userRawData = rawProfileRows[0]?.raw_data || {};
-  const canonicalMemberships = await fetchAllUserMemberships(profileId, userRawData);
+  const canonicalMemberships = await fetchAllUserMemberships(profileId);
 
   const zoneMembers = canonicalMemberships
     .filter((m) => !m.hasHqAccess)
@@ -675,8 +670,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
     hidden_features: {},
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
-    raw: userRawData,
-    rawData: userRawData,
+    raw: {},
+    rawData: {},
   };
 }
 

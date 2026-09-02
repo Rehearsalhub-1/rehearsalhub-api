@@ -92,7 +92,7 @@ router.patch('/:zoneId', requireAuth, async (req, res) => {
 
   // Check if caller is org admin of this organization
   const callerMembership = await prisma.membership.findFirst({
-    where: { userId: auth?.id, organizationId: orgId },
+    where: { userId: auth?.userId || auth?.id, organizationId: orgId },
   });
   const isOrgAdmin = callerMembership?.role === 'HQ_ADMIN' || callerMembership?.role === 'ZONE_ADMIN';
 

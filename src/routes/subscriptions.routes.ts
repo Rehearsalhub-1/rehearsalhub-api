@@ -8,12 +8,12 @@ const router = Router();
 router.get('/me', requireAuth, async (_req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const profile = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!profile) return res.status(404).json({ success: false, error: 'User not found' });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     const sub = {
-      id: `sub_${profile.id}`,
-      userId: profile.id,
+      id: `sub_${user.id}`,
+      userId: user.id,
       status: 'active',
       tier: 'premium',
       plan: 'monthly',
@@ -31,32 +31,38 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     const auth = res.locals.auth;
     if (!canManageAllTenants(auth.role)) return res.status(403).json({ success: false, error: 'Forbidden' });
 
-    const allProfiles = await prisma.profile.findMany({
+    const allUsers = await prisma.user.findMany({
       take: 100,
+      include: {
+        memberships: {
+          include: { organization: true },
+        },
+      },
     });
 
-    const data = allProfiles.map((p) => {
-      const fullName = [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Singer';
+    const data = allUsers.map((u) => {
+      const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Singer';
+      const zoneId = u.memberships?.[0]?.organizationId || 'zone-001';
       return {
         payment: {
-          id: `pay_${p.id}`,
-          userId: p.id,
-          userEmail: p.email || '',
+          id: `pay_${u.id}`,
+          userId: u.id,
+          userEmail: u.email || '',
           userName: fullName,
           amount: 0,
           currency: 'USD',
           status: 'success',
           subscriptionType: 'individual',
           subscriptionPeriod: {
-            start: p.createdAt.toISOString(),
+            start: u.createdAt.toISOString(),
             end: new Date(Date.now() + 365 * 86400000).toISOString(),
           },
-          metadata: { zoneId: 'zone-001' },
-          createdAt: p.createdAt.toISOString(),
+          metadata: { zoneId },
+          createdAt: u.createdAt.toISOString(),
         },
         subscription: {
-          id: `sub_${p.id}`,
-          userId: p.id,
+          id: `sub_${u.id}`,
+          userId: u.id,
           status: 'active',
           plan: 'premium',
         },
@@ -77,12 +83,12 @@ router.get('/:userId', requireAuth, async (req: Request, res: Response) => {
     if (auth.userId !== userId && auth.role !== 'hq_admin' && auth.role !== 'admin') {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
-    const profile = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!profile) return res.status(404).json({ success: false, error: 'User not found' });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     const sub = {
-      id: `sub_${profile.id}`,
-      userId: profile.id,
+      id: `sub_${user.id}`,
+      userId: user.id,
       status: 'active',
       tier: 'premium',
       plan: 'monthly',
@@ -101,8 +107,8 @@ router.post('/:userId/extend', requireAuth, async (req: Request, res: Response) 
     const { months = 1 } = req.body;
     const auth = res.locals.auth;
     if (!canManageAllTenants(auth.role)) return res.status(403).json({ success: false, error: 'Forbidden' });
-    const profile = await prisma.profile.findUnique({ where: { id: userId } });
-    if (!profile) return res.status(404).json({ success: false, error: 'User not found' });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     const newExpiry = new Date(Date.now() + Number(months) * 30 * 86400000).toISOString();
     res.json({ success: true, message: `Subscription extended by ${months} month(s)`, expiresAt: newExpiry });

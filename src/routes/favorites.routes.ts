@@ -17,18 +17,38 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
         ],
       },
       include: {
-        items: true,
+        items: {
+          include: {
+            song: true,
+          },
+        },
       },
     });
 
-    const songs = new Set<string>();
+    const songIdSet = new Set<string>();
+    const fullSongs: any[] = [];
+
     for (const row of rows) {
       if (row.items && row.items.length > 0) {
-        for (const it of row.items) songs.add(it.songId);
+        for (const it of row.items) {
+          if (!songIdSet.has(it.songId)) {
+            songIdSet.add(it.songId);
+            if (it.song) fullSongs.push(it.song);
+          }
+        }
       }
     }
 
-    res.json({ success: true, data: { songs: Array.from(songs) } });
+    const songIds = Array.from(songIdSet);
+
+    res.json({
+      success: true,
+      data: {
+        songs: songIds,
+        songIds,
+        songList: fullSongs,
+      },
+    });
   } catch (err) {
     console.error('[favorites/me]', err);
     res.status(500).json({ success: false, error: 'Failed to load favorite songs' });

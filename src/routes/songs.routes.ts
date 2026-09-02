@@ -143,6 +143,40 @@ const getMinisteredSongByIdHandler = async (req: Request, res: Response) => {
 router.get('/master/:id', requireAuth, getMinisteredSongByIdHandler);
 router.get('/ministered/:id', requireAuth, getMinisteredSongByIdHandler);
 
+router.post('/import-from-ministered', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { songIds = [] } = req.body || {};
+    const orgId = req.tenant?.effectiveZoneId || 'zone-001';
+
+    if (!Array.isArray(songIds) || songIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'songIds array is required' });
+    }
+
+    const songs = await prisma.song.findMany({
+      where: { id: { in: songIds } },
+    });
+
+    for (const song of songs) {
+      await prisma.song.update({
+        where: { id: song.id },
+        data: {
+          organizationId: orgId,
+          status: 'active',
+        },
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: `${songs.length} song(s) imported to repertoire.`,
+      importedCount: songs.length,
+    });
+  } catch (err) {
+    console.error('[songs/import-from-ministered]', err);
+    res.status(500).json({ success: false, error: 'Failed to import songs' });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. MAIN REPERTOIRE & PROGRAM SONGS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +237,8 @@ const getSongsHandler = async (req: Request, res: Response) => {
 
 router.get('/', requireAuth, getSongsHandler);
 router.get('/praise-night', requireAuth, getSongsHandler);
+router.get('/zone', requireAuth, getSongsHandler);
+router.get('/zone-songs', requireAuth, getSongsHandler);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. SONG BY ID
@@ -473,6 +509,80 @@ router.delete('/history/:id', requireAuth, requireTenantAdmin, async (req: Reque
   } catch (err) {
     console.error('[songs/history:DELETE]', err);
     res.status(500).json({ success: false, error: 'Failed to delete history entry' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. PERSONAL NOTES & DOODLE ANNOTATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/notes/:songId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { songId } = req.params;
+    const userId = res.locals.auth?.userId || 'guest';
+    const key = `song_note_${userId}_${songId}`;
+
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const notes = setting?.value && typeof setting.value === 'object' ? (setting.value as any).notes || '' : '';
+
+    res.json({ success: true, data: { notes, note: notes } });
+  } catch (err) {
+    console.error('[songs/notes:GET]', err);
+    res.json({ success: true, data: { notes: '', note: '' } });
+  }
+});
+
+router.patch('/notes/:songId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { songId } = req.params;
+    const userId = res.locals.auth?.userId || 'guest';
+    const key = `song_note_${userId}_${songId}`;
+    const notes = req.body.notes || req.body.note || '';
+
+    await prisma.setting.upsert({
+      where: { key },
+      update: { value: { notes, updatedAt: new Date().toISOString() } },
+      create: { key, value: { notes, updatedAt: new Date().toISOString() } },
+    });
+
+    res.json({ success: true, message: 'Notes saved', data: { notes } });
+  } catch (err) {
+    console.error('[songs/notes:PATCH]', err);
+    res.status(500).json({ success: false, error: 'Failed to save notes' });
+  }
+});
+
+router.get('/annotations/:songId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { songId } = req.params;
+    const key = `song_anno_${songId}`;
+
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const strokes = setting?.value && typeof setting.value === 'object' ? (setting.value as any).strokes || [] : [];
+
+    res.json({ success: true, data: { strokes } });
+  } catch (err) {
+    console.error('[songs/annotations:GET]', err);
+    res.json({ success: true, data: { strokes: [] } });
+  }
+});
+
+router.patch('/annotations/:songId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { songId } = req.params;
+    const key = `song_anno_${songId}`;
+    const strokes = req.body.data?.strokes || req.body.strokes || [];
+
+    await prisma.setting.upsert({
+      where: { key },
+      update: { value: { strokes, updatedAt: new Date().toISOString() } },
+      create: { key, value: { strokes, updatedAt: new Date().toISOString() } },
+    });
+
+    broadcast('annotation', songId, { songId, strokes });
+    res.json({ success: true, message: 'Annotations saved', data: { strokes } });
+  } catch (err) {
+    console.error('[songs/annotations:PATCH]', err);
+    res.status(500).json({ success: false, error: 'Failed to save annotations' });
   }
 });
 

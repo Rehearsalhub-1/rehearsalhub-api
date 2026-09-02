@@ -44,8 +44,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 // GET /categories/page
 router.get('/page', requireAuth, async (_req: Request, res: Response) => {
   try {
-    const rows = await prisma.category.findMany({ where: { type: 'PAGE' }, orderBy: { order: 'asc' } });
-    res.json({ success: true, data: rows.map(shapeCategory) });
+    const rows = await prisma.category.findMany({
+      where: {
+        OR: [
+          { type: 'PAGE' },
+          { type: 'PROGRAM' },
+        ],
+      },
+      orderBy: { order: 'asc' },
+    });
+    res.json({ success: true, count: rows.length, data: rows.map(shapeCategory) });
   } catch (err) {
     console.error('[categories/page]', err);
     res.status(500).json({ success: false, error: 'Failed to load page categories' });

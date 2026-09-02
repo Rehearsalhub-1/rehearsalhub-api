@@ -58,6 +58,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// GET /media/categories - List media folders/categories
+router.get('/categories', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const defaultCategories = ['Rehearsal', 'Praise Night', 'Communion', 'Live', 'Music Videos', 'Special Events'];
+    res.json({ success: true, count: defaultCategories.length, data: defaultCategories.map((name) => ({ name, title: name })) });
+  } catch (err) {
+    res.json({ success: true, count: 0, data: [] });
+  }
+});
+
 // GET /media/:id
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {

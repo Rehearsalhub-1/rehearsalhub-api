@@ -41,15 +41,15 @@ writesRouter.patch('/subscriptions/:userId', requireAuth, async (req: Request, r
     return;
   }
 
-  const profile = await prisma.profile.findUnique({ where: { id: userId } });
-  if (!profile) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
     notFound(res);
     return;
   }
 
   const updatedSub = {
-    id: `sub_${profile.id}`,
-    userId: profile.id,
+    id: `sub_${user.id}`,
+    userId: user.id,
     status: parsed.data.status || 'active',
     plan: parsed.data.plan || 'premium',
     expiresAt: parsed.data.expires_at || null,

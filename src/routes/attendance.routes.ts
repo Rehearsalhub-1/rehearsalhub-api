@@ -186,4 +186,51 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res:
   }
 });
 
+/** GET /attendance/code — Get current attendance check-in code */
+router.get('/code', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const effectiveZoneId = req.query.zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const key = `attendance_code_${effectiveZoneId}`;
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const val = setting?.value && typeof setting.value === 'object' ? (setting.value as any) : {};
+    res.json({ success: true, data: { code: val.code || '', active: val.active ?? false, zoneId: effectiveZoneId } });
+  } catch (err) {
+    console.error('[attendance/code:GET]', err);
+    res.json({ success: true, data: { code: '', active: false } });
+  }
+});
+
+/** POST /attendance/code — Set or toggle attendance check-in code */
+router.post('/code', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  try {
+    const { code, active, zoneId } = req.body;
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const key = `attendance_code_${effectiveZoneId}`;
+
+    const updated = await prisma.setting.upsert({
+      where: { key },
+      update: {
+        value: {
+          code: code || '',
+          active: active ?? true,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+      create: {
+        key,
+        value: {
+          code: code || '',
+          active: active ?? true,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    res.json({ success: true, data: updated.value });
+  } catch (err) {
+    console.error('[attendance/code:POST]', err);
+    res.status(500).json({ success: false, error: 'Failed to update attendance code' });
+  }
+});
+
 export default router;

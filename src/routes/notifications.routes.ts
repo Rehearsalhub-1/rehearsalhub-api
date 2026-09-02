@@ -78,8 +78,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-/** POST /notifications — Broadcast / Send notification */
-router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+/** POST /notifications & POST /notifications/broadcast — Broadcast / Send notification */
+const handleCreateNotification = async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
     const { title, body, message, type = 'info', category = 'general', priority = 'normal', actionUrl, targetUserId, targetOrgId } = req.body;
@@ -125,7 +125,10 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
     console.error('[notifications:create]', err);
     res.status(500).json({ success: false, error: 'Failed to create notification' });
   }
-});
+};
+
+router.post('/', requireAuth, requireTenantAdmin, handleCreateNotification);
+router.post('/broadcast', requireAuth, requireTenantAdmin, handleCreateNotification);
 
 /** POST /notifications/mark-read — Mark a single notification as read */
 router.post('/mark-read', requireAuth, async (req: Request, res: Response) => {
@@ -146,6 +149,26 @@ router.post('/mark-read', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[notifications/mark-read]', err);
     res.status(500).json({ success: false, error: 'Failed to mark notification read' });
+  }
+});
+
+/** PATCH /notifications/:id — Mark specific notification as read/unread */
+router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = res.locals.auth.userId as string;
+    const notifId = req.params.id;
+    const isRead = req.body.is_read !== undefined ? Boolean(req.body.is_read) : true;
+
+    await prisma.notificationDelivery.upsert({
+      where: { notificationId_userId: { notificationId: notifId, userId } },
+      create: { notificationId: notifId, userId, isRead, readAt: isRead ? new Date() : null },
+      update: { isRead, readAt: isRead ? new Date() : null },
+    });
+
+    res.json({ success: true, message: `Notification marked as ${isRead ? 'read' : 'unread'}` });
+  } catch (err) {
+    console.error('[notifications:PATCH:id]', err);
+    res.status(500).json({ success: false, error: 'Failed to update notification' });
   }
 });
 

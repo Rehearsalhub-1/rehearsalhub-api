@@ -228,6 +228,19 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
     const nextIsActive = typeof isActive === 'boolean' ? isActive : nextCategory === 'ongoing';
     const nextIsArchived = typeof isArchived === 'boolean' ? isArchived : nextCategory === 'archive';
 
+    if (Array.isArray(req.body.songIds)) {
+      await prisma.programSong.deleteMany({ where: { programId: id } });
+      if (req.body.songIds.length > 0) {
+        await prisma.programSong.createMany({
+          data: req.body.songIds.map((sId: string, idx: number) => ({
+            programId: id,
+            songId: sId,
+            order: idx + 1,
+          })),
+        });
+      }
+    }
+
     const updated = await prisma.program.update({
       where: { id },
       data: {
@@ -244,6 +257,7 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       include: {
         programSongs: {
           include: { song: true },
+          orderBy: { order: 'asc' },
         },
       },
     });

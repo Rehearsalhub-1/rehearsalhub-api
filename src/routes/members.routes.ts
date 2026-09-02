@@ -32,12 +32,7 @@ function shapeMember(m: any) {
 router.get('/mine', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const rawProfileRows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT raw_data FROM profiles WHERE id = $1 LIMIT 1`,
-      userId
-    ).catch(() => []);
-    const rawData = rawProfileRows[0]?.raw_data || {};
-    const memberships = await fetchAllUserMemberships(userId, rawData);
+    const memberships = await fetchAllUserMemberships(userId);
 
     const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map(shapeMember);
     const hqMembers = memberships.filter((m) => m.hasHqAccess).map(shapeMember);
@@ -58,12 +53,7 @@ router.get('/by-user/:userId', requireAuth, async (req: Request, res: Response) 
     const isAdmin = auth.role === 'admin' || auth.role === 'hq_admin';
     if (!isSelf && !isAdmin) return res.status(403).json({ success: false, error: 'Forbidden' });
 
-    const rawProfileRows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT raw_data FROM profiles WHERE id = $1 LIMIT 1`,
-      userId
-    ).catch(() => []);
-    const rawData = rawProfileRows[0]?.raw_data || {};
-    const memberships = await fetchAllUserMemberships(userId, rawData);
+    const memberships = await fetchAllUserMemberships(userId);
 
     const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map(shapeMember);
     const hqMembers = memberships.filter((m) => m.hasHqAccess).map(shapeMember);
@@ -198,6 +188,47 @@ router.patch('/:userId', requireAuth, async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[members/:userId PATCH]', err);
     res.status(500).json({ success: false, error: err?.message || 'Failed to update member' });
+  }
+});
+
+/** DELETE /members/zone/:membershipId */
+router.delete('/zone/:membershipId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { membershipId } = req.params;
+    const userId = res.locals.auth.userId as string;
+
+    await prisma.membership.deleteMany({
+      where: {
+        id: membershipId,
+        userId,
+      },
+    });
+
+    res.json({ success: true, message: 'Membership removed' });
+  } catch (err) {
+    console.error('[members/zone/:id:DELETE]', err);
+    res.status(500).json({ success: false, error: 'Failed to delete membership' });
+  }
+});
+
+/** DELETE /members/:id */
+router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = res.locals.auth.userId as string;
+
+    await prisma.membership.deleteMany({
+      where: {
+        OR: [
+          { id, userId },
+          { id },
+        ],
+      },
+    });
+
+    res.json({ success: true, message: 'Membership deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Failed to delete membership' });
   }
 });
 

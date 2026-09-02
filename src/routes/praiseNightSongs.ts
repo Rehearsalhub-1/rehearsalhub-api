@@ -13,23 +13,29 @@ router.get('/', async (req: Request, res: Response) => {
     let rows: any[] = [];
 
     if (targetProgramId) {
-      // Query by programId direct column + rawData fallbacks
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM songs
-         WHERE praise_night_id = $1
-            OR raw_data->>'praiseNightId' = $1
-            OR raw_data->>'programId' = $1
-            OR raw_data->>'praise_night_id' = $1
-         ORDER BY title ASC`,
-        targetProgramId
-      );
-    } else if (zoneId) {
+      const programSongs = await prisma.programSong.findMany({
+        where: { programId: targetProgramId },
+        include: { song: true },
+        orderBy: { order: 'asc' },
+      });
+
+      rows = programSongs.map((ps) => ({
+        ...ps.song,
+        order: ps.order,
+        programId: ps.programId,
+        praiseNightId: ps.programId,
+      }));
+    } else if (zoneId && zoneId !== 'all') {
       rows = await prisma.song.findMany({
         where: { organizationId: zoneId as string },
         orderBy: { title: 'asc' },
+        take: 250,
       });
     } else {
-      rows = await prisma.song.findMany({ orderBy: { title: 'asc' } });
+      rows = await prisma.song.findMany({
+        orderBy: { title: 'asc' },
+        take: 500,
+      });
     }
 
     res.json({ success: true, count: rows.length, data: rows.map(mergeRawRow) });
