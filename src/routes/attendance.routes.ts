@@ -81,34 +81,72 @@ const handleCheckIn = async (req: Request, res: Response) => {
     const now = new Date();
     const id = req.body.id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-    const inserted = await prisma.attendance.upsert({
-      where: {
-        programId_userId: {
-          programId: programId || 'general_rehearsal',
-          userId: targetUserId,
+    // Validate or resolve valid programId
+    let resolvedProgramId: string | null = null;
+    if (programId && typeof programId === 'string' && programId !== 'general_rehearsal') {
+      const exists = await prisma.program.findUnique({ where: { id: programId } });
+      if (exists) resolvedProgramId = programId;
+    }
+    if (!resolvedProgramId) {
+      const activeProgram = await prisma.program.findFirst({
+        where: {
+          OR: [
+            { organizationId: orgId },
+            { organizationId: 'zone-001' },
+          ],
+          isActive: true,
         },
-      },
-      update: {
-        status: 'present',
-        checkInTime: now,
-        scannedAt: qrCode ? now : undefined,
-        qrCode: qrCode || undefined,
-        recordedById: auth.userId,
-      },
-      create: {
-        id,
-        organizationId: orgId,
-        userId: targetUserId,
-        programId: programId || 'general_rehearsal',
-        eventName: eventName || 'Rehearsal',
-        status: 'present',
-        checkInTime: now,
-        scannedAt: qrCode ? now : null,
-        qrCode: qrCode || null,
-        recordedById: auth.userId,
-      },
-      include: { user: true },
-    });
+        select: { id: true },
+      });
+      resolvedProgramId = activeProgram?.id || null;
+    }
+
+    let inserted;
+    if (resolvedProgramId) {
+      inserted = await prisma.attendance.upsert({
+        where: {
+          programId_userId: {
+            programId: resolvedProgramId,
+            userId: targetUserId,
+          },
+        },
+        update: {
+          status: 'present',
+          checkInTime: now,
+          scannedAt: qrCode ? now : undefined,
+          qrCode: qrCode || undefined,
+          recordedById: auth.userId,
+        },
+        create: {
+          id,
+          organizationId: orgId,
+          userId: targetUserId,
+          programId: resolvedProgramId,
+          eventName: eventName || 'Rehearsal',
+          status: 'present',
+          checkInTime: now,
+          scannedAt: qrCode ? now : null,
+          qrCode: qrCode || null,
+          recordedById: auth.userId,
+        },
+        include: { user: true },
+      });
+    } else {
+      inserted = await prisma.attendance.create({
+        data: {
+          id,
+          organizationId: orgId,
+          userId: targetUserId,
+          eventName: eventName || 'General Rehearsal',
+          status: 'present',
+          checkInTime: now,
+          scannedAt: qrCode ? now : null,
+          qrCode: qrCode || null,
+          recordedById: auth.userId,
+        },
+        include: { user: true },
+      });
+    }
 
     res.status(201).json({ success: true, message: 'Checked in successfully', data: shapeAttendance(inserted) });
   } catch (err: any) {

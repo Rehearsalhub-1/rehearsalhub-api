@@ -133,22 +133,24 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     }
   }
 
-  // Extract from composite ID (e.g. uid1_uid2) if missing from participants list
-  if (typeof c.id === 'string' && c.id.includes('_')) {
+  // Extract from composite ID (e.g. uid1_uid2) ONLY for legacy direct chats when DB participants is empty
+  if (participants.length === 0 && (c.type === 'direct' || !c.type) && typeof c.id === 'string' && c.id.includes('_') && !c.id.startsWith('group_') && !c.id.startsWith('chat_')) {
     const parts = c.id.split('_');
-    for (const uid of parts) {
-      if (uid && !participants.includes(uid)) {
-        participants.push(uid);
-        const u = extraUsersMap[uid];
-        const name = getUserDisplayName(u);
-        details[uid] = {
-          id: uid,
-          name,
-          avatar: u?.avatarUrl || u?.avatar || null,
-          email: u?.email || null,
-          firstName: u?.firstName || u?.first_name || null,
-          lastName: u?.lastName || u?.last_name || null,
-        };
+    if (parts.length === 2) {
+      for (const uid of parts) {
+        if (uid && !participants.includes(uid)) {
+          participants.push(uid);
+          const u = extraUsersMap[uid];
+          const name = getUserDisplayName(u);
+          details[uid] = {
+            id: uid,
+            name,
+            avatar: u?.avatarUrl || u?.avatar || null,
+            email: u?.email || null,
+            firstName: u?.firstName || u?.first_name || null,
+            lastName: u?.lastName || u?.last_name || null,
+          };
+        }
       }
     }
   }
@@ -233,9 +235,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       where: {
         OR: [
           { participants: { some: { userId } } },
-          { id: { contains: userId } },
-          { createdById: userId },
-          { messages: { some: { senderId: userId } } },
+          {
+            AND: [
+              { type: 'direct' },
+              { id: { contains: userId } },
+            ],
+          },
         ],
       },
       include: {
@@ -757,9 +762,15 @@ router.patch('/:chatId', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    // Handle new participants
+    // Handle participant synchronization
     const incomingParticipants = participants || memberIds;
     if (Array.isArray(incomingParticipants) && incomingParticipants.length > 0) {
+      await prisma.chatParticipant.deleteMany({
+        where: {
+          chatId,
+          userId: { notIn: incomingParticipants },
+        },
+      });
       for (const uid of incomingParticipants) {
         await prisma.chatParticipant.upsert({
           where: { chatId_userId: { chatId, userId: uid } },

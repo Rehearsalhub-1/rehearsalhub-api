@@ -78,6 +78,42 @@ router.get('/requests', requireAuth, requireTenantAdmin, async (req: Request, re
   }
 });
 
+/** POST /subgroups/requests — Submit request to create or join a church/subgroup */
+router.post('/requests', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const { name, churchName, subgroupName, zoneId, note, description } = req.body;
+    const targetName = (name || churchName || subgroupName || note || '').trim();
+    if (!targetName) {
+      return res.status(400).json({ success: false, error: 'Church name is required' });
+    }
+
+    const orgId = zoneId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
+    const id = `grp_req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    const group = await prisma.group.create({
+      data: {
+        id,
+        organizationId: orgId,
+        name: targetName,
+        description: description?.trim() || `Requested by user ${auth.userId}`,
+        type: 'church',
+        status: 'pending',
+        estimatedMembers: 1,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Church request submitted successfully for coordinator approval',
+      data: shapeGroup(group),
+    });
+  } catch (err: any) {
+    console.error('[subgroups/requests POST]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to submit church request' });
+  }
+});
+
 /** GET /subgroups - List groups */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
