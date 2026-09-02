@@ -99,11 +99,24 @@ export function profileFromUser(user: any): any {
 
 export type AuthUser = {
   id: string;
+  uid?: string;
+  userId?: string;
   email: string;
   role: string;
   zoneId: string | null;
+  zone_id?: string | null;
   firstName?: string | null;
   lastName?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string;
+  displayName?: string;
+  username?: string | null;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+  profile_image_url?: string | null;
+  phone?: string | null;
+  phoneNumber?: string | null;
   hasHqAccess?: boolean;
   has_hq_access?: boolean;
   memberships?: any[];
@@ -354,16 +367,30 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
     data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() },
   });
   const accessToken = signAccessToken({ sub: profile.id, role: resolvedRole, zoneId: resolvedZoneId ?? undefined });
+  const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || email || 'Member';
   return {
     accessToken,
     refreshToken: rawRefresh,
     user: {
       id: profile.id,
+      uid: profile.id,
+      userId: profile.id,
       email,
       role: resolvedRole,
       zoneId: resolvedZoneId,
+      zone_id: resolvedZoneId,
       firstName: profile.firstName,
       lastName: profile.lastName,
+      first_name: profile.firstName,
+      last_name: profile.lastName,
+      name: fullName,
+      displayName: fullName,
+      username: profile.username || (email ? email.split('@')[0] : null),
+      avatar: profile.avatarUrl || profile.avatar || null,
+      avatarUrl: profile.avatarUrl || profile.avatar || null,
+      profile_image_url: profile.avatarUrl || profile.avatar || null,
+      phone: profile.phone || null,
+      phoneNumber: profile.phone || null,
       hasHqAccess: profile.hasHqAccess || false,
       has_hq_access: profile.hasHqAccess || false,
       memberships: canonicalMemberships,

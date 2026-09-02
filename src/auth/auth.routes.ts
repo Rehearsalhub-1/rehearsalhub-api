@@ -20,7 +20,7 @@ const router = Router();
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many login attempts, please try again later.' },
@@ -28,7 +28,7 @@ const loginLimiter = rateLimit({
 
 const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many refresh attempts, please try again later.' },
@@ -36,7 +36,7 @@ const refreshLimiter = rateLimit({
 
 const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 50,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many password reset attempts, please try again later.' },
@@ -44,7 +44,7 @@ const passwordResetLimiter = rateLimit({
 
 const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10-minute window
-  max: 10,                   // 10 attempts per window
+  max: 50,                   // 50 attempts per window
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many OTP requests. Please wait a few minutes before trying again.' },
