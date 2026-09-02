@@ -426,6 +426,35 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
     const isParticipant = chat.participants.some((p) => p.userId === auth.userId);
     if (!isParticipant) return res.status(403).json({ success: false, error: 'Forbidden' });
 
+    // 1. Direct chat block check
+    if (chat.type === 'direct') {
+      const recipient = chat.participants.find(p => p.userId !== auth.userId);
+      if (recipient) {
+        const blockKey = `blocked_users_${recipient.userId}`;
+        const blockSetting = await prisma.setting.findUnique({ where: { key: blockKey } });
+        const blockedList: string[] = Array.isArray(blockSetting?.value) ? (blockSetting?.value as string[]) : [];
+        if (blockedList.includes(auth.userId)) {
+          return res.status(403).json({ success: false, error: 'Cannot send message to this user' });
+        }
+      }
+    }
+
+    // 2. Group adminOnlySend check
+    if (chat.type === 'group') {
+      const settingsKey = `chat_settings_${chatId}`;
+      const settingsRow = await prisma.setting.findUnique({ where: { key: settingsKey } });
+      const groupSettings: any = settingsRow?.value || {};
+      if (groupSettings.adminOnlySend) {
+        const isCreator = chat.createdById === auth.userId;
+        const roleKey = `chat_role_${chatId}_${auth.userId}`;
+        const roleRow = await prisma.setting.findUnique({ where: { key: roleKey } });
+        const isGroupAdmin = roleRow?.value && typeof roleRow.value === 'object' && (roleRow.value as any).role === 'admin';
+        if (!isCreator && !isGroupAdmin && auth.role !== 'admin' && auth.role !== 'hq_admin') {
+          return res.status(403).json({ success: false, error: 'Only admins can send messages in this group' });
+        }
+      }
+    }
+
     const messageId = req.body.id || crypto.randomUUID();
 
     let storedText = text;
@@ -792,6 +821,176 @@ router.post('/:chatId/messages/:messageId/reactions', requireAuth, async (req: R
     res.json({ success: true });
   } catch (err) {
     res.json({ success: true });
+  }
+});
+
+// 18. POST /chats/requests/:chatId/accept — Accept message request
+router.post('/requests/:chatId/accept', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+
+    // Save acceptance in settings/metadata
+    const key = `chat_accepted_${auth.userId}_${chatId}`;
+    await prisma.setting.upsert({
+      where: { key },
+      create: { key, value: { accepted: true, acceptedAt: new Date().toISOString() } },
+      update: { value: { accepted: true, acceptedAt: new Date().toISOString() } },
+    });
+
+    broadcast('chat_accepted', chatId, { chatId, userId: auth.userId });
+    res.json({ success: true, message: 'Chat request accepted' });
+  } catch (err: any) {
+    console.error('[chats:requests:accept]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to accept request' });
+  }
+});
+
+// 19. POST /chats/requests/:chatId/decline — Decline message request
+router.post('/requests/:chatId/decline', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const auth = res.locals.auth;
+
+    await prisma.chatParticipant.deleteMany({
+      where: { chatId, userId: auth.userId },
+    });
+
+    res.json({ success: true, message: 'Chat request declined' });
+  } catch (err: any) {
+    console.error('[chats:requests:decline]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to decline request' });
+  }
+});
+
+// 20. GET /chats/users/blocked — Get user's blocked list
+router.get('/users/blocked', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const key = `blocked_users_${auth.userId}`;
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const blockedIds: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+
+    let users: any[] = [];
+    if (blockedIds.length > 0) {
+      users = await prisma.user.findMany({
+        where: { id: { in: blockedIds } },
+        select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true, role: true },
+      });
+    }
+
+    res.json({ success: true, count: users.length, data: users });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to get blocked users' });
+  }
+});
+
+// 21. POST /chats/users/block — Block a user
+router.post('/users/block', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const { targetUserId } = req.body;
+    if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId is required' });
+
+    const key = `blocked_users_${auth.userId}`;
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const currentList: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+
+    if (!currentList.includes(targetUserId)) {
+      currentList.push(targetUserId);
+      await prisma.setting.upsert({
+        where: { key },
+        create: { key, value: currentList },
+        update: { value: currentList },
+      });
+    }
+
+    res.json({ success: true, message: 'User blocked successfully' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to block user' });
+  }
+});
+
+// 22. DELETE /chats/users/block/:targetUserId — Unblock a user
+router.delete('/users/block/:targetUserId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const { targetUserId } = req.params;
+
+    const key = `blocked_users_${auth.userId}`;
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const currentList: string[] = Array.isArray(setting?.value) ? (setting?.value as string[]) : [];
+    const updatedList = currentList.filter(id => id !== targetUserId);
+
+    await prisma.setting.upsert({
+      where: { key },
+      create: { key, value: updatedList },
+      update: { value: updatedList },
+    });
+
+    res.json({ success: true, message: 'User unblocked successfully' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to unblock user' });
+  }
+});
+
+// 23. PATCH /chats/:chatId/participants/:targetUserId/role — Promote / Demote admin
+router.patch('/:chatId/participants/:targetUserId/role', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId, targetUserId } = req.params;
+    const { role = 'admin' } = req.body;
+    const auth = res.locals.auth;
+
+    // Verify requesting user is creator or admin
+    const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+    if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
+    if (chat.createdById !== auth.userId && auth.role !== 'admin' && auth.role !== 'hq_admin') {
+      return res.status(403).json({ success: false, error: 'Only group creator can promote admins' });
+    }
+
+    const key = `chat_role_${chatId}_${targetUserId}`;
+    await prisma.setting.upsert({
+      where: { key },
+      create: { key, value: { role } },
+      update: { value: { role } },
+    });
+
+    broadcast('chat_participant_role', chatId, { chatId, userId: targetUserId, role });
+    res.json({ success: true, message: `Participant role updated to ${role}` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update participant role' });
+  }
+});
+
+// 24. PATCH /chats/:chatId/settings — Update group permissions (e.g. adminOnlySend)
+router.patch('/:chatId/settings', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    const { adminOnlySend, description } = req.body;
+    const auth = res.locals.auth;
+
+    const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+    if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
+
+    const key = `chat_settings_${chatId}`;
+    const existing = await prisma.setting.findUnique({ where: { key } });
+    const currentVal: any = existing?.value || {};
+    const updatedVal = {
+      ...currentVal,
+      ...(adminOnlySend !== undefined ? { adminOnlySend } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
+
+    await prisma.setting.upsert({
+      where: { key },
+      create: { key, value: updatedVal },
+      update: { value: updatedVal },
+    });
+
+    broadcast('chat_settings_updated', chatId, { chatId, settings: updatedVal });
+    res.json({ success: true, data: updatedVal });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update chat settings' });
   }
 });
 

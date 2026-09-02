@@ -81,6 +81,8 @@ const updateProfileSchema = z.object({
   firstName: z.string().optional(),
   last_name: z.string().optional(),
   lastName: z.string().optional(),
+  middle_name: z.string().optional(),
+  middleName: z.string().optional(),
   email: z.string().optional(),
   password: z.string().min(1).optional(),
   role: z.string().optional(),
@@ -93,16 +95,22 @@ const updateProfileSchema = z.object({
   zoneCode: z.string().optional(),
   zone_id: z.string().optional(),
   zoneId: z.string().optional(),
+  organizationId: z.string().optional(),
   church: z.string().optional(),
   kingschat_id: z.string().optional(),
   kingschatId: z.string().optional(),
   designation: z.string().optional(),
+  administration: z.string().optional(),
+  voice_part: z.string().optional(),
+  voicePart: z.string().optional(),
+  username: z.string().optional(),
+  alias: z.string().optional(),
   profile_image_url: z.string().optional(),
   avatar_url: z.string().optional(),
   avatar: z.string().optional(),
   expo_push_token: z.string().optional(),
   onesignal_sub_id: z.string().optional(),
-});
+}).passthrough();
 
 // GET /profiles/check-username/:username
 router.get('/check-username/:username', requireAuth, async (req, res) => {
@@ -203,15 +211,15 @@ router.get('/birthdays', requireAuth, async (_req, res) => {
   }
 });
 
-// GET /profiles/directory
-router.get('/directory', requireAuth, async (req, res) => {
+// GET /profiles & GET /profiles/directory — List all directory profiles
+const handleGetDirectory = async (req: any, res: any) => {
   try {
     const auth = res.locals.auth;
-    const { ids, zone_code, zoneId } = req.query as any;
+    const { ids, zone_code, zoneId, limit = 500 } = req.query as any;
 
     let idList: string[] = [];
     if (typeof ids === 'string' && ids.trim().length > 0) {
-      idList = ids.split(',').map((s: string) => s.trim()).filter(Boolean).slice(0, 100);
+      idList = ids.split(',').map((s: string) => s.trim()).filter(Boolean).slice(0, 500);
     }
 
     const where: any = {};
@@ -235,7 +243,11 @@ router.get('/directory', requireAuth, async (req, res) => {
           include: { organization: true, group: true },
         },
       },
-      take: 250,
+      orderBy: [
+        { firstName: 'asc' },
+        { lastName: 'asc' },
+      ],
+      take: Math.min(parseInt(limit as string) || 500, 1000),
     });
 
     res.json({ success: true, count: users.length, data: users.map(formatUserProfile) });
@@ -243,7 +255,10 @@ router.get('/directory', requireAuth, async (req, res) => {
     console.error('[profiles/directory]', err);
     res.status(500).json({ success: false, error: 'Failed to fetch directory' });
   }
-});
+};
+
+router.get('/', requireAuth, handleGetDirectory);
+router.get('/directory', requireAuth, handleGetDirectory);
 
 // GET /profiles/:userId
 router.get('/:userId', requireAuth, async (req, res) => {
