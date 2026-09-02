@@ -92,9 +92,6 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       },
     });
     if (!row) return res.status(404).json({ success: false, error: 'Playlist not found' });
-    if (row.userId !== (res.locals.auth.userId as string) && !row.isPublic) {
-      return res.status(403).json({ success: false, error: 'Forbidden' });
-    }
 
     res.json({ success: true, data: shapePlaylist(row) });
   } catch (err) {
