@@ -606,7 +606,17 @@ router.delete('/:chatId/messages/:messageId', requireAuth, async (req: Request, 
 
     const existing = await prisma.message.findUnique({ where: { id: messageId } });
     if (!existing) return res.status(404).json({ success: false, error: 'Message not found' });
-    if (existing.senderId !== auth.userId) return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    const chat = await prisma.chat.findUnique({ where: { id: chatId } });
+    const settingsKey = `chat_settings_${chatId}`;
+    const settingsRow = await prisma.setting.findUnique({ where: { key: settingsKey } }).catch(() => null);
+    const settingsVal: any = settingsRow?.value || {};
+    const groupAdmins: string[] = Array.isArray(settingsVal?.admins) ? settingsVal.admins : [];
+    const isGroupAdmin = chat?.createdById === auth.userId || groupAdmins.includes(auth.userId) || auth.role === 'hq_admin';
+
+    if (existing.senderId !== auth.userId && !isGroupAdmin) {
+      return res.status(403).json({ success: false, error: 'Only sender or group admin can delete this message' });
+    }
 
     await prisma.message.delete({ where: { id: messageId } });
     broadcast('message_deleted', chatId, { messageId });
@@ -923,6 +933,9 @@ router.post('/:chatId/participants', requireAuth, async (req: Request, res: Resp
 
     const formatted = formatChat(updated, res.locals.auth.userId);
     broadcast('chat', chatId, formatted);
+    targets.forEach((uId: string) => {
+      broadcast('chats', uId, { type: 'chat_created', chat: formatted });
+    });
     res.json({ success: true, data: formatted });
   } catch (err) {
     console.error('[chats:participants:add]', err);
