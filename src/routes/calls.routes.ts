@@ -126,7 +126,15 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     });
 
     const shaped = shapeCall(call);
-    broadcast('calls', receiverId, { type: 'incoming_call', call: shaped });
+    const participantIds: string[] = Array.isArray(req.body.participantIds) && req.body.participantIds.length > 0
+      ? req.body.participantIds
+      : [receiverId];
+
+    for (const pid of participantIds) {
+      if (pid && pid !== auth.userId) {
+        broadcast('calls', pid, { type: 'incoming_call', call: shaped });
+      }
+    }
     if (chatId) broadcast('calls', chatId, { type: 'incoming_call', call: shaped });
     broadcast('call', callId, shaped);
     res.status(201).json({ success: true, data: shaped });

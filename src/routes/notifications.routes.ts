@@ -130,6 +130,83 @@ const handleCreateNotification = async (req: Request, res: Response) => {
 router.post('/', requireAuth, requireTenantAdmin, handleCreateNotification);
 router.post('/broadcast', requireAuth, requireTenantAdmin, handleCreateNotification);
 
+/** POST /notifications/send — Dispatch peer-to-peer / system push & websocket notifications */
+router.post('/send', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { recipientIds, title, body, data } = req.body;
+    const userIds: string[] = Array.isArray(recipientIds) ? recipientIds : [recipientIds].filter(Boolean);
+    if (!userIds.length) {
+      return res.status(400).json({ success: false, error: 'recipientIds are required' });
+    }
+
+    // 1. Broadcast real-time websocket event to each recipient
+    for (const uid of userIds) {
+      broadcast('notifications', uid, {
+        id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title,
+        body,
+        data,
+        createdAt: new Date().toISOString(),
+      });
+      if (data?.type === 'call' || data?.screen === 'Call' || data?.callId) {
+        broadcast('calls', uid, {
+          type: 'incoming_call',
+          call: {
+            id: data?.callId,
+            callerName: data?.senderName || title,
+            callerAvatar: data?.senderAvatar,
+            type: data?.callType || 'voice',
+            chatId: data?.chatId,
+            roomId: data?.callId,
+          },
+        });
+      }
+    }
+
+    // 2. Fetch Expo push tokens from settings table and dispatch to Expo Push API
+    try {
+      const metaKeys = userIds.map((id) => `profile_meta_${id}`);
+      const settings = await prisma.setting.findMany({
+        where: { key: { in: metaKeys } },
+      });
+
+      const pushMessages: any[] = [];
+      for (const s of settings) {
+        const val: any = s.value;
+        const token = val?.expoPushToken || val?.expo_push_token;
+        if (token && typeof token === 'string' && token.startsWith('ExponentPushToken')) {
+          pushMessages.push({
+            to: token,
+            sound: 'default',
+            title: title || 'New Notification',
+            body: body || '',
+            data: data || {},
+          });
+        }
+      }
+
+      if (pushMessages.length > 0) {
+        fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(pushMessages),
+        }).catch((err) => console.warn('[ExpoPush] Dispatch failed:', err));
+      }
+    } catch (pushErr) {
+      console.warn('[notifications:send:expo]', pushErr);
+    }
+
+    res.json({ success: true, count: userIds.length });
+  } catch (err) {
+    console.error('[notifications:send]', err);
+    res.status(500).json({ success: false, error: 'Failed to send notifications' });
+  }
+});
+
 /** POST /notifications/mark-read — Mark a single notification as read */
 router.post('/mark-read', requireAuth, async (req: Request, res: Response) => {
   try {
