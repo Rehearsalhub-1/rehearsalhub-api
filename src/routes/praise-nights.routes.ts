@@ -119,17 +119,11 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     if (targetZone && targetZone !== 'all' && targetZone !== 'global') {
-      where.OR = [
-        { organizationId: targetZone },
-        { organizationId: 'zone-001' },
-        { organizationId: null },
-      ];
+      const orgIds = Array.from(new Set([targetZone, 'zone-001'])).filter(Boolean);
+      where.organizationId = { in: orgIds };
     } else if (!isHqAdmin && targetZone) {
-      where.OR = [
-        { organizationId: targetZone },
-        { organizationId: 'zone-001' },
-        { organizationId: null },
-      ];
+      const orgIds = Array.from(new Set([targetZone, 'zone-001'])).filter(Boolean);
+      where.organizationId = { in: orgIds };
     }
 
     const programs = await prisma.program.findMany({
@@ -144,9 +138,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     });
 
     res.json({ success: true, count: programs.length, data: programs.map(shapeProgram) });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[programs]', err);
-    res.status(500).json({ success: false, error: 'Failed to load programs' });
+    res.status(500).json({ success: false, error: err?.message || 'Failed to load programs' });
   }
 });
 
