@@ -101,7 +101,11 @@ router.get('/:callId', requireAuth, async (req: Request, res: Response) => {
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { receiverId, type = 'voice', chatId, callerName, callerAvatar } = req.body;
+    const receiverId = req.body.receiverId || req.body.receiver_id;
+    const type = req.body.type || 'voice';
+    const chatId = req.body.chatId || req.body.chat_id || null;
+    const callerName = req.body.callerName || req.body.caller_name || null;
+    const callerAvatar = req.body.callerAvatar || req.body.caller_avatar || null;
     if (!receiverId) return res.status(400).json({ success: false, error: 'receiverId is required' });
 
     const callId = req.body.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

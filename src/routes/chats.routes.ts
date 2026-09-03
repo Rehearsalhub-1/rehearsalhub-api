@@ -110,7 +110,7 @@ function formatMessage(m: any) {
   };
 }
 
-function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string, any> = {}) {
+function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string, any> = {}, settingsMap: Record<string, any> = {}) {
   const participants: string[] = [];
   const details: Record<string, any> = {};
 
@@ -208,7 +208,7 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     organizationId: c.organizationId || null,
     createdById: c.createdById,
     createdBy: c.createdById,
-    admins: Array.from(new Set([c.createdById, ...(Array.isArray(c.admins) ? c.admins : [])].filter(Boolean))),
+    admins: Array.from(new Set([c.createdById, ...(Array.isArray(settingsMap[c.id]?.admins) ? settingsMap[c.id].admins : (Array.isArray(c.admins) ? c.admins : []))].filter(Boolean))),
     participants,
     participantDetails: details,
     lastMessage: lastMsg ? {
@@ -271,7 +271,20 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       extraUsers.forEach((u) => { extraUsersMap[u.id] = u; });
     }
 
-    const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap));
+    // Query group chat settings to attach configured admins
+    const groupChatKeys = chatRows.filter(c => c.type === 'group' || c.id.startsWith('group_')).map(c => `chat_settings_${c.id}`);
+    const settingsList = groupChatKeys.length > 0 ? await prisma.setting.findMany({
+      where: { key: { in: groupChatKeys } }
+    }).catch(() => []) : [];
+    const settingsMap: Record<string, any> = {};
+    settingsList.forEach((s: any) => {
+      try {
+        const val = typeof s.value === 'string' ? JSON.parse(s.value) : s.value;
+        settingsMap[s.key.replace('chat_settings_', '')] = val;
+      } catch {}
+    });
+
+    const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap, settingsMap));
     data.sort((a, b) => {
       const timeA = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
       const timeB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
@@ -612,7 +625,13 @@ router.delete('/:chatId/messages/:messageId', requireAuth, async (req: Request, 
     const settingsRow = await prisma.setting.findUnique({ where: { key: settingsKey } }).catch(() => null);
     const settingsVal: any = settingsRow?.value || {};
     const groupAdmins: string[] = Array.isArray(settingsVal?.admins) ? settingsVal.admins : [];
-    const isGroupAdmin = chat?.createdById === auth.userId || groupAdmins.includes(auth.userId) || auth.role === 'hq_admin';
+    const isGroupAdmin = chat?.createdById === auth.userId || 
+                         groupAdmins.includes(auth.userId) || 
+                         auth.role === 'hq_admin' || 
+                         auth.role === 'admin' || 
+                         auth.role === 'boss' || 
+                         auth.role === 'zone_admin' || 
+                         auth.role === 'coordinator';
 
     if (existing.senderId !== auth.userId && !isGroupAdmin) {
       return res.status(403).json({ success: false, error: 'Only sender or group admin can delete this message' });
