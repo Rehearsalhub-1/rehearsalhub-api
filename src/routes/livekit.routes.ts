@@ -24,7 +24,21 @@ async function canJoinRoom(room: string, userId: string): Promise<boolean> {
     },
   });
   if (!call) return true;
-  return call.callerId === userId || call.receiverId === userId;
+  if (call.callerId === userId || call.receiverId === userId) return true;
+
+  if (call.chatId) {
+    try {
+      const chat = await prisma.chat.findUnique({
+        where: { id: call.chatId },
+        include: { participants: true },
+      });
+      if (chat && chat.participants.some((p: any) => p.userId === userId)) {
+        return true;
+      }
+    } catch {}
+  }
+
+  return false;
 }
 
 router.get('/', requireAuth, async (req: Request, res: Response) => {

@@ -127,6 +127,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const shaped = shapeCall(call);
     broadcast('calls', receiverId, { type: 'incoming_call', call: shaped });
+    if (chatId) broadcast('calls', chatId, { type: 'incoming_call', call: shaped });
     broadcast('call', callId, shaped);
     res.status(201).json({ success: true, data: shaped });
   } catch (err) {
