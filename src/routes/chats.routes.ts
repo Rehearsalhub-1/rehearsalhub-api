@@ -207,6 +207,8 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     avatar: avatar?.uri || (typeof avatar === 'string' ? avatar : null),
     organizationId: c.organizationId || null,
     createdById: c.createdById,
+    createdBy: c.createdById,
+    admins: Array.from(new Set([c.createdById, ...(Array.isArray(c.admins) ? c.admins : [])].filter(Boolean))),
     participants,
     participantDetails: details,
     lastMessage: lastMsg ? {
@@ -275,7 +277,26 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       const timeB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
       return timeB - timeA;
     });
-    res.json({ success: true, count: data.length, data });
+
+    // Deduplicate direct chats so each user appears ONLY ONCE in the chat list
+    const seenOtherUsers = new Set<string>();
+    const deduplicatedData: any[] = [];
+
+    for (const chat of data) {
+      if (!chat.isGroup && chat.type === 'direct') {
+        const otherId = (chat.participants || []).find((id: string) => id !== userId);
+        if (otherId) {
+          if (seenOtherUsers.has(otherId)) {
+            // Already included the newest conversation with this person — skip older duplicate
+            continue;
+          }
+          seenOtherUsers.add(otherId);
+        }
+      }
+      deduplicatedData.push(chat);
+    }
+
+    res.json({ success: true, count: deduplicatedData.length, data: deduplicatedData });
   } catch (err) {
     console.error('[chats:get]', err);
     res.status(500).json({ success: false, error: 'Failed to load chats' });
@@ -306,7 +327,14 @@ router.get('/:chatId', requireAuth, async (req: Request, res: Response) => {
     const isParticipant = chat.participants.some((p) => p.userId === userId) || chat.id.includes(userId) || chat.createdById === userId;
     if (!isParticipant) return res.status(403).json({ success: false, error: 'Forbidden' });
 
-    res.json({ success: true, data: formatChat(chat, userId) });
+    const settingsKey = `chat_settings_${chatId}`;
+    const settingsRow = await prisma.setting.findUnique({ where: { key: settingsKey } }).catch(() => null);
+    const settingsVal: any = settingsRow?.value || {};
+    const formatted = formatChat(chat, userId);
+    const savedAdmins = Array.isArray(settingsVal?.admins) ? settingsVal.admins : [];
+    formatted.admins = Array.from(new Set([chat.createdById, ...savedAdmins].filter(Boolean)));
+
+    res.json({ success: true, data: formatted });
   } catch (err) {
     console.error('[chats:get:id]', err);
     res.status(500).json({ success: false, error: 'Failed to load chat' });
