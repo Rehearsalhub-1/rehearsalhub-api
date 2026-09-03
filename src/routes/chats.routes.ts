@@ -245,7 +245,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
           include: { sender: true },
         },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
 
     // Collect any participant IDs that might not have a joined user relation
@@ -270,6 +270,11 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap));
+    data.sort((a, b) => {
+      const timeA = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const timeB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return timeB - timeA;
+    });
     res.json({ success: true, count: data.length, data });
   } catch (err) {
     console.error('[chats:get]', err);
@@ -501,12 +506,6 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
         unreadCount: { increment: 1 },
       },
     });
-
-    // Touch chat updatedAt so it immediately floats to the top of the chat list
-    await prisma.chat.update({
-      where: { id: chatId },
-      data: { updatedAt: new Date() },
-    }).catch(() => {});
 
     const formatted = formatMessage(message);
     broadcast('chat', chatId, formatted);
