@@ -43,11 +43,52 @@ function resolveAudio(song: any): { audioUrl: string; audioUrls: Record<string, 
 }
 
 function formatSong(song: any) {
-  const { audioUrl, audioUrls } = resolveAudio(song);
-  const primaryProgramSong = Array.isArray(song.programSongs) ? song.programSongs[0] : null;
-  const primaryProgram = primaryProgramSong?.program;
-  const programId = song.praiseNightId || song.programId || primaryProgramSong?.programId || primaryProgram?.id || null;
+  return shapeSong(song);
+}
+function isConductorGuideText(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('harmony') ||
+    lower.includes('harmonies') ||
+    lower.includes('unison') ||
+    lower.includes('verse 1') ||
+    lower.includes('verse 2') ||
+    lower.includes('modulate') ||
+    lower.includes('modulation') ||
+    lower.includes('coda') ||
+    lower.includes('refrain') ||
+    lower.includes('prechorus') ||
+    lower.includes('pre-chorus') ||
+    lower.includes('turnaround') ||
+    lower.includes('interlude') ||
+    (lower.includes('<div') && lower.includes('solo'))
+  );
+}
+
+function shapeSong(song: any) {
+  const audioUrls = (song.audioUrls as Record<string, string>) || {};
+  const audioUrl = song.audioFile || audioUrls.full || null;
+
+  // Extract primary program info from relation if populated
+  const programSongs = song.programSongs || [];
+  const primaryProgramSong = programSongs.length > 0 ? programSongs[0] : null;
+  const primaryProgram = primaryProgramSong?.program || null;
+  const programId = primaryProgram?.id || song.programId || null;
   const programName = primaryProgram?.name || song.program || null;
+
+  const rawSolfas = song.solfas || '';
+  const rawConductor = song.conductor || '';
+  const rawConductorGuide = song.conductorGuide || '';
+
+  const isGuideInSolfas = isConductorGuideText(rawSolfas);
+  const resolvedConductorGuide = isGuideInSolfas ? rawSolfas : (rawConductorGuide || (isConductorGuideText(rawConductor) ? rawConductor : ''));
+  const resolvedConductorPerson = isConductorGuideText(rawConductor) ? '' : rawConductor;
+  const resolvedSolfa = isGuideInSolfas ? '' : rawSolfas;
+
+  const historySummary = programName
+    ? `**Ministered at ${programName}**\n\n- **Lead Singer:** ${song.leadSinger || 'Loveworld Singers'}\n- **Conductor:** ${resolvedConductorPerson || '—'}\n- **Key:** ${song.key || '—'} · **Tempo:** ${song.tempo || '—'}\n- **Rehearsal Count:** x${song.rehearsalCount || 0}`
+    : (song.createdAt ? `**Catalog Entry**\n\n- **Lead Singer:** ${song.leadSinger || 'Loveworld Singers'}\n- **Key:** ${song.key || '—'}` : '');
 
   return {
     id: song.id,
@@ -64,12 +105,12 @@ function formatSong(song: any) {
     karaokeLrcText: song.lyrics || '',
     lrcText: song.lyrics || '',
     syncedLyricsText: song.lyrics || '',
-    solfas: song.solfas || '',
-    solfa: song.solfas || '',
+    solfas: resolvedSolfa,
+    solfa: resolvedSolfa,
     writer: song.writer || '',
     leadSinger: song.leadSinger || 'Loveworld Singers',
-    conductor: song.conductor || '',
-    conductorGuide: song.conductor || '',
+    conductor: resolvedConductorPerson,
+    conductorGuide: resolvedConductorGuide,
     drummer: song.drummer || '',
     leadKeyboardist: song.leadKeyboardist || '',
     leadGuitarist: song.leadGuitarist || '',
@@ -84,6 +125,7 @@ function formatSong(song: any) {
     rehearsalCount: song.rehearsalCount || 0,
     organizationId: song.organizationId || null,
     groupId: song.groupId || null,
+    history: historySummary,
     createdAt: song.createdAt,
     updatedAt: song.updatedAt,
   };
@@ -267,7 +309,174 @@ router.get('/zone', requireAuth, getSongsHandler);
 router.get('/zone-songs', requireAuth, getSongsHandler);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. SONG BY ID
+// 3. SONG HISTORY (Must be BEFORE /:id so Express does not capture /history as an ID!)
+// ─────────────────────────────────────────────────────────────────────────────
+const getSongHistoryHandler = async (req: Request, res: Response) => {
+  try {
+    const songId = (req.params.id || req.query.songId || '') as string;
+    if (!songId) {
+      res.status(400).json({ success: false, error: 'Missing songId' });
+      return;
+    }
+
+    const song = await prisma.song.findUnique({
+      where: { id: songId },
+      include: {
+        programSongs: {
+          include: { program: true },
+          orderBy: { program: { createdAt: 'desc' } },
+        },
+      },
+    });
+
+    const history = await prisma.songHistory.findMany({
+      where: { songId },
+      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const formatted: any[] = history.map((h) => ({
+      id: h.id,
+      songId: h.songId,
+      type: h.type || 'metadata',
+      title: h.description || 'Song Update',
+      description: h.description || '',
+      old_value: h.oldValue || '',
+      new_value: h.newValue || '',
+      oldValue: h.oldValue || '',
+      newValue: h.newValue || '',
+      createdBy: h.user ? [h.user.firstName, h.user.lastName].filter(Boolean).join(' ') || h.user.email : 'Admin',
+      createdAt: h.createdAt,
+      created_at: h.createdAt,
+    }));
+
+    if (song) {
+      if (song.programSongs && song.programSongs.length > 0) {
+        for (const ps of song.programSongs) {
+          const progName = ps.program?.name || 'Program Repertoire';
+          const progDate = ps.program?.date || (ps.program?.createdAt ? new Date(ps.program.createdAt).toISOString() : song.createdAt);
+          formatted.push({
+            id: `prog-${ps.id}`,
+            songId,
+            type: 'details',
+            title: `Ministered at ${progName}`,
+            description: `Program Edition: ${progName} • Lead Singer: ${song.leadSinger || 'Loveworld Singers'}${song.conductor ? ` • Conductor: ${song.conductor}` : ''}`,
+            new_value: JSON.stringify({
+              program: progName,
+              leadSinger: song.leadSinger || 'Loveworld Singers',
+              conductor: song.conductor || '—',
+              key: song.key || '—',
+              tempo: song.tempo || '—',
+              rehearsalCount: song.rehearsalCount || 0,
+              date: ps.program?.date || '—',
+            }),
+            old_value: '',
+            createdBy: 'Ministry Archive',
+            createdAt: progDate,
+            created_at: progDate,
+          });
+        }
+      }
+
+      const audioUrl = song.audioFile || (song.audioUrls as any)?.full || null;
+      if (audioUrl) {
+        formatted.push({
+          id: `audio-baseline-${song.id}`,
+          songId,
+          type: 'audio',
+          title: `Master Audio Track`,
+          description: `Original master audio recorded for ${song.title}`,
+          audioUrl: audioUrl,
+          new_value: audioUrl,
+          old_value: '',
+          createdBy: 'Master Library',
+          createdAt: song.createdAt,
+          created_at: song.createdAt,
+        });
+      }
+
+      if (song.lyrics) {
+        formatted.push({
+          id: `lyrics-baseline-${song.id}`,
+          songId,
+          type: 'lyrics',
+          title: `Master Lyrics (${song.title})`,
+          description: `Archived ministry lyrics`,
+          new_value: song.lyrics,
+          old_value: '',
+          createdBy: song.writer ? `Written by ${song.writer}` : 'Ministry Archive',
+          createdAt: song.createdAt,
+          created_at: song.createdAt,
+        });
+      }
+
+      const guideText = isConductorGuideText(song.solfas) ? song.solfas : '';
+      if (guideText) {
+        formatted.push({
+          id: `conductor-baseline-${song.id}`,
+          songId,
+          type: 'conductor',
+          title: `Conductor Arrangement Guide`,
+          description: song.conductor ? `Arrangement cues for ${song.conductor}` : 'Arrangement cues',
+          new_value: guideText,
+          old_value: '',
+          createdBy: song.conductor ? `Conductor ${song.conductor}` : 'Director Archive',
+          createdAt: song.createdAt,
+          created_at: song.createdAt,
+        });
+      }
+    }
+
+    res.json({ success: true, count: formatted.length, data: formatted });
+  } catch (err) {
+    console.error('[songs/history:GET]', err);
+    res.status(500).json({ success: false, error: 'Failed to load song history' });
+  }
+};
+
+router.get('/history', requireAuth, getSongHistoryHandler);
+router.get('/:id/history', requireAuth, getSongHistoryHandler);
+
+router.post('/history', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const { songId, type, description, old_value, new_value } = body;
+
+    if (!songId) {
+      res.status(400).json({ success: false, error: 'Missing songId' });
+      return;
+    }
+
+    const entry = await prisma.songHistory.create({
+      data: {
+        songId,
+        userId: res.locals.auth?.userId || null,
+        type: type || 'metadata',
+        description: description || 'Song updated',
+        oldValue: typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || ''),
+        newValue: typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || ''),
+      },
+    });
+
+    res.status(201).json({ success: true, data: entry });
+  } catch (err) {
+    console.error('[songs/history:POST]', err);
+    res.status(500).json({ success: false, error: 'Failed to record song history' });
+  }
+});
+
+router.delete('/history/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  try {
+    await prisma.songHistory.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'History entry deleted' });
+  } catch (err) {
+    console.error('[songs/history:DELETE]', err);
+    res.status(500).json({ success: false, error: 'Failed to delete history entry' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. SONG BY ID
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -465,78 +674,7 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res:
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 7. SONG HISTORY
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/history', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { songId } = req.query as { songId?: string };
-    if (!songId) {
-      res.status(400).json({ success: false, error: 'Missing songId' });
-      return;
-    }
 
-    const history = await prisma.songHistory.findMany({
-      where: { songId },
-      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const formatted = history.map((h) => ({
-      id: h.id,
-      songId: h.songId,
-      type: h.type || 'metadata',
-      description: h.description || '',
-      oldValue: h.oldValue || '',
-      newValue: h.newValue || '',
-      createdBy: h.user ? [h.user.firstName, h.user.lastName].filter(Boolean).join(' ') || h.user.email : 'Admin',
-      createdAt: h.createdAt,
-    }));
-
-    res.json({ success: true, count: formatted.length, data: formatted });
-  } catch (err) {
-    console.error('[songs/history:GET]', err);
-    res.status(500).json({ success: false, error: 'Failed to load song history' });
-  }
-});
-
-router.post('/history', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const body = req.body || {};
-    const { songId, type, description, old_value, new_value } = body;
-
-    if (!songId) {
-      res.status(400).json({ success: false, error: 'Missing songId' });
-      return;
-    }
-
-    const entry = await prisma.songHistory.create({
-      data: {
-        songId,
-        userId: res.locals.auth?.userId || null,
-        type: type || 'metadata',
-        description: description || 'Song updated',
-        oldValue: typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || ''),
-        newValue: typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || ''),
-      },
-    });
-
-    res.status(201).json({ success: true, data: entry });
-  } catch (err) {
-    console.error('[songs/history:POST]', err);
-    res.status(500).json({ success: false, error: 'Failed to record song history' });
-  }
-});
-
-router.delete('/history/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
-  try {
-    await prisma.songHistory.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'History entry deleted' });
-  } catch (err) {
-    console.error('[songs/history:DELETE]', err);
-    res.status(500).json({ success: false, error: 'Failed to delete history entry' });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 8. PERSONAL NOTES & DOODLE ANNOTATIONS
