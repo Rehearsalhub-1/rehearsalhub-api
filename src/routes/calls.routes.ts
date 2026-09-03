@@ -172,6 +172,44 @@ router.patch('/:callId', requireAuth, async (req: Request, res: Response) => {
     broadcast('calls', updated.callerId, { type: 'call_status', call: shaped });
     broadcast('calls', updated.receiverId, { type: 'call_status', call: shaped });
 
+    if (status === 'missed' || status === 'declined') {
+      try {
+        const callerName = shaped.callerName || 'Someone';
+        const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const isVideo = updated.type === 'video';
+        await prisma.notification.create({
+          data: {
+            id: notifId,
+            title: `Missed ${isVideo ? 'video' : 'voice'} call`,
+            body: `You missed a ${isVideo ? 'video' : 'voice'} call from ${callerName}`,
+            type: 'call',
+            category: 'call',
+            actionUrl: `call/${callId}`,
+            organizationId: req.tenant?.effectiveZoneId || 'zone-001',
+            senderId: updated.callerId,
+          },
+        });
+        await prisma.notificationDelivery.create({
+          data: {
+            notificationId: notifId,
+            userId: updated.receiverId,
+            isRead: false,
+          },
+        }).catch(() => {});
+        broadcast('notifications', updated.receiverId, {
+          id: notifId,
+          title: `Missed ${isVideo ? 'video' : 'voice'} call`,
+          body: `You missed a ${isVideo ? 'video' : 'voice'} call from ${callerName}`,
+          category: 'call',
+          type: 'call',
+          actionUrl: `call/${callId}`,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (errNotif) {
+        console.warn('[calls:patch:missed_notif]', errNotif);
+      }
+    }
+
     res.json({ success: true, data: shaped });
   } catch (err) {
     console.error('[calls:patch]', err);

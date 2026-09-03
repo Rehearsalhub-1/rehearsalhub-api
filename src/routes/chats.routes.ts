@@ -34,27 +34,44 @@ function formatMessage(m: any) {
   let songData = m.songData || null;
   let profileData = m.profileData || m.contactData || null;
   let pollOptions = m.pollOptions || null;
-  let audioUrl = m.audioUrl || m.mediaUrl || m.voiceUrl || null;
+  let mediaUrl = m.mediaUrl || m.media_url || null;
+  let imageUrl = m.imageUrl || null;
+  let videoUrl = m.videoUrl || null;
+  let audioUrl = m.audioUrl || m.voiceUrl || null;
+  let documentUrl = m.documentUrl || null;
   let documentName = m.documentName || null;
   let documentSize = m.documentSize || null;
   let replyTo = m.replyTo || null;
+  let duration = m.duration || null;
 
   if (typeof m.text === 'string' && m.text.startsWith('{') && m.text.endsWith('}')) {
     try {
       const parsed = JSON.parse(m.text);
       if (parsed && typeof parsed === 'object') {
-        displayText = parsed.text || '';
+        displayText = parsed.text !== undefined ? parsed.text : displayText;
         playlistData = parsed.playlistData || playlistData;
         songData = parsed.songData || songData;
         profileData = parsed.profileData || parsed.contactData || profileData;
         pollOptions = parsed.pollOptions || pollOptions;
-        audioUrl = parsed.audioUrl || parsed.mediaUrl || parsed.voiceUrl || audioUrl;
+        mediaUrl = parsed.mediaUrl || parsed.media_url || mediaUrl;
+        imageUrl = parsed.imageUrl || (parsed.type === 'image' || m.type === 'image' ? (parsed.mediaUrl || parsed.media_url) : imageUrl);
+        videoUrl = parsed.videoUrl || (parsed.type === 'video' || m.type === 'video' ? (parsed.mediaUrl || parsed.media_url) : videoUrl);
+        audioUrl = parsed.audioUrl || parsed.voiceUrl || ((parsed.type === 'audio' || parsed.type === 'voice' || m.type === 'audio' || m.type === 'voice') ? (parsed.mediaUrl || parsed.media_url) : audioUrl);
+        documentUrl = parsed.documentUrl || (parsed.type === 'document' || m.type === 'document' ? (parsed.mediaUrl || parsed.media_url) : documentUrl);
         documentName = parsed.documentName || documentName;
         documentSize = parsed.documentSize || documentSize;
         replyTo = parsed.replyTo || replyTo;
+        duration = parsed.duration || duration;
       }
     } catch {}
   }
+
+  // Infer media types from m.type if not explicitly set
+  if ((m.type === 'image' || m.type === 'photo') && !imageUrl) imageUrl = mediaUrl;
+  if (m.type === 'video' && !videoUrl) videoUrl = mediaUrl;
+  if (m.type === 'document' && !documentUrl) documentUrl = mediaUrl;
+  if ((m.type === 'audio' || m.type === 'voice') && !audioUrl) audioUrl = mediaUrl;
+  if (!mediaUrl) mediaUrl = imageUrl || videoUrl || audioUrl || documentUrl;
 
   // Fallback text parsers if structured payload was legacy formatted text
   if (m.type === 'playlist_share' && !playlistData && typeof displayText === 'string') {
@@ -98,11 +115,15 @@ function formatMessage(m: any) {
     profileData,
     contactData: profileData,
     pollOptions,
+    mediaUrl,
+    imageUrl,
+    videoUrl,
     audioUrl,
-    mediaUrl: audioUrl,
     voiceUrl: audioUrl,
+    documentUrl,
     documentName,
     documentSize,
+    duration,
     replyTo,
     status: m.status || 'sent',
     edited: m.edited || false,
@@ -506,21 +527,25 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
     const messageId = req.body.id || crypto.randomUUID();
 
     let storedText = text;
-    const hasStructuredData = req.body.playlistData || req.body.songData || req.body.profileData || req.body.contactData || req.body.pollOptions || req.body.media_url || req.body.audioUrl || req.body.voiceUrl || req.body.documentName;
+    const hasStructuredData = req.body.playlistData || req.body.songData || req.body.profileData || req.body.contactData || req.body.pollOptions || req.body.media_url || req.body.mediaUrl || req.body.imageUrl || req.body.videoUrl || req.body.documentUrl || req.body.audioUrl || req.body.voiceUrl || req.body.documentName;
 
     if (hasStructuredData) {
       storedText = JSON.stringify({
         text,
+        type,
         playlistData: req.body.playlistData || null,
         songData: req.body.songData || null,
         profileData: req.body.profileData || req.body.contactData || null,
         contactData: req.body.contactData || req.body.profileData || null,
         pollOptions: req.body.pollOptions || null,
-        audioUrl: req.body.audioUrl || req.body.media_url || req.body.voiceUrl || null,
-        mediaUrl: req.body.media_url || req.body.audioUrl || null,
-        voiceUrl: req.body.voiceUrl || req.body.audioUrl || null,
+        imageUrl: req.body.imageUrl || (type === 'image' ? (req.body.media_url || req.body.mediaUrl) : null),
+        videoUrl: req.body.videoUrl || (type === 'video' ? (req.body.media_url || req.body.mediaUrl) : null),
+        audioUrl: req.body.audioUrl || req.body.voiceUrl || ((type === 'audio' || type === 'voice') ? (req.body.media_url || req.body.mediaUrl) : null),
+        documentUrl: req.body.documentUrl || (type === 'document' ? (req.body.media_url || req.body.mediaUrl) : null),
+        mediaUrl: req.body.media_url || req.body.mediaUrl || req.body.imageUrl || req.body.videoUrl || req.body.audioUrl || req.body.documentUrl || null,
         documentName: req.body.documentName || null,
         documentSize: req.body.documentSize || null,
+        duration: req.body.duration || null,
         replyTo: req.body.replyTo || null,
       });
     }

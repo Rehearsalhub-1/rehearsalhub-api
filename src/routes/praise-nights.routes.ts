@@ -101,9 +101,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       where.OR = [
         { organizationId: targetZone },
         { organizationId: 'zone-001' },
+        { organizationId: null },
       ];
     } else if (!isHqAdmin && targetZone) {
-      where.organizationId = targetZone;
+      where.OR = [
+        { organizationId: targetZone },
+        { organizationId: 'zone-001' },
+        { organizationId: null },
+      ];
     }
 
     const programs = await prisma.program.findMany({

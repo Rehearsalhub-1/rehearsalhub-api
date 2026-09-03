@@ -41,8 +41,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// GET /categories/page
-router.get('/page', requireAuth, async (_req: Request, res: Response) => {
+// GET /categories/page & /categories/zone-page
+const handleGetPageCategories = async (_req: Request, res: Response) => {
   try {
     const rows = await prisma.category.findMany({
       where: {
@@ -58,7 +58,10 @@ router.get('/page', requireAuth, async (_req: Request, res: Response) => {
     console.error('[categories/page]', err);
     res.status(500).json({ success: false, error: 'Failed to load page categories' });
   }
-});
+};
+
+router.get('/page', requireAuth, handleGetPageCategories);
+router.get('/zone-page', requireAuth, handleGetPageCategories);
 
 // POST /categories
 router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
