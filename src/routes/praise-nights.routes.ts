@@ -2,7 +2,28 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 
+import fs from 'fs';
+import path from 'path';
+
 const router = Router();
+
+const programIdToPageCategory: Record<string, string> = {};
+try {
+  const snapshotPath = path.join(__dirname, '../../backups/snapshot_1787937142839/programs.json');
+  if (fs.existsSync(snapshotPath)) {
+    const rawSnapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+    if (Array.isArray(rawSnapshot)) {
+      rawSnapshot.forEach((p: any) => {
+        const pc = p.pageCategory || p.raw_data?.pageCategory || p.raw?.pageCategory || null;
+        if (p.id && pc) {
+          programIdToPageCategory[p.id] = pc;
+        }
+      });
+    }
+  }
+} catch (err) {
+  console.warn('[praise-nights] could not load snapshot pageCategory map:', err);
+}
 
 function shapeProgram(p: any) {
   const programSongsList = Array.isArray(p.programSongs)
@@ -53,7 +74,7 @@ function shapeProgram(p: any) {
     date: p.date,
     category: p.category || 'pre-rehearsal',
     status: p.status || p.category || 'pre-rehearsal',
-    pageCategory: p.pageCategory || p.page_category || null,
+    pageCategory: p.pageCategory || p.page_category || programIdToPageCategory[p.id] || null,
     isActive: typeof p.isActive === 'boolean' ? p.isActive : p.category === 'ongoing',
     isArchived: typeof p.isArchived === 'boolean' ? p.isArchived : p.category === 'archive',
     organizationId: p.organizationId || p.organization_id || null,
