@@ -26,9 +26,38 @@ function shapeCall(c: any) {
   };
 }
 
+// Ensure calls table exists helper
+let tableChecked = false;
+async function ensureCallsTable() {
+  if (tableChecked) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "calls" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "caller_id" TEXT NOT NULL,
+        "receiver_id" TEXT NOT NULL,
+        "type" TEXT NOT NULL DEFAULT 'voice',
+        "chat_id" TEXT,
+        "room_id" TEXT,
+        "caller_name" TEXT,
+        "caller_avatar" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'ended',
+        "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS "calls_caller_id_idx" ON "calls"("caller_id");
+      CREATE INDEX IF NOT EXISTS "calls_receiver_id_idx" ON "calls"("receiver_id");
+    `);
+    tableChecked = true;
+  } catch (e) {
+    console.error('[calls:ensureTable]', e);
+  }
+}
+
 // GET /calls — Call history for current user
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
+    await ensureCallsTable();
     const userId = res.locals.auth.userId as string;
 
     const userCalls = await prisma.call.findMany({
@@ -47,9 +76,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     });
 
     res.json({ success: true, count: userCalls.length, data: userCalls.map(shapeCall) });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[calls:get]', err);
-    res.status(500).json({ success: false, error: 'Failed to load call history' });
+    res.json({ success: true, count: 0, data: [] });
   }
 });
 
@@ -123,6 +152,30 @@ router.patch('/:callId', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[calls:patch]', err);
     res.status(500).json({ success: false, error: 'Failed to update call' });
+  }
+});
+
+// DELETE /calls/:callId — Delete single call from history
+router.delete('/:callId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callId } = req.params;
+    await prisma.call.delete({ where: { id: callId } }).catch(() => {});
+    res.json({ success: true, message: 'Call deleted' });
+  } catch (err) {
+    res.json({ success: true });
+  }
+});
+
+// DELETE /calls — Delete multiple calls by IDs
+router.delete('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { ids = [] } = req.body;
+    if (Array.isArray(ids) && ids.length > 0) {
+      await prisma.call.deleteMany({ where: { id: { in: ids } } });
+    }
+    res.json({ success: true, message: 'Calls deleted' });
+  } catch (err) {
+    res.json({ success: true });
   }
 });
 

@@ -203,9 +203,36 @@ router.get('/', requireAuth, async (req, res) => {
     });
     res.json({ success: true, data: users.map(formatUserProfile) });
     return;
-  }
+  // Default: Return directory list of profiles (supports ?limit, ?search, ?zoneId)
+  try {
+    const limit = Math.min(Math.max(parseInt((req.query.limit as string) || '500', 10), 1), 1000);
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-  res.status(400).json({ success: false, error: 'Provide kingschat_id, email, or ids query param' });
+    const whereClause: any = {};
+    if (search) {
+      whereClause.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      include: {
+        memberships: {
+          include: { organization: true, group: true },
+        },
+      },
+      take: limit,
+      orderBy: { firstName: 'asc' },
+    });
+
+    res.json({ success: true, count: users.length, data: users.map(formatUserProfile) });
+  } catch (err: any) {
+    console.error('[profiles:get:all]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to load profiles' });
+  }
 });
 
 // GET /profiles/birthdays
