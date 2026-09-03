@@ -203,6 +203,8 @@ router.get('/', requireAuth, async (req, res) => {
     });
     res.json({ success: true, data: users.map(formatUserProfile) });
     return;
+  }
+
   // Default: Return directory list of profiles (supports ?limit, ?search, ?zoneId)
   try {
     const limit = Math.min(Math.max(parseInt((req.query.limit as string) || '500', 10), 1), 1000);
