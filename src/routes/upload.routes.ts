@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { uploadToR2 } from '../services/r2Service';
+import { uploadToR2, getR2Object } from '../services/r2Service';
 import { requireAuth } from '../auth/auth.middleware';
 
 const router = Router();
@@ -16,6 +16,35 @@ const publicAvatarUpload = multer({
   fileFilter: (_req, file, callback) => {
     callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
   },
+});
+
+// Stream media from R2 with full HTTP Range support
+router.get('/file/:key(*)', async (req, res) => {
+  try {
+    const key = req.params.key;
+    const range = req.headers.range;
+    const result = await getR2Object(key, range);
+
+    res.setHeader('Content-Type', result.ContentType || 'application/octet-stream');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    if (result.ContentRange) {
+      res.status(206);
+      res.setHeader('Content-Range', result.ContentRange);
+    }
+    if (result.ContentLength !== undefined) {
+      res.setHeader('Content-Length', result.ContentLength);
+    }
+
+    (result.Body as any).pipe(res);
+  } catch (err: any) {
+    if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
+      return res.status(404).send('File not found');
+    }
+    console.error('[UploadRoute] Stream error:', err);
+    res.status(500).send('Error streaming media');
+  }
 });
 
 // Upload media directly to Cloudflare R2

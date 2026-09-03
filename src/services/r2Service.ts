@@ -1,14 +1,19 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'b2e5411830e116cf4ce6e91e90843db0';
 const bucketName = process.env.R2_BUCKET_NAME || 'rehearsalhub-media';
 const accessKeyId = process.env.R2_ACCESS_KEY_ID || '53609880149dce49393f0d762b8b4baf';
 const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || 'dfec6c0153c47aa9c036d9e8bbbe2739ec738352f55afa2f8fd70df95f67ae90';
-const publicUrlBase = (process.env.R2_PUBLIC_URL || 'https://pub-cb7697578fcc48d3b3aeb70a47eb2f65.r2.dev').replace(/\/+$/, '');
+const apiBase = (process.env.API_BASE_URL || 'https://rehearsalhub-api-production-6a17.up.railway.app').replace(/\/+$/, '');
+const envPublicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+// If R2_PUBLIC_URL is empty or points to the private/disabled r2.dev domain, serve through the API proxy
+export const publicUrlBase = (envPublicUrl && !envPublicUrl.includes('r2.dev'))
+  ? envPublicUrl
+  : `${apiBase}/upload/file`;
 
 export const r2Client = new S3Client({
   region: 'auto',
@@ -134,6 +139,15 @@ export async function checkR2ObjectExists(key: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function getR2Object(key: string, range?: string) {
+  const command = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+    Range: range,
+  });
+  return await r2Client.send(command);
 }
 
 export function getR2PublicUrl(key: string): string {

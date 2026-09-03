@@ -9,10 +9,11 @@ function shapeSubmission(s: any) {
   const isPending = (s.status || '').toLowerCase() === 'pending';
   const isApproved = (s.status || '').toLowerCase() === 'approved';
   const isRejected = (s.status || '').toLowerCase() === 'rejected';
+  const submitter = s.roleAssignments?.find((r: any) => r.role === 'SUBMITTER' || r.role === 'LEAD_SINGER');
 
   return {
     id: s.id,
-    userId: s.groupId || null,
+    userId: submitter?.userId || s.groupId || null,
     userName: s.writer || 'Member',
     userEmail: '',
     userAvatar: null,
@@ -64,7 +65,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const songs = await prisma.song.findMany({
       where,
-      include: { organization: true },
+      include: { organization: true, roleAssignments: true },
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
@@ -90,14 +91,22 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
       whereConditions.push({
         writer: { contains: auth.firstName.trim(), mode: 'insensitive' },
       });
+      whereConditions.push({
+        leadSinger: { contains: auth.firstName.trim(), mode: 'insensitive' },
+      });
     }
 
     const songs = await prisma.song.findMany({
       where: {
-        category: 'Submitted Songs',
-        OR: whereConditions,
+        OR: [
+          { roleAssignments: { some: { userId } } },
+          {
+            category: 'Submitted Songs',
+            OR: whereConditions,
+          },
+        ],
       },
-      include: { organization: true },
+      include: { organization: true, roleAssignments: true },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
@@ -114,7 +123,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
     const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const { title, lyrics, notes, audioUrl, artist, writer, category, key, tempo, solfas, zoneId } = req.body;
+    const { title, lyrics, notes, audioUrl, artist, writer, leadSinger, category, key, tempo, solfas, zoneId } = req.body;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
 
     if (orgId) {
@@ -128,6 +137,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         id,
         title: title || 'Untitled Submitted Song',
         writer: writer || artist || auth.firstName || 'Member',
+        leadSinger: leadSinger || null,
         key: key || null,
         tempo: tempo || null,
         lyrics: lyrics || null,
@@ -136,17 +146,31 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         audioFile: audioUrl || null,
         status: 'pending',
         organizationId: orgId,
-        groupId: auth.userId,
+        groupId: null,
       },
       include: { organization: true },
     });
 
-    const formatted = shapeSubmission(created);
+    if (auth.userId) {
+      try {
+        await prisma.songRoleAssignment.create({
+          data: {
+            songId: id,
+            userId: auth.userId,
+            role: 'SUBMITTER',
+          },
+        });
+      } catch (roleErr) {
+        console.warn('[submitted-songs:role]', roleErr);
+      }
+    }
+
+    const formatted = shapeSubmission({ ...created, roleAssignments: auth.userId ? [{ userId: auth.userId, role: 'SUBMITTER' }] : [] });
     broadcast('submitted_song', id, formatted);
     res.json({ success: true, data: formatted });
-  } catch (err) {
+  } catch (err: any) {
     console.error('[submitted-songs:post]', err);
-    res.status(500).json({ success: false, error: 'Failed to submit song' });
+    res.status(500).json({ success: false, error: err?.message || 'Failed to submit song' });
   }
 });
 
