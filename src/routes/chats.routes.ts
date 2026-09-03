@@ -231,14 +231,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
 
-    // Fetch deleted / hidden chats for this user
-    const deletedKey = `deleted_chats_${userId}`;
-    const deletedRow = await prisma.setting.findUnique({ where: { key: deletedKey } });
-    const deletedChatIds: string[] = Array.isArray(deletedRow?.value) ? (deletedRow?.value as string[]) : [];
-
     const chatRows = await prisma.chat.findMany({
       where: {
-        id: { notIn: deletedChatIds },
         participants: { some: { userId } },
       },
       include: {
@@ -251,7 +245,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
           include: { sender: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { updatedAt: 'desc' },
     });
 
     // Collect any participant IDs that might not have a joined user relation
@@ -378,6 +372,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const formatted = formatChat(newChat, auth.userId);
     broadcast('chat', chatId, formatted);
+    rawParticipants.forEach((uId: string) => {
+      broadcast('chats', uId, { type: 'chat_created', chat: formatted });
+    });
     res.status(201).json({ success: true, data: formatted });
   } catch (err) {
     console.error('[chats:create]', err);
@@ -505,9 +502,20 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
       },
     });
 
+    // Touch chat updatedAt so it immediately floats to the top of the chat list
+    await prisma.chat.update({
+      where: { id: chatId },
+      data: { updatedAt: new Date() },
+    }).catch(() => {});
+
     const formatted = formatMessage(message);
     broadcast('chat', chatId, formatted);
     broadcast('messages', chatId, formatted);
+
+    // Broadcast to each participant's user channel to instantly update their chat list
+    chat.participants.forEach((p) => {
+      broadcast('chats', p.userId, { type: 'chat_updated', chatId, lastMessage: formatted });
+    });
     res.status(201).json({ success: true, data: formatted });
   } catch (err) {
     console.error('[chats:messages:send]', err);
