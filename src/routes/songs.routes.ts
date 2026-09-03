@@ -44,11 +44,19 @@ function resolveAudio(song: any): { audioUrl: string; audioUrls: Record<string, 
 
 function formatSong(song: any) {
   const { audioUrl, audioUrls } = resolveAudio(song);
+  const primaryProgramSong = Array.isArray(song.programSongs) ? song.programSongs[0] : null;
+  const primaryProgram = primaryProgramSong?.program;
+  const programId = song.praiseNightId || song.programId || primaryProgramSong?.programId || primaryProgram?.id || null;
+  const programName = primaryProgram?.name || song.program || null;
+
   return {
     id: song.id,
-    praiseNightId: song.praiseNightId || song.programId || null,
-    programId: song.praiseNightId || song.programId || null,
-    order: song.order !== undefined ? song.order : null,
+    praiseNightId: programId,
+    programId: programId,
+    program: programName,
+    programName: programName,
+    programBannerImage: primaryProgram?.bannerImage || null,
+    order: song.order !== undefined ? song.order : (primaryProgramSong?.order ?? null),
     title: song.title || 'Untitled Song',
     key: song.key || null,
     tempo: song.tempo || null,
@@ -105,7 +113,22 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
 
     const [total, rows] = await Promise.all([
       prisma.song.count({ where }),
-      prisma.song.findMany({ where, orderBy: { title: 'asc' }, skip, take: limit }),
+      prisma.song.findMany({
+        where,
+        include: {
+          programSongs: {
+            include: {
+              program: {
+                select: { id: true, name: true, bannerImage: true }
+              }
+            },
+            take: 1
+          }
+        },
+        orderBy: { title: 'asc' },
+        skip,
+        take: limit
+      }),
     ]);
 
     const formatted = rows.map(formatSong);

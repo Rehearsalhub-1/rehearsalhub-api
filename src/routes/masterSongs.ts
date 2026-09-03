@@ -20,33 +20,52 @@ router.get('/', async (_req: Request, res: Response) => {
       where: {
         isMaster: true,
       },
+      include: {
+        programSongs: {
+          include: {
+            program: {
+              select: { id: true, name: true, bannerImage: true }
+            }
+          },
+          take: 1,
+        }
+      },
       orderBy: { title: 'asc' },
     });
 
-    const formattedSongs = songs.map((s) => ({
-      id: s.id,
-      title: s.title || '',
-      key: s.key || null,
-      tempo: s.tempo || null,
-      lyrics: s.lyrics || null,
-      writer: s.writer || null,
-      solfas: s.solfas || null,
-      category: s.category || 'Master Library',
-      audioFile: s.audioFile || null,
-      audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
-      conductor: s.conductor || null,
-      leadSinger: s.leadSinger || null,
-      drummer: s.drummer || null,
-      bassGuitarist: s.bassGuitarist || null,
-      leadKeyboardist: s.leadKeyboardist || null,
-      leadGuitarist: s.leadGuitarist || null,
-      status: s.status || 'active',
-      isMaster: true,
-      isMinistered: s.isMinistered,
-      rehearsalCount: s.rehearsalCount,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-    }));
+    const formattedSongs = songs.map((s: any) => {
+      const primaryProgram = s.programSongs?.[0]?.program;
+      const progName = primaryProgram?.name || null;
+      return {
+        id: s.id,
+        programId: primaryProgram?.id || null,
+        praiseNightId: primaryProgram?.id || null,
+        program: progName,
+        programName: progName,
+        programBannerImage: primaryProgram?.bannerImage || null,
+        title: s.title || '',
+        key: s.key || null,
+        tempo: s.tempo || null,
+        lyrics: s.lyrics || null,
+        writer: s.writer || null,
+        solfas: s.solfas || null,
+        category: s.category || 'Master Library',
+        audioFile: s.audioFile || null,
+        audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
+        conductor: s.conductor || null,
+        leadSinger: s.leadSinger || null,
+        drummer: s.drummer || null,
+        bassGuitarist: s.bassGuitarist || null,
+        leadKeyboardist: s.leadKeyboardist || null,
+        leadGuitarist: s.leadGuitarist || null,
+        status: s.status || 'active',
+        isMaster: true,
+        isMinistered: s.isMinistered,
+        rehearsalCount: s.rehearsalCount,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+    });
 
     res.json({ success: true, count: formattedSongs.length, data: formattedSongs });
   } catch (error) {
