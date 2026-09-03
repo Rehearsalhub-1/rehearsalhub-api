@@ -12,7 +12,7 @@ function shapeSubmission(s: any) {
 
   return {
     id: s.id,
-    userId: s.groupId || s.organizationId || null,
+    userId: s.groupId || null,
     userName: s.writer || 'Member',
     userEmail: '',
     userAvatar: null,
@@ -81,10 +81,21 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
     const userId = auth?.userId;
+    if (!userId) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+
+    const whereConditions: any[] = [{ groupId: userId }];
+    if (auth.firstName && auth.firstName.trim().length > 1) {
+      whereConditions.push({
+        writer: { contains: auth.firstName.trim(), mode: 'insensitive' },
+      });
+    }
 
     const songs = await prisma.song.findMany({
       where: {
         category: 'Submitted Songs',
+        OR: whereConditions,
       },
       include: { organization: true },
       orderBy: { createdAt: 'desc' },
@@ -125,6 +136,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         audioFile: audioUrl || null,
         status: 'pending',
         organizationId: orgId,
+        groupId: auth.userId,
       },
       include: { organization: true },
     });

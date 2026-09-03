@@ -41,6 +41,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const directNotifIds = new Set(directDeliveries.map((d) => d.notificationId));
 
     // 2. Fetch organization broadcasts (global 'zone-001' or tenant-specific)
+    // Exclude notifications that were targeted directly to specific individuals (deliveries is not empty)
     const broadcasts = await prisma.notification.findMany({
       where: {
         OR: [
@@ -49,6 +50,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
           { organizationId: null },
         ],
         id: { notIn: Array.from(directNotifIds) },
+        deliveries: {
+          none: {},
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -133,6 +137,7 @@ router.post('/broadcast', requireAuth, requireTenantAdmin, handleCreateNotificat
 /** POST /notifications/send — Dispatch peer-to-peer / system push & websocket notifications */
 router.post('/send', requireAuth, async (req: Request, res: Response) => {
   try {
+    const auth = res.locals.auth;
     const { recipientIds, title, body, data } = req.body;
     const userIds: string[] = Array.isArray(recipientIds) ? recipientIds : [recipientIds].filter(Boolean);
     if (!userIds.length) {
@@ -198,6 +203,41 @@ router.post('/send', requireAuth, async (req: Request, res: Response) => {
       }
     } catch (pushErr) {
       console.warn('[notifications:send:expo]', pushErr);
+    }
+
+    // 3. Persist notification and delivery records for user inboxes
+    const isCallSignaling = data?.type === 'call_ring' || data?.type === 'call_end' || data?.type === 'call_reject';
+    if (!isCallSignaling) {
+      try {
+        const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const category = data?.category || (data?.type === 'call' ? 'call' : (data?.chatId ? 'chat' : 'general'));
+        const actionUrl = data?.actionUrl || (data?.chatId ? `chat/${data.chatId}` : null);
+
+        await prisma.notification.create({
+          data: {
+            id: notifId,
+            title: title || 'New Notification',
+            body: body || '',
+            type: data?.type || (category === 'chat' ? 'info' : 'info'),
+            category,
+            actionUrl,
+            organizationId: req.tenant?.effectiveZoneId || 'zone-001',
+            senderId: auth.userId,
+          },
+        });
+
+        for (const uid of userIds) {
+          await prisma.notificationDelivery.create({
+            data: {
+              notificationId: notifId,
+              userId: uid,
+              isRead: false,
+            },
+          }).catch(() => {});
+        }
+      } catch (dbErr) {
+        console.warn('[notifications:send:db]', dbErr);
+      }
     }
 
     res.json({ success: true, count: userIds.length });

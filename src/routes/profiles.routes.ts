@@ -242,17 +242,39 @@ router.get('/birthdays', requireAuth, async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
       include: { memberships: { include: { organization: true, group: true } } },
-      take: 50,
+      take: 200,
     });
-    const result = users.map((u) => ({
-      id: u.id,
-      first_name: u.firstName || 'Member',
-      last_name: u.lastName || '',
-      birthday: '',
-      profile_image_url: u.avatarUrl || '',
-      isToday: false,
-      zoneId: u.memberships?.[0]?.organizationId || '',
-    }));
+    const metaKeys = users.map((u) => `profile_meta_${u.id}`);
+    const metaSettings = await prisma.setting.findMany({
+      where: { key: { in: metaKeys } },
+    });
+    const metaMap = new Map<string, any>();
+    metaSettings.forEach((s) => {
+      const uId = s.key.replace('profile_meta_', '');
+      metaMap.set(uId, s.value);
+    });
+
+    const now = new Date();
+    const result: any[] = [];
+    for (const u of users) {
+      const meta = metaMap.get(u.id) || {};
+      const rawBday = meta.birthday || meta.dob || meta.dateOfBirth || (u as any).birthday;
+      if (!rawBday) continue;
+      const bDate = new Date(rawBday);
+      if (isNaN(bDate.getTime())) continue;
+
+      const isToday = bDate.getMonth() === now.getMonth() && bDate.getDate() === now.getDate();
+
+      result.push({
+        id: u.id,
+        first_name: u.firstName || 'Member',
+        last_name: u.lastName || '',
+        birthday: rawBday,
+        profile_image_url: u.avatarUrl || meta.avatar || '',
+        isToday,
+        zoneId: u.memberships?.[0]?.organizationId || '',
+      });
+    }
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('[profiles/birthdays]', err);

@@ -9,18 +9,20 @@ const router = Router();
 function shapeCall(c: any) {
   const caller = c.caller || {};
   const receiver = c.receiver || {};
+  const isGroup = !!c.chatId && (c.chatId.startsWith('group') || c.receiverId.startsWith('group') || c.chatId !== c.receiverId);
   return {
     id: c.id,
     callerId: c.callerId,
     receiverId: c.receiverId,
     callerName: c.callerName || [caller.firstName, caller.lastName].filter(Boolean).join(' ') || caller.email || 'Caller',
     callerAvatar: c.callerAvatar || caller.avatarUrl || null,
-    receiverName: [receiver.firstName, receiver.lastName].filter(Boolean).join(' ') || receiver.email || 'Member',
+    receiverName: (receiver && receiver.firstName) ? [receiver.firstName, receiver.lastName].filter(Boolean).join(' ') : (isGroup ? 'Group Call' : 'Member'),
     receiverAvatar: receiver.avatarUrl || null,
     type: c.type || 'voice',
     status: c.status || 'ended',
     roomId: c.roomId || c.id,
     chatId: c.chatId || null,
+    isGroup,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
   };
@@ -60,13 +62,22 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     await ensureCallsTable();
     const userId = res.locals.auth.userId as string;
 
+    const userMemberships = await prisma.chatParticipant.findMany({
+      where: { userId },
+      select: { chatId: true },
+    }).catch(() => []);
+    const userChatIds = userMemberships.map((m: any) => m.chatId);
+
+    const whereOr: any[] = [
+      { callerId: userId },
+      { receiverId: userId },
+    ];
+    if (userChatIds.length > 0) {
+      whereOr.push({ chatId: { in: userChatIds } });
+    }
+
     const userCalls = await prisma.call.findMany({
-      where: {
-        OR: [
-          { callerId: userId },
-          { receiverId: userId },
-        ],
-      },
+      where: { OR: whereOr },
       include: {
         caller: true,
         receiver: true,
