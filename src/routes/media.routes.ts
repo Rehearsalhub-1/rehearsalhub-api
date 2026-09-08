@@ -86,19 +86,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
     const takeCount = limit ? Math.min(parseInt(limit, 10), 500) : 100;
 
-    // 1. Fetch from media_videos (Primary Video Library)
-    const videoTableRows = (!type || type === 'all' || type.toLowerCase() === 'video')
-      ? await fetchMediaVideos(takeCount, search)
-      : [];
-
-    // 2. Fetch from media_assets table
-    const whereClause: any = {
-      OR: [
-        ...(effectiveZoneId ? [{ organizationId: effectiveZoneId }] : []),
-        { organizationId: 'zone-001' },
-        { organizationId: null },
-      ],
-    };
+    // Tenancy Filter: Strictly enforce organization / zone isolation so zones do not see other orgs' media
+    const whereClause: any = effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global'
+      ? { organizationId: effectiveZoneId }
+      : {};
 
     if (folder && folder !== 'all') {
       whereClause.folder = folder;
@@ -117,6 +108,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       };
     }
 
+    // Only query official media_assets table for the tenant. Never mix with user personal media or other zones.
     const assets = await prisma.mediaAsset.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' },
@@ -125,18 +117,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const shapedAssets = assets.map(shapeMedia);
 
-    // 3. Deduplicate and merge (videos from media_videos + uploaded assets)
-    const seenIds = new Set<string>();
-    const combined: any[] = [];
-
-    for (const item of [...videoTableRows, ...shapedAssets]) {
-      if (item && item.id && !seenIds.has(String(item.id))) {
-        seenIds.add(String(item.id));
-        combined.push(item);
-      }
-    }
-
-    res.json({ success: true, count: combined.length, data: combined });
+    res.json({ success: true, count: shapedAssets.length, data: shapedAssets });
   } catch (err) {
     console.error('[media:get]', err);
     res.status(500).json({ success: false, error: 'Failed to load media assets' });
