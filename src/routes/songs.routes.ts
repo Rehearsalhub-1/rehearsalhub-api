@@ -122,6 +122,10 @@ function shapeSong(song: any) {
     status: song.status || 'active',
     isMaster: Boolean(song.isMaster),
     isMinistered: Boolean(song.isMinistered),
+    isHQOnly: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
+    is_hq_only: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
+    isHqOnly: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
+    scope: (song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly) ? 'hq' : 'global',
     rehearsalCount: song.rehearsalCount || 0,
     organizationId: song.organizationId || null,
     groupId: song.groupId || null,
@@ -142,7 +146,13 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
     const search = ((req.query.search as string) || '').trim();
     const skip = (page - 1) * limit;
 
+    const auth = res.locals.auth || (req as any).user || {};
+    const isHqUser = Boolean(req.tenant?.isHQAdmin || auth.role === 'hq_admin' || auth.role === 'super_admin' || auth.role === 'admin' || auth.hasHqAccess || auth.has_hq_access);
+
     const where: any = { isMaster: true };
+    if (!isHqUser) {
+      where.status = { not: 'hq_only' };
+    }
 
     if (search) {
       where.OR = [
@@ -173,7 +183,9 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
       }),
     ]);
 
-    const formatted = rows.map(formatSong);
+    const formatted = rows
+      .filter(r => isHqUser || (r.status !== 'hq_only' && !(r.audioUrls as any)?._isHQOnly))
+      .map(formatSong);
     res.json({
       success: true,
       count: formatted.length,
@@ -511,6 +523,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const organizationId = body.zoneId || body.organizationId || req.tenant?.effectiveZoneId || 'zone-001';
     const programId = body.praiseNightId || body.programId || null;
 
+    const isHqOnly = Boolean(body.isHQOnly || body.is_hq_only || body.isHqOnly || body.scope === 'hq');
+    let audioUrlsData = body.audioUrls || body.audio_urls || null;
+    if (isHqOnly) {
+      if (!audioUrlsData || typeof audioUrlsData !== 'object') audioUrlsData = {};
+      audioUrlsData = { ...audioUrlsData, _isHQOnly: true };
+    }
+
     const newSong = await prisma.song.create({
       data: {
         id: songId,
@@ -529,9 +548,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         bassGuitarist: body.bassGuitarist || body.bass_guitarist || '',
         solfas: body.solfas || body.solfa || '',
         audioFile: body.audioFile || body.audio_file || body.audioUrl || null,
-        audioUrls: body.audioUrls || body.audio_urls || null,
+        audioUrls: audioUrlsData,
         category: body.category || 'Praise Night',
-        status: body.status || 'active',
+        status: isHqOnly ? 'hq_only' : (body.status || 'active'),
         isMaster: Boolean(body.isMaster),
         isMinistered: Boolean(body.isMinistered),
         ...(programId
@@ -590,6 +609,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (body.status !== undefined) data.status = body.status;
     if (body.isMaster !== undefined) data.isMaster = Boolean(body.isMaster);
     if (body.isMinistered !== undefined) data.isMinistered = Boolean(body.isMinistered);
+
+    if (body.isHQOnly !== undefined || body.is_hq_only !== undefined || body.isHqOnly !== undefined || body.scope !== undefined) {
+      const isHqOnly = Boolean(body.isHQOnly || body.is_hq_only || body.isHqOnly || body.scope === 'hq');
+      const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? { ...(existing.audioUrls as any) } : {};
+      data.audioUrls = { ...currentAudioUrls, ...(data.audioUrls || {}), _isHQOnly: isHqOnly };
+      data.status = isHqOnly ? 'hq_only' : (body.status || (existing.status === 'hq_only' ? 'active' : existing.status));
+    }
 
     const updated = await prisma.song.update({
       where: { id: songId },
