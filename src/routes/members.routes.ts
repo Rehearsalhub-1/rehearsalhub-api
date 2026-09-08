@@ -28,6 +28,61 @@ function shapeMember(m: any) {
   };
 }
 
+// GET /members - query members with optional scope=global and search=...
+router.get('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'admin' || auth.role === 'hq_admin' || auth.role === 'super_admin';
+    const { scope, search, zoneId } = req.query as { scope?: string; search?: string; zoneId?: string };
+
+    let whereClause: any = {};
+
+    if (scope === 'global') {
+      if (!isHqAdmin) {
+        return res.status(403).json({ success: false, error: 'Global member scope is reserved for HQ administrators' });
+      }
+      // no organizationId constraint
+    } else {
+      const targetOrg = zoneId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
+      whereClause.organizationId = targetOrg;
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.trim();
+      whereClause.OR = [
+        { user: { firstName: { contains: q, mode: 'insensitive' } } },
+        { user: { lastName: { contains: q, mode: 'insensitive' } } },
+        { user: { email: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+
+    const memberships = await prisma.membership.findMany({
+      where: whereClause,
+      include: {
+        user: true,
+        organization: true,
+        group: true,
+      },
+      take: 100,
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    const data = memberships.map((m) => {
+      const shaped = shapeMember(m);
+      return {
+        ...shaped,
+        churchId: m.groupId || null,
+        churchName: m.group?.name || null,
+      };
+    });
+
+    res.json({ success: true, count: data.length, data });
+  } catch (err) {
+    console.error('[members GET /]', err);
+    res.status(500).json({ success: false, error: 'Failed to load members' });
+  }
+});
+
 // GET /members/mine
 router.get('/mine', requireAuth, async (req: Request, res: Response) => {
   try {

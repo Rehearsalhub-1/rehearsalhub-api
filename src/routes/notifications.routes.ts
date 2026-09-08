@@ -82,18 +82,75 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/** Helper to dispatch Expo push notifications to a set of user IDs */
+export async function sendExpoPushToUsers(
+  userIds: string[],
+  payload: { title: string; body: string; data?: Record<string, any> }
+) {
+  if (!userIds.length) return;
+  try {
+    const metaKeys = userIds.map((id) => `profile_meta_${id}`);
+    const settings = await prisma.setting.findMany({
+      where: { key: { in: metaKeys } },
+    });
+
+    const pushMessages: any[] = [];
+    for (const s of settings) {
+      const val: any = s.value;
+      const token = val?.expoPushToken || val?.expo_push_token;
+      if (token && typeof token === 'string' && token.startsWith('ExponentPushToken')) {
+        pushMessages.push({
+          to: token,
+          sound: 'default',
+          title: payload.title || 'Loveworld Singers Notification',
+          body: payload.body || '',
+          data: payload.data || {},
+        });
+      }
+    }
+
+    if (pushMessages.length > 0) {
+      for (let i = 0; i < pushMessages.length; i += 100) {
+        const chunk = pushMessages.slice(i, i + 100);
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(chunk),
+        }).catch((err) => console.warn('[ExpoPush] Dispatch chunk failed:', err));
+      }
+    }
+  } catch (pushErr) {
+    console.warn('[sendExpoPushToUsers]', pushErr);
+  }
+}
+
 /** POST /notifications & POST /notifications/broadcast — Broadcast / Send notification */
 const handleCreateNotification = async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { title, body, message, type = 'info', category = 'general', priority = 'normal', actionUrl, targetUserId, targetOrgId } = req.body;
+    const {
+      title,
+      body,
+      message,
+      type = 'info',
+      category = 'general',
+      priority = 'normal',
+      actionUrl,
+      targetUserId,
+      targetOrgId,
+      targetChurchId,
+    } = req.body;
     const text = (body || message || title || '').trim();
     if (!text) {
       return res.status(400).json({ success: false, error: 'Notification message is required' });
     }
 
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const orgId = targetOrgId || req.tenant?.effectiveZoneId || 'zone-001';
+    const orgId = targetOrgId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
 
     const notif = await prisma.notification.create({
       data: {
@@ -105,12 +162,15 @@ const handleCreateNotification = async (req: Request, res: Response) => {
         priority,
         actionUrl: actionUrl || null,
         organizationId: orgId,
-        senderId: auth.userId,
+        senderId: auth.userId || auth.id,
       },
     });
 
+    let recipientUserIds: string[] = [];
+
     // If targeted to a specific user, create a delivery record
     if (targetUserId) {
+      recipientUserIds = [targetUserId];
       await prisma.notificationDelivery.create({
         data: {
           notificationId: notifId,
@@ -119,12 +179,80 @@ const handleCreateNotification = async (req: Request, res: Response) => {
         },
       });
       broadcast('notifications', targetUserId, shapeNotification(notif, false));
+    } else if (targetChurchId) {
+      // Find members of this church group
+      const churchMembers = await prisma.membership.findMany({
+        where: { groupId: targetChurchId },
+        select: { userId: true },
+      });
+      recipientUserIds = churchMembers.map((m) => m.userId);
+
+      if (recipientUserIds.length > 0) {
+        await prisma.notificationDelivery.createMany({
+          data: recipientUserIds.map((uid) => ({
+            notificationId: notifId,
+            userId: uid,
+            isRead: false,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      broadcast('notifications', `church_${targetChurchId}`, shapeNotification(notif, false));
+    } else if (targetOrgId) {
+      // Zone-scoped broadcast
+      const zoneMembers = await prisma.membership.findMany({
+        where: { organizationId: targetOrgId },
+        select: { userId: true },
+      });
+      recipientUserIds = zoneMembers.map((m) => m.userId);
+
+      if (recipientUserIds.length > 0) {
+        await prisma.notificationDelivery.createMany({
+          data: recipientUserIds.map((uid) => ({
+            notificationId: notifId,
+            userId: uid,
+            isRead: false,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      broadcast('notifications', targetOrgId, shapeNotification(notif, false));
     } else {
-      // Broadcast to organization channel
+      // Global broadcast
+      const allMembers = await prisma.membership.findMany({
+        select: { userId: true },
+        distinct: ['userId'],
+      });
+      recipientUserIds = allMembers.map((m) => m.userId);
+
+      if (recipientUserIds.length > 0) {
+        await prisma.notificationDelivery.createMany({
+          data: recipientUserIds.map((uid) => ({
+            notificationId: notifId,
+            userId: uid,
+            isRead: false,
+          })),
+          skipDuplicates: true,
+        });
+      }
       broadcast('notifications', orgId, shapeNotification(notif, false));
     }
 
-    res.status(201).json({ success: true, data: shapeNotification(notif, false) });
+    // Dispatch Expo push notification
+    if (recipientUserIds.length > 0) {
+      sendExpoPushToUsers(recipientUserIds, {
+        title: title || 'Notification',
+        body: text,
+        data: {
+          notificationId: notifId,
+          category,
+          type,
+          actionUrl,
+        },
+      }).catch((e) => console.warn('[ExpoPush:broadcast]', e));
+    }
+
+    res.status(201).json({ success: true, data: shapeNotification(notif, false), recipientCount: recipientUserIds.length });
   } catch (err) {
     console.error('[notifications:create]', err);
     res.status(500).json({ success: false, error: 'Failed to create notification' });
@@ -133,6 +261,36 @@ const handleCreateNotification = async (req: Request, res: Response) => {
 
 router.post('/', requireAuth, requireTenantAdmin, handleCreateNotification);
 router.post('/broadcast', requireAuth, requireTenantAdmin, handleCreateNotification);
+
+/** GET /notifications/sent — List notifications sent by the current admin */
+router.get('/sent', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const adminId = auth.userId || auth.id;
+
+    const notifs = await prisma.notification.findMany({
+      where: { senderId: adminId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: {
+        deliveries: {
+          select: { id: true, userId: true, isRead: true },
+        },
+      },
+    });
+
+    const data = notifs.map((n) => ({
+      ...shapeNotification(n, false),
+      recipientCount: n.deliveries.length,
+      readCount: n.deliveries.filter((d) => d.isRead).length,
+    }));
+
+    res.json({ success: true, count: data.length, data });
+  } catch (err) {
+    console.error('[notifications:sent]', err);
+    res.status(500).json({ success: false, error: 'Failed to load sent notifications' });
+  }
+});
 
 /** POST /notifications/send — Dispatch peer-to-peer / system push & websocket notifications */
 router.post('/send', requireAuth, async (req: Request, res: Response) => {

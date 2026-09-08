@@ -74,6 +74,64 @@ const handleGetMyAttendance = async (req: Request, res: Response) => {
 router.get('/mine', requireAuth, handleGetMyAttendance);
 router.get('/personal', requireAuth, handleGetMyAttendance);
 
+/** GET /attendance/session — Get live clock-in status for a zone */
+router.get('/session', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { zoneId } = req.query as { zoneId?: string };
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const key = `clockin_session_${effectiveZoneId}`;
+
+    const setting = await prisma.setting.findUnique({ where: { key } });
+    const val: any = setting?.value || {};
+
+    res.json({
+      success: true,
+      data: {
+        zoneId: effectiveZoneId,
+        isOpen: val.isOpen !== false, // Defaults to true if never explicitly closed
+        lastToggledAt: val.lastToggledAt || null,
+        toggledBy: val.toggledBy || null,
+      },
+    });
+  } catch (err) {
+    console.error('[attendance:session:get]', err);
+    res.status(500).json({ success: false, error: 'Failed to check clock-in session' });
+  }
+});
+
+/** POST /attendance/session/toggle — Open or close rehearsal clock-in */
+router.post('/session/toggle', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth;
+    const { zoneId, isOpen } = req.body;
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const key = `clockin_session_${effectiveZoneId}`;
+
+    const updatedValue = {
+      isOpen: Boolean(isOpen),
+      lastToggledAt: new Date().toISOString(),
+      toggledBy: auth.userId || auth.id || 'Coordinator',
+    };
+
+    await prisma.setting.upsert({
+      where: { key },
+      update: { value: updatedValue },
+      create: { key, value: updatedValue },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        zoneId: effectiveZoneId,
+        ...updatedValue,
+      },
+    });
+  } catch (err) {
+    console.error('[attendance:session:toggle]', err);
+    res.status(500).json({ success: false, error: 'Failed to toggle clock-in session' });
+  }
+});
+
 /** POST /attendance/check-in & POST /attendance */
 const handleCheckIn = async (req: Request, res: Response) => {
   try {
@@ -83,6 +141,17 @@ const handleCheckIn = async (req: Request, res: Response) => {
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
     const now = new Date();
     const id = req.body.id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    // Guard: Check if clock-in session is open for this zone
+    const sessionKey = `clockin_session_${orgId}`;
+    const sessionSetting = await prisma.setting.findUnique({ where: { key: sessionKey } });
+    const sessionVal: any = sessionSetting?.value || {};
+    if (sessionVal.isOpen === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Clock-in is currently closed for this rehearsal. Late arrivals cannot check in.',
+      });
+    }
 
     // Validate or resolve valid programId
     let resolvedProgramId: string | null = null;
@@ -135,20 +204,50 @@ const handleCheckIn = async (req: Request, res: Response) => {
         include: { user: true },
       });
     } else {
-      inserted = await prisma.attendance.create({
-        data: {
-          id,
-          organizationId: orgId,
+      // Deduplicate general rehearsals on the same calendar day for the same user
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      const existingRecord = await prisma.attendance.findFirst({
+        where: {
           userId: targetUserId,
-          eventName: eventName || 'General Rehearsal',
-          status: 'present',
-          checkInTime: now,
-          scannedAt: qrCode ? now : null,
-          qrCode: qrCode || null,
-          recordedById: auth.userId,
+          organizationId: orgId,
+          checkInTime: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
         },
         include: { user: true },
       });
+
+      if (existingRecord) {
+        inserted = await prisma.attendance.update({
+          where: { id: existingRecord.id },
+          data: {
+            checkInTime: now,
+            status: 'present',
+            scannedAt: qrCode ? now : undefined,
+            qrCode: qrCode || undefined,
+            recordedById: auth.userId,
+          },
+          include: { user: true },
+        });
+      } else {
+        inserted = await prisma.attendance.create({
+          data: {
+            id,
+            organizationId: orgId,
+            userId: targetUserId,
+            eventName: eventName || 'General Rehearsal',
+            status: 'present',
+            checkInTime: now,
+            scannedAt: qrCode ? now : null,
+            qrCode: qrCode || null,
+            recordedById: auth.userId,
+          },
+          include: { user: true },
+        });
+      }
     }
 
     res.status(201).json({ success: true, message: 'Checked in successfully', data: shapeAttendance(inserted) });

@@ -68,12 +68,23 @@ function formatUserProfile(u: any, metaInput?: any) {
     zoneId: primaryMembership?.organizationId || null,
     zone_id: primaryMembership?.organizationId || null,
     zoneName: primaryMembership?.organization?.name || null,
-    canAnnotate: true,
-    can_annotate: true,
-    canAccessArchive: true,
-    can_access_archive: true,
-    canAccessPreRehearsal: true,
-    can_access_pre_rehearsal: true,
+    canAnnotate: meta.canAnnotate ?? false,
+    can_annotate: meta.canAnnotate ?? false,
+    canAccessArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
+    can_access_archive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
+    canSeeArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
+    canAccessPreRehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
+    can_access_pre_rehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
+    hiddenFeatures: meta.hiddenFeatures || {
+      hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
+      hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
+      hideAnnotations: !(meta.canAnnotate ?? false),
+    },
+    hidden_features: meta.hiddenFeatures || {
+      hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
+      hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
+      hideAnnotations: !(meta.canAnnotate ?? false),
+    },
     memberships: activeMemberships.map((m: any) => ({
       id: `${m.userId}_${m.organizationId}`,
       organizationId: m.organizationId,
@@ -129,7 +140,6 @@ const updateProfileSchema = z.object({
   avatar_url: z.string().optional(),
   avatar: z.string().optional(),
   expo_push_token: z.string().optional(),
-  onesignal_sub_id: z.string().optional(),
 }).passthrough();
 
 // GET /profiles/check-username/:username
@@ -457,6 +467,13 @@ router.patch('/:userId', requireAuth, async (req, res) => {
       ...(body.church !== undefined ? { church: body.church } : {}),
       ...(body.designation !== undefined ? { designation: body.designation } : {}),
       ...(body.administration !== undefined ? { administration: body.administration } : {}),
+      ...(body.canSeeArchive !== undefined ? { canSeeArchive: body.canSeeArchive } : {}),
+      ...(body.can_access_archive !== undefined ? { can_access_archive: body.can_access_archive } : {}),
+      ...(body.canAccessArchive !== undefined ? { canAccessArchive: body.canAccessArchive } : {}),
+      ...(body.can_access_ongoing !== undefined ? { can_access_ongoing: body.can_access_ongoing } : {}),
+      ...(body.can_access_pre_rehearsal !== undefined ? { can_access_pre_rehearsal: body.can_access_pre_rehearsal } : {}),
+      ...(body.canAnnotate !== undefined ? { canAnnotate: body.canAnnotate } : {}),
+      ...(body.hiddenFeatures !== undefined ? { hiddenFeatures: body.hiddenFeatures } : {}),
     };
 
     await prisma.setting.upsert({
@@ -522,24 +539,6 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   const formatted = formatUserProfile(updated, updatedMeta);
   broadcast('profile', userId, formatted);
   res.json({ success: true, message: 'Profile updated', data: formatted });
-});
-
-// PATCH /profiles/:userId/onesignal
-router.patch('/:userId/onesignal', requireAuth, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const subId = req.body.subscription_id || req.body.subscriptionId || req.body.onesignal_id;
-    if (subId) {
-      await prisma.setting.upsert({
-        where: { key: `onesignal_${userId}` },
-        update: { value: { subscriptionId: subId, updatedAt: new Date().toISOString() } },
-        create: { key: `onesignal_${userId}`, value: { subscriptionId: subId, updatedAt: new Date().toISOString() } },
-      });
-    }
-    res.json({ success: true, message: 'OneSignal updated' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Failed to update OneSignal ID' });
-  }
 });
 
 // POST /profiles/:userId/password

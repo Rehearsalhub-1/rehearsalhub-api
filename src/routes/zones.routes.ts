@@ -12,6 +12,9 @@ router.get('/', async (_req, res) => {
       groups: {
         select: { id: true, name: true, type: true, status: true },
       },
+      _count: {
+        select: { memberships: true, groups: true },
+      },
     },
   });
   res.json({ success: true, data: rows });

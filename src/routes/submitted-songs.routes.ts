@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
+import { sendExpoPushToUsers } from './notifications.routes';
 
 const router = Router();
 
@@ -178,14 +179,66 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 router.patch('/:id/approve', requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const auth = res.locals.auth;
     const updated = await prisma.song.update({
       where: { id },
       data: { status: 'approved' },
-      include: { organization: true },
+      include: {
+        organization: true,
+        roleAssignments: true,
+      },
     });
 
     const formatted = shapeSubmission(updated);
     broadcast('submitted_song', id, formatted);
+
+    // Notify submitter privately
+    const submitterAssignment = updated.roleAssignments?.find((r) => r.role === 'SUBMITTER' || r.role === 'LEAD_SINGER');
+    const submitterUserId = submitterAssignment?.userId;
+
+    if (submitterUserId) {
+      try {
+        const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const notifTitle = 'Song Approved';
+        const notifBody = `Your song "${updated.title}" has been approved for rehearsals!`;
+
+        const notif = await prisma.notification.create({
+          data: {
+            id: notifId,
+            title: notifTitle,
+            body: notifBody,
+            type: 'success',
+            category: 'rehearsal', // Routes directly to singer's REHEARSALS tab
+            priority: 'high',
+            organizationId: updated.organizationId,
+            senderId: auth.userId || auth.id,
+          },
+        });
+
+        await prisma.notificationDelivery.create({
+          data: {
+            notificationId: notifId,
+            userId: submitterUserId,
+            isRead: false,
+          },
+        });
+
+        broadcast('notifications', submitterUserId, notif);
+
+        sendExpoPushToUsers([submitterUserId], {
+          title: notifTitle,
+          body: notifBody,
+          data: {
+            notificationId: notifId,
+            category: 'rehearsal',
+            songId: id,
+          },
+        }).catch((err) => console.warn('[submitted-songs:approve:push]', err));
+      } catch (notifErr) {
+        console.warn('[submitted-songs:approve:notif]', notifErr);
+      }
+    }
+
     res.json({ success: true, data: formatted });
   } catch (err) {
     console.error('[submitted-songs:approve]', err);
@@ -197,14 +250,66 @@ router.patch('/:id/approve', requireTenantAdmin, async (req: Request, res: Respo
 router.patch('/:id/reject', requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const auth = res.locals.auth;
     const updated = await prisma.song.update({
       where: { id },
       data: { status: 'rejected' },
-      include: { organization: true },
+      include: {
+        organization: true,
+        roleAssignments: true,
+      },
     });
 
     const formatted = shapeSubmission(updated);
     broadcast('submitted_song', id, formatted);
+
+    // Notify submitter privately
+    const submitterAssignment = updated.roleAssignments?.find((r) => r.role === 'SUBMITTER' || r.role === 'LEAD_SINGER');
+    const submitterUserId = submitterAssignment?.userId;
+
+    if (submitterUserId) {
+      try {
+        const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const notifTitle = 'Song Submission Update';
+        const notifBody = `Your song submission "${updated.title}" was not approved at this time.`;
+
+        const notif = await prisma.notification.create({
+          data: {
+            id: notifId,
+            title: notifTitle,
+            body: notifBody,
+            type: 'warning',
+            category: 'rehearsal', // Routes directly to singer's REHEARSALS tab
+            priority: 'normal',
+            organizationId: updated.organizationId,
+            senderId: auth.userId || auth.id,
+          },
+        });
+
+        await prisma.notificationDelivery.create({
+          data: {
+            notificationId: notifId,
+            userId: submitterUserId,
+            isRead: false,
+          },
+        });
+
+        broadcast('notifications', submitterUserId, notif);
+
+        sendExpoPushToUsers([submitterUserId], {
+          title: notifTitle,
+          body: notifBody,
+          data: {
+            notificationId: notifId,
+            category: 'rehearsal',
+            songId: id,
+          },
+        }).catch((err) => console.warn('[submitted-songs:reject:push]', err));
+      } catch (notifErr) {
+        console.warn('[submitted-songs:reject:notif]', notifErr);
+      }
+    }
+
     res.json({ success: true, data: formatted });
   } catch (err) {
     console.error('[submitted-songs:reject]', err);
