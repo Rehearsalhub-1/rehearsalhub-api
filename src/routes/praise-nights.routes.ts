@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
+import { broadcast } from '../ws/wsServer';
 
 import fs from 'fs';
 import path from 'path';
@@ -24,6 +25,8 @@ try {
 } catch (err) {
   console.warn('[praise-nights] could not load snapshot pageCategory map:', err);
 }
+
+const programCategoryOrders: Record<string, string[]> = {};
 
 function shapeProgram(p: any) {
   const programSongsList = Array.isArray(p.programSongs)
@@ -83,6 +86,7 @@ function shapeProgram(p: any) {
     bannerImage: p.bannerImage || p.banner_image || null,
     songCount: programSongsList.length || (p.rehearsalCount || 0),
     heardCount,
+    categoryOrder: programCategoryOrders[p.id] || p.categoryOrder || [],
     songs: programSongsList,
     createdAt: p.createdAt || p.created_at,
     updatedAt: p.updatedAt || p.updated_at,
@@ -206,7 +210,11 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
       },
     });
 
-    res.status(201).json({ success: true, message: 'Program created successfully', data: shapeProgram(row) });
+    const shaped = shapeProgram(row);
+    broadcast('programs', 'all', { type: 'create', program: shaped });
+    broadcast('praise-nights', programId, shaped);
+
+    res.status(201).json({ success: true, message: 'Program created successfully', data: shaped });
   } catch (err) {
     console.error('[programs/create]', err);
     res.status(500).json({ success: false, error: 'Failed to create program' });
@@ -261,6 +269,10 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       }
     }
 
+    if (Array.isArray(req.body.categoryOrder)) {
+      programCategoryOrders[id] = req.body.categoryOrder.map(String);
+    }
+
     const updated = await prisma.program.update({
       where: { id },
       data: {
@@ -282,7 +294,11 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       },
     });
 
-    res.json({ success: true, message: 'Program updated successfully', data: shapeProgram(updated) });
+    const shaped = shapeProgram(updated);
+    broadcast('programs', 'all', { type: 'update', program: shaped });
+    broadcast('praise-nights', id, shaped);
+
+    res.json({ success: true, message: 'Program updated successfully', data: shaped });
   } catch (err: any) {
     console.error('[programs/:id:patch]', err);
     res.status(500).json({ success: false, error: err?.message || 'Failed to update program' });
@@ -316,7 +332,11 @@ router.patch('/:id/status', requireAuth, requireTenantAdmin, async (req: Request
       },
     });
 
-    res.json({ success: true, message: `Program status updated to ${targetStatus}`, data: shapeProgram(updated) });
+    const shaped = shapeProgram(updated);
+    broadcast('programs', 'all', { type: 'status', program: shaped });
+    broadcast('praise-nights', req.params.id, shaped);
+
+    res.json({ success: true, message: `Program status updated to ${targetStatus}`, data: shaped });
   } catch (err) {
     console.error('[programs/:id/status]', err);
     res.status(500).json({ success: false, error: 'Failed to update program status' });
@@ -368,10 +388,13 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req: Reque
       },
     });
 
+    const shaped = shapeProgram(newProg);
+    broadcast('programs', 'all', { type: 'create', program: shaped });
+
     res.json({
       success: true,
       message: 'Program duplicated successfully',
-      data: shapeProgram(newProg),
+      data: shaped,
     });
   } catch (err) {
     console.error('[programs/:id/duplicate]', err);
@@ -383,6 +406,8 @@ router.post('/:id/duplicate', requireAuth, requireTenantAdmin, async (req: Reque
 router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     await prisma.program.delete({ where: { id: req.params.id } });
+    broadcast('programs', 'all', { type: 'delete', programId: req.params.id });
+    broadcast('praise-nights', req.params.id, { deleted: true, id: req.params.id });
     res.json({ success: true, message: 'Program deleted' });
   } catch (err) {
     console.error('[programs/delete]', err);

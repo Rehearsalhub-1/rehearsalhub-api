@@ -167,6 +167,7 @@ app.use('/organizations', zonesRouter);
 app.use('/zones', zonesRouter);
 app.use('/members', membersRouter);
 app.use('/schedule', scheduleRouter);
+app.use('/schedules', scheduleRouter);
 app.use('/praise-nights', praiseNightsRouter);
 app.use('/programs', praiseNightsRouter);
 app.use('/chats', chatsRouter);
