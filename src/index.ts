@@ -230,6 +230,44 @@ app.get('/api/settings/:id', apiKeyAuth, async (req, res) => {
   }
 });
 
+// ── Admin Dashboard Stats — single endpoint, no client-side aggregation ──────
+app.get('/admin/dashboard/stats', async (req: express.Request, res: express.Response) => {
+  try {
+    const auth = (res as any).locals?.auth || {};
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
+    const { zoneId, churchId } = req.query as { zoneId?: string; churchId?: string };
+    const effectiveZone = zoneId || (req as any).tenant?.effectiveZoneId || 'zone-001';
+    const effectiveChurch = churchId || null;
+
+    const orgFilter = effectiveChurch
+      ? { groupId: effectiveChurch }
+      : isHqAdmin
+      ? {}
+      : { organizationId: effectiveZone };
+
+    const memberFilter = effectiveChurch
+      ? { groupId: effectiveChurch }
+      : isHqAdmin
+      ? {}
+      : { organizationId: effectiveZone };
+
+    const [totalMembers, activePrograms, totalSongs, pendingSongs] = await Promise.all([
+      prisma.membership.count({ where: memberFilter }),
+      prisma.program.count({ where: { ...orgFilter, groupId: effectiveChurch || null } }),
+      prisma.song.count({ where: { isMaster: true } }),
+      prisma.song.count({ where: { status: 'pending', category: 'Submitted Songs', ...(effectiveChurch ? { organizationId: effectiveZone } : (isHqAdmin ? {} : { organizationId: effectiveZone })) } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: { totalMembers, activePrograms, totalSongs, pendingSongs },
+    });
+  } catch (err) {
+    console.error('[admin/dashboard/stats]', err);
+    res.status(500).json({ success: false, error: 'Failed to load dashboard stats' });
+  }
+});
+
 // Global error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[API Global Error]', err?.stack || err);
