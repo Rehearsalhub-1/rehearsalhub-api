@@ -1,9 +1,10 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { apiKeyAuth } from './middleware/auth';
+import { requireAuth } from './auth/auth.middleware';
 import masterSongsRouter from './routes/masterSongs';
 import songsRouter from './routes/songs.routes';
 import praiseNightSongsRouter from './routes/praiseNightSongs';
@@ -230,8 +231,8 @@ app.get('/api/settings/:id', apiKeyAuth, async (req, res) => {
   }
 });
 
-// ── Admin Dashboard Stats — single endpoint, no client-side aggregation ──────
-app.get('/admin/dashboard/stats', async (req: express.Request, res: express.Response) => {
+// â”€â”€ Admin Dashboard Stats â€” single endpoint, no client-side aggregation â”€â”€â”€â”€â”€â”€
+app.get('/admin/dashboard/stats', requireAuth, async (req: express.Request, res: express.Response) => {
   try {
     const auth = (res as any).locals?.auth || {};
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
@@ -285,7 +286,7 @@ const httpServer = http.createServer(app);
 createWsServer(httpServer);
 
 httpServer.listen(PORT, async () => {
-  console.log(`🎵 RehearsalHub API running on port ${PORT}`);
+  console.log(`ðŸŽµ RehearsalHub API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Docs:   http://localhost:${PORT}/`);
 
@@ -296,12 +297,12 @@ httpServer.listen(PORT, async () => {
   // Warm up the DB connection on startup via Prisma
   try {
     await prisma.$queryRawUnsafe('SELECT 1');
-    console.log(`   Prisma DB connection warmed up ✓`);
+    console.log(`   Prisma DB connection warmed up âœ“`);
   } catch (e) {
     console.warn(`   DB warmup failed (will retry on first request):`, (e as Error).message);
   }
 
-  // ── Keep-alive self-ping ────────────────────────────────────────────────────
+  // â”€â”€ Keep-alive self-ping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (process.env.NODE_ENV === 'production') {
     const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
     const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -318,3 +319,4 @@ httpServer.listen(PORT, async () => {
     }, PING_INTERVAL_MS);
   }
 });
+

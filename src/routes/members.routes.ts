@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 import { fetchAllUserMemberships } from '../auth/auth.service';
@@ -270,21 +270,25 @@ router.delete('/zone/:membershipId', requireAuth, async (req: Request, res: Resp
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = res.locals.auth.userId as string;
+    const auth = res.locals.auth;
+    const isAdmin =
+      auth.role === 'hq_admin' ||
+      auth.role === 'admin' ||
+      auth.role === 'super_admin' ||
+      auth.role === 'zone_admin' ||
+      auth.role === 'zone_coordinator';
 
+    // Admins can remove any membership; regular users can only remove their own
     await prisma.membership.deleteMany({
-      where: {
-        OR: [
-          { id, userId },
-          { id },
-        ],
-      },
+      where: isAdmin ? { id } : { id, userId: auth.userId },
     });
 
     res.json({ success: true, message: 'Membership deleted' });
   } catch (err) {
+    console.error('[members/:id DELETE]', err);
     res.status(500).json({ success: false, error: 'Failed to delete membership' });
   }
 });
 
 export default router;
+
