@@ -363,6 +363,7 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
     }));
 
     if (song) {
+      // ── 1. Program appearances (Details tab) ─────────────────────────────
       if (song.programSongs && song.programSongs.length > 0) {
         for (const ps of song.programSongs) {
           const progName = ps.program?.name || 'Program Repertoire';
@@ -390,6 +391,31 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
         }
       }
 
+      // ── 2. Song metadata baseline (Details tab) — always shown ───────────
+      formatted.push({
+        id: `metadata-baseline-${song.id}`,
+        songId,
+        type: 'details',
+        title: `Song Details — ${song.title}`,
+        description: `Ministry catalog entry for ${song.title}`,
+        new_value: JSON.stringify({
+          title: song.title || '—',
+          leadSinger: song.leadSinger || '—',
+          writer: song.writer || '—',
+          conductor: song.conductor || '—',
+          key: song.key || '—',
+          tempo: song.tempo || '—',
+          category: song.category || '—',
+          rehearsalCount: song.rehearsalCount || 0,
+          isMaster: song.isMaster,
+        }),
+        old_value: '',
+        createdBy: 'Ministry Archive',
+        createdAt: song.createdAt,
+        created_at: song.createdAt,
+      });
+
+      // ── 3. Audio baseline (Audio tab) ─────────────────────────────────────
       const audioUrl = song.audioFile || (song.audioUrls as any)?.full || null;
       if (audioUrl) {
         formatted.push({
@@ -407,12 +433,13 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
         });
       }
 
+      // ── 4. Lyrics baseline (Lyrics tab) — always shown if lyrics exist ────
       if (song.lyrics) {
         formatted.push({
           id: `lyrics-baseline-${song.id}`,
           songId,
           type: 'lyrics',
-          title: `Master Lyrics (${song.title})`,
+          title: `Master Lyrics — ${song.title}`,
           description: `Archived ministry lyrics`,
           new_value: song.lyrics,
           old_value: '',
@@ -422,17 +449,56 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
         });
       }
 
-      const guideText = isConductorGuideText(song.solfas) ? song.solfas : '';
-      if (guideText) {
+      // ── 5. Conductor guide (Conductor tab) — check both conductor and solfas fields ──
+      // conductor field may hold the guide text; solfas field sometimes holds it too
+      const conductorGuideText = isConductorGuideText(song.conductor)
+        ? song.conductor
+        : isConductorGuideText(song.solfas)
+        ? song.solfas
+        : null;
+
+      // Even if no guide text, still emit a conductor entry if conductor name is known
+      if (conductorGuideText) {
         formatted.push({
           id: `conductor-baseline-${song.id}`,
           songId,
           type: 'conductor',
           title: `Conductor Arrangement Guide`,
           description: song.conductor ? `Arrangement cues for ${song.conductor}` : 'Arrangement cues',
-          new_value: guideText,
+          new_value: conductorGuideText,
           old_value: '',
           createdBy: song.conductor ? `Conductor ${song.conductor}` : 'Director Archive',
+          createdAt: song.createdAt,
+          created_at: song.createdAt,
+        });
+      } else if (song.conductor) {
+        // conductor name exists but no guide text — still show a conductor entry
+        formatted.push({
+          id: `conductor-name-${song.id}`,
+          songId,
+          type: 'conductor',
+          title: `Conductor — ${song.conductor}`,
+          description: `Conducted by ${song.conductor}`,
+          new_value: song.conductor,
+          old_value: '',
+          createdBy: 'Ministry Archive',
+          createdAt: song.createdAt,
+          created_at: song.createdAt,
+        });
+      }
+
+      // ── 6. Solfa notation (Solfa tab) — always shown if solfa exists ──────
+      const resolvedSolfa = !isConductorGuideText(song.solfas) ? song.solfas : null;
+      if (resolvedSolfa) {
+        formatted.push({
+          id: `solfa-baseline-${song.id}`,
+          songId,
+          type: 'solfa',
+          title: `Solfa Notation — ${song.title}`,
+          description: `Ministry solfa notation`,
+          new_value: resolvedSolfa,
+          old_value: '',
+          createdBy: song.writer ? `Written by ${song.writer}` : 'Ministry Archive',
           createdAt: song.createdAt,
           created_at: song.createdAt,
         });
