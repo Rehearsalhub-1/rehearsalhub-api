@@ -123,19 +123,15 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     if (targetZone && targetZone !== 'all' && targetZone !== 'global') {
-      if (isHqAdmin) {
-        // HQ admins can see all zones including zone-001
-        where.organizationId = { in: [targetZone, 'zone-001'] };
-      } else {
-        // Zone admins see ONLY their own zone — never zone-001 HQ programs
-        where.organizationId = targetZone;
-      }
+      // Everyone — admin or singer — sees ONLY their own zone's programs.
+      // No HQ fallback. If a zone has no programs the response is empty.
+      // HQ admins whose zone IS zone-001 will correctly see zone-001 programs.
+      where.organizationId = targetZone;
     } else if (isHqAdmin && !targetZone) {
       // HQ admin with no zone filter = see everything (no org constraint)
-    }
-    // Non-HQ admin with no zone = they shouldn't be calling this, return empty
-    else if (!isHqAdmin) {
-      where.organizationId = 'zone-001'; // Return only global/HQ as fallback
+    } else if (!isHqAdmin && !targetZone) {
+      // No zone resolved at all — return empty rather than leaking data
+      where.organizationId = '__none__';
     }
 
     const programs = await prisma.program.findMany({
