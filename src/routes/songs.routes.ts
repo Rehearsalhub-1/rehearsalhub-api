@@ -667,9 +667,15 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     if (body.tempo !== undefined) data.tempo = body.tempo;
     if (body.lyrics !== undefined) data.lyrics = body.lyrics;
     if (body.writer !== undefined) data.writer = body.writer;
-    if (body.status !== undefined) data.status = body.status;
     if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
     if (body.audioFile !== undefined || body.audioUrl !== undefined) data.audioFile = body.audioFile || body.audioUrl;
+
+    // Map isHeard boolean to status string; isHeard takes priority over status
+    if (body.isHeard !== undefined) {
+      data.status = body.isHeard ? 'heard' : 'unheard';
+    } else if (body.status !== undefined) {
+      data.status = body.status;
+    }
 
     const updated = await prisma.song.update({
       where: { id: songId },

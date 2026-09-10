@@ -732,9 +732,9 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const administration = meta.administration || (primaryRole === 'admin' ? 'Admin' : 'Member');
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member';
 
-  const canAccessArchive = true;
-  const canAccessPreRehearsal = true;
-  const canAnnotate = true;
+  const canAccessArchive = meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? true;
+  const canAccessPreRehearsal = meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? true;
+  const canAnnotate = meta.canAnnotate ?? true;
 
   return {
     id: user.id,
@@ -780,8 +780,26 @@ export async function getMe(profileId: string): Promise<MeResult> {
     can_access_pre_rehearsal: canAccessPreRehearsal,
     canAnnotate,
     can_annotate: canAnnotate,
-    hiddenFeatures: {},
-    hidden_features: {},
+    hiddenFeatures: meta.hiddenFeatures ?? {
+      hideArchives: !canAccessArchive,
+      hidePreRehearsal: !canAccessPreRehearsal,
+      hideAnnotations: !canAnnotate,
+      hideOngoing: meta.hiddenFeatures?.hideOngoing ?? false,
+      hideSubgroups: meta.hiddenFeatures?.hideSubgroups ?? false,
+      hideSubmissions: meta.hiddenFeatures?.hideSubmissions ?? false,
+      hideMinisteredSongs: meta.hiddenFeatures?.hideMinisteredSongs ?? false,
+      hideAudioLab: meta.hiddenFeatures?.hideAudioLab ?? false,
+    },
+    hidden_features: meta.hiddenFeatures ?? {
+      hideArchives: !canAccessArchive,
+      hidePreRehearsal: !canAccessPreRehearsal,
+      hideAnnotations: !canAnnotate,
+      hideOngoing: meta.hiddenFeatures?.hideOngoing ?? false,
+      hideSubgroups: meta.hiddenFeatures?.hideSubgroups ?? false,
+      hideSubmissions: meta.hiddenFeatures?.hideSubmissions ?? false,
+      hideMinisteredSongs: meta.hiddenFeatures?.hideMinisteredSongs ?? false,
+      hideAudioLab: meta.hiddenFeatures?.hideAudioLab ?? false,
+    },
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
     raw: meta,
