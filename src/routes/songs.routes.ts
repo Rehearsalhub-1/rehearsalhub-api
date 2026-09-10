@@ -7,15 +7,16 @@ const router = Router();
 
 function resolveAudio(song: any): { audioUrl: string; audioUrls: Record<string, string> } {
   const urlsObj: Record<string, string> = {};
-  if (song.audioUrls && typeof song.audioUrls === 'object') {
+  if (song.audioUrls && typeof song.audioUrls === 'object' && !Array.isArray(song.audioUrls)) {
     Object.assign(urlsObj, song.audioUrls);
   }
-  if (song.audio_urls && typeof song.audio_urls === 'object') {
+  if (song.audio_urls && typeof song.audio_urls === 'object' && !Array.isArray(song.audio_urls)) {
     Object.assign(urlsObj, song.audio_urls);
   }
   if (song.sopranoUrl || song.soprano_url) urlsObj.soprano = song.sopranoUrl || song.soprano_url;
   if (song.altoUrl || song.alto_url) urlsObj.alto = song.altoUrl || song.alto_url;
   if (song.tenorUrl || song.tenor_url) urlsObj.tenor = song.tenorUrl || song.tenor_url;
+  if (song.bassUrl || song.bass_url) urlsObj.bass = song.bassUrl || song.bass_url;
   if (song.leadVocalUrl || song.lead_vocal_url) urlsObj.lead = song.leadVocalUrl || song.lead_vocal_url;
   if (song.instrumentalUrl || song.instrumental_url) urlsObj.instrumental = song.instrumentalUrl || song.instrumental_url;
 
@@ -67,8 +68,7 @@ function isConductorGuideText(text: string | null | undefined): boolean {
 }
 
 function shapeSong(song: any) {
-  const audioUrls = (song.audioUrls as Record<string, string>) || {};
-  const audioUrl = song.audioFile || audioUrls.full || null;
+  const { audioUrl, audioUrls } = resolveAudio(song);
 
   // Extract primary program info from relation if populated
   const programSongs = song.programSongs || [];

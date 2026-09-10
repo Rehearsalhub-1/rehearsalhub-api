@@ -1,0 +1,1710 @@
+﻿{
+  "rowCounts": {
+    "attendance": 2105,
+    "auth_credentials": 4,
+    "calls": 19,
+    "categories": 123,
+    "chat_participants": 945,
+    "chats": 132,
+    "groups": 0,
+    "media_assets": 7823,
+    "media_doodles": 0,
+    "memberships": 1002,
+    "messages": 891,
+    "notification_deliveries": 0,
+    "notifications": 30,
+    "organizations": 86,
+    "playlist_items": 1099,
+    "playlists": 304,
+    "profiles": 880,
+    "program_songs": 3817,
+    "programs": 127,
+    "refresh_tokens": 173,
+    "settings": 23,
+    "song_categories": 0,
+    "song_history": 591,
+    "song_role_assignments": 4,
+    "songs": 3732,
+    "submitted_songs": 202,
+    "support_tickets": 0,
+    "user_song_notes": 0,
+    "user_statuses": 0
+  },
+  "tablesMeta": {
+    "attendance": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "program_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'present'::character varying"
+      },
+      {
+        "name": "event_name",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "check_in_time",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "scanned_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "qr_code",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "recorded_by_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "auth_credentials": [
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "password_hash",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "calls": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "caller_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "receiver_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "text",
+        "nullable": false,
+        "default": "'voice'::text"
+      },
+      {
+        "name": "chat_id",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "room_id",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "caller_name",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "caller_avatar",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "nullable": false,
+        "default": "'ended'::text"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp without time zone",
+        "nullable": false,
+        "default": "CURRENT_TIMESTAMP"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp without time zone",
+        "nullable": false,
+        "default": "CURRENT_TIMESTAMP"
+      }
+    ],
+    "categories": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'PROGRAM'::character varying"
+      },
+      {
+        "name": "color",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "order",
+        "type": "integer",
+        "nullable": true,
+        "default": "0"
+      }
+    ],
+    "chat_participants": [
+      {
+        "name": "chat_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "unread_count",
+        "type": "integer",
+        "nullable": true,
+        "default": "0"
+      },
+      {
+        "name": "joined_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "chats": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'direct'::character varying"
+      },
+      {
+        "name": "title",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_by",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "groups": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'church'::character varying"
+      },
+      {
+        "name": "status",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'active'::character varying"
+      },
+      {
+        "name": "estimated_members",
+        "type": "integer",
+        "nullable": true,
+        "default": "0"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "media_assets": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "group_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "url",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'AUDIO'::character varying"
+      },
+      {
+        "name": "folder",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "size",
+        "type": "bigint",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "mime_type",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "thumbnail",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      }
+    ],
+    "media_doodles": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "data",
+        "type": "jsonb",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      }
+    ],
+    "memberships": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "group_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "role",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'MEMBER'::character varying"
+      },
+      {
+        "name": "voice_part",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'ACTIVE'::character varying"
+      },
+      {
+        "name": "joined_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "messages": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "chat_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "sender_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "text",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'text'::character varying"
+      },
+      {
+        "name": "edited",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "status",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'sent'::character varying"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "notification_deliveries": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "notification_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "is_read",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "read_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": null
+      }
+    ],
+    "notifications": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "sender_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "body",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'announcement'::character varying"
+      },
+      {
+        "name": "category",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "priority",
+        "type": "character varying",
+        "nullable": true,
+        "default": "'normal'::character varying"
+      },
+      {
+        "name": "action_url",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "organizations": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "code",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "country",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "region",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "is_hq",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "invitation_code",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": true,
+        "default": "true"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "playlist_items": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "playlist_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "order",
+        "type": "integer",
+        "nullable": true,
+        "default": "1"
+      }
+    ],
+    "playlists": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "is_public",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "profiles": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "email",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "first_name",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "last_name",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "phone",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "avatar_url",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "kingschat_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "profile_completed",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "program_songs": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "program_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "order",
+        "type": "integer",
+        "nullable": true,
+        "default": "1"
+      }
+    ],
+    "programs": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "group_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "name",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "date",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "text",
+        "nullable": true,
+        "default": "'praise_night'::character varying"
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "nullable": true,
+        "default": "'pre-rehearsal'::character varying"
+      },
+      {
+        "name": "location",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "banner_image",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "is_archived",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "rehearsal_count",
+        "type": "integer",
+        "nullable": true,
+        "default": "0"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "refresh_tokens": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "token_hash",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "settings": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "key",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "value",
+        "type": "jsonb",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "song_categories": [
+      {
+        "name": "song_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "category_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      }
+    ],
+    "song_history": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "old_value",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "new_value",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      }
+    ],
+    "song_role_assignments": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "role",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      }
+    ],
+    "songs": [
+      {
+        "name": "id",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "group_id",
+        "type": "character varying",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "character varying",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "key",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "tempo",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "lyrics",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "writer",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "category",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "audio_file",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "audio_urls",
+        "type": "jsonb",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "conductor",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "lead_singer",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "drummer",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "lead_keyboardist",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "lead_guitarist",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "bass_guitarist",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "solfas",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "is_master",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "is_ministered",
+        "type": "boolean",
+        "nullable": true,
+        "default": "false"
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "nullable": true,
+        "default": "'active'::character varying"
+      },
+      {
+        "name": "rehearsal_count",
+        "type": "integer",
+        "nullable": true,
+        "default": "0"
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": true,
+        "default": "true"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "submitted_songs": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "text",
+        "nullable": false,
+        "default": "'zone-001'::text"
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "title",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "lyrics",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "audio_url",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "notes",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "nullable": false,
+        "default": "'pending'::text"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": true,
+        "default": "now()"
+      }
+    ],
+    "support_tickets": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "organization_id",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "subject",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "message",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "nullable": false,
+        "default": "'open'::text"
+      },
+      {
+        "name": "priority",
+        "type": "text",
+        "nullable": false,
+        "default": "'normal'::text"
+      },
+      {
+        "name": "last_message",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      }
+    ],
+    "user_song_notes": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "song_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "notes",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      }
+    ],
+    "user_statuses": [
+      {
+        "name": "id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "media_url",
+        "type": "text",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "type",
+        "type": "text",
+        "nullable": false,
+        "default": "'image'::text"
+      },
+      {
+        "name": "caption",
+        "type": "text",
+        "nullable": true,
+        "default": null
+      },
+      {
+        "name": "viewers",
+        "type": "ARRAY",
+        "nullable": true,
+        "default": "ARRAY[]::text[]"
+      },
+      {
+        "name": "likes",
+        "type": "ARRAY",
+        "nullable": true,
+        "default": "ARRAY[]::text[]"
+      },
+      {
+        "name": "expires_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": null
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "nullable": false,
+        "default": "now()"
+      }
+    ]
+  },
+  "profStats": {
+    "total": "880",
+    "has_email": "858",
+    "has_phone": "79",
+    "has_kingschat": "764",
+    "has_avatar": "67",
+    "completed": "828"
+  },
+  "catStats": [
+    {
+      "type": "PROGRAM",
+      "count": "29",
+      "sample_names": "GLOBAL COMMUNION SERVICE, Week 1, SONG LIST AND CATEGORIZATION, WEEK 2"
+    },
+    {
+      "type": "SONG",
+      "count": "94",
+      "sample_names": "COMBINED CATEGORY OF ALL HEARD SONGS, New Christmas Songs (not rehearsed), JULY GFAP DAY 2, Teens Voices, New Christmas Songs (rehearsed), DAY 4, PROPOSED MEDLEYS, MARCH HSLHS 2026 BTL, DAY 4 MINISTRATION, Previously ministered christmas songs, DAY 7 MINISTRATION, New Praise Songs from Praise Night 26 (Rehearsed), 2024 New Solo Christmas Songs (Was heard but not approved/comments are available), Previously Heard but not approved Healing Songs, New Praise Songs (Not Rehearsed), New Healing Songs (Not Rehearsed), Previously ministered healing songs, NEW PRAISE SONGS"
+    }
+  ],
+  "settingsKeys": [
+    {
+      "key": "blocked_users_8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+    },
+    {
+      "key": "chat_accepted_8ILWjbl9IbgbuxBK9P23mB6pZBt1_lEuiEFLsf7ZQQrHIkbre"
+    },
+    {
+      "key": "chat_role_group_1788420712912_8ILWjbl9IbgbuxBK9P23mB6pZBt1_272ZOrqRL9S7pUVmwuTIQe0J8I33"
+    },
+    {
+      "key": "chat_role_group_1788420712912_8ILWjbl9IbgbuxBK9P23mB6pZBt1_IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+    },
+    {
+      "key": "chat_role_group_zone_zone-001_Bn6ePxmPiWcYoU54OAgqu5F1O6b2"
+    },
+    {
+      "key": "chat_role_group_zone_zone-001_ekfLifMbIaWsLrTPtbv0apaY1Jz1"
+    },
+    {
+      "key": "chat_role_group_zone_zone-001_h7TSoUvnExa4oaUjJ1dlU7q96XT2"
+    },
+    {
+      "key": "chat_role_group_zone_zone-001_IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+    },
+    {
+      "key": "chat_role_group_zone_zone-001_system"
+    },
+    {
+      "key": "chat_settings_group_1788420712912_8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+    },
+    {
+      "key": "chat_settings_group_zone_zone-001"
+    },
+    {
+      "key": "deleted_chats_8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+    },
+    {
+      "key": "onesignal_4t6ZbclyYWcsaEzRSJiixz2427C2"
+    },
+    {
+      "key": "onesignal_Bn6ePxmPiWcYoU54OAgqu5F1O6b2"
+    },
+    {
+      "key": "onesignal_IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+    },
+    {
+      "key": "profile_meta_4t6ZbclyYWcsaEzRSJiixz2427C2"
+    },
+    {
+      "key": "profile_meta_8ILWjbl9IbgbuxBK9P23mB6pZBt1"
+    },
+    {
+      "key": "profile_meta_IS6DHsWw8Zh1yEzsmpHHq1u255u1"
+    },
+    {
+      "key": "profile_meta_NwhtaD9HKuY441FDysxWVAIGeOr2"
+    },
+    {
+      "key": "song_anno_3d7RHc3GtnSSI2Ml7X1x"
+    },
+    {
+      "key": "song_anno_9"
+    },
+    {
+      "key": "song_anno_yFQHwYBdiMJBX53StTTV"
+    },
+    {
+      "key": "song_anno_zUKopig60nrRwjhOHcab"
+    }
+  ],
+  "mediaRes": [
+    {
+      "type": "AUDIO",
+      "mime_type": "mp3",
+      "count": "7158"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "MP3",
+      "count": "229"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "jpg",
+      "count": "111"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "m4a",
+      "count": "71"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "wav",
+      "count": "55"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "webm",
+      "count": "41"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "png",
+      "count": "40"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": null,
+      "count": "37"
+    },
+    {
+      "type": "VIDEO",
+      "mime_type": "audio/mpeg",
+      "count": "33"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "3gp",
+      "count": "15"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "mp4",
+      "count": "10"
+    },
+    {
+      "type": "VIDEO",
+      "mime_type": null,
+      "count": "8"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "jpeg",
+      "count": "6"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "aac",
+      "count": "6"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "txt",
+      "count": "2"
+    },
+    {
+      "type": "AUDIO",
+      "mime_type": "webp",
+      "count": "1"
+    }
+  ],
+  "callsRes": [
+    {
+      "type": "video",
+      "status": "ended",
+      "count": "5"
+    },
+    {
+      "type": "video",
+      "status": "ringing",
+      "count": "4"
+    },
+    {
+      "type": "voice",
+      "status": "ended",
+      "count": "5"
+    },
+    {
+      "type": "voice",
+      "status": "ringing",
+      "count": "5"
+    }
+  ],
+  "notifRes": [
+    {
+      "type": "call",
+      "priority": "normal",
+      "count": "13"
+    },
+    {
+      "type": "chat",
+      "priority": "normal",
+      "count": "17"
+    }
+  ],
+  "orgSummary": {
+    "total_orgs": "86",
+    "hq_orgs": "1",
+    "with_region": "86",
+    "with_country": "0"
+  }
+}

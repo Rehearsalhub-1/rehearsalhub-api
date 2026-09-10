@@ -23,13 +23,13 @@ export function mergeRawRow<T extends { id: string; rawData?: unknown }>(
     merged.audioUrl ||
     merged.url ||
     merged.fileUrl ||
-    (merged.audioUrls && typeof merged.audioUrls === 'object' ? merged.audioUrls.full : null) ||
+    (merged.audioUrls && typeof merged.audioUrls === 'object' && !Array.isArray(merged.audioUrls) ? merged.audioUrls.full : null) ||
     '';
 
   if (audio) {
     merged.audioFile = audio;
     merged.audioUrl = audio;
-    if (!merged.audioUrls || typeof merged.audioUrls !== 'object') {
+    if (!merged.audioUrls || typeof merged.audioUrls !== 'object' || Array.isArray(merged.audioUrls)) {
       merged.audioUrls = { full: audio };
     } else if (!merged.audioUrls.full) {
       merged.audioUrls.full = audio;

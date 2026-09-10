@@ -28,12 +28,47 @@ try {
 
 const programCategoryOrders: Record<string, string[]> = {};
 
+function resolveAudioForSong(s: any) {
+  const urlsObj: Record<string, string> = {};
+  if (s.audioUrls && typeof s.audioUrls === 'object' && !Array.isArray(s.audioUrls)) {
+    Object.assign(urlsObj, s.audioUrls);
+  }
+  if (s.audio_urls && typeof s.audio_urls === 'object' && !Array.isArray(s.audio_urls)) {
+    Object.assign(urlsObj, s.audio_urls);
+  }
+  if (s.sopranoUrl || s.soprano_url) urlsObj.soprano = s.sopranoUrl || s.soprano_url;
+  if (s.altoUrl || s.alto_url) urlsObj.alto = s.altoUrl || s.alto_url;
+  if (s.tenorUrl || s.tenor_url) urlsObj.tenor = s.tenorUrl || s.tenor_url;
+  if (s.bassUrl || s.bass_url) urlsObj.bass = s.bassUrl || s.bass_url;
+  if (s.leadVocalUrl || s.lead_vocal_url) urlsObj.lead = s.leadVocalUrl || s.lead_vocal_url;
+  if (s.instrumentalUrl || s.instrumental_url) urlsObj.instrumental = s.instrumentalUrl || s.instrumental_url;
+
+  const audio =
+    s.audioFile ||
+    s.audio_file ||
+    s.audioUrl ||
+    s.audio_url ||
+    s.url ||
+    urlsObj.full ||
+    urlsObj.main ||
+    urlsObj.master ||
+    (Object.values(urlsObj).find((v: any) => typeof v === 'string' && v.trim().length > 0) as string) ||
+    '';
+
+  if (audio && !urlsObj.full) {
+    urlsObj.full = audio;
+  }
+
+  return { audioUrl: audio, audioUrls: Object.keys(urlsObj).length > 0 ? urlsObj : null };
+}
+
 function shapeProgram(p: any) {
   const programSongsList = Array.isArray(p.programSongs)
     ? p.programSongs
         .sort((a: any, b: any) => (a.order ?? 9999) - (b.order ?? 9999))
         .map((ps: any, index: number) => {
           const s = ps.song || ps;
+          const { audioUrl, audioUrls } = resolveAudioForSong(s);
           return {
             id: s.id,
             praiseNightId: p.id,
@@ -53,9 +88,9 @@ function shapeProgram(p: any) {
             leadKeyboardist: s.leadKeyboardist || s.lead_keyboardist || '',
             leadGuitarist: s.leadGuitarist || s.lead_guitarist || '',
             bassGuitarist: s.bassGuitarist || s.bass_guitarist || '',
-            audioFile: s.audioFile || s.audio_file || s.audioUrl || s.audio_url || '',
-            audioUrl: s.audioUrl || s.audio_url || s.audioFile || s.audio_file || '',
-            audioUrls: s.audioUrls || s.audio_urls || null,
+            audioFile: audioUrl,
+            audioUrl: audioUrl,
+            audioUrls: audioUrls,
             category: s.category || 'Previously ministered praise songs',
             status: s.status || 'unheard',
             isMaster: Boolean(s.isMaster || s.is_master),

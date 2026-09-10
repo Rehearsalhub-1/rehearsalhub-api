@@ -716,7 +716,11 @@ export async function getMe(profileId: string): Promise<MeResult> {
 
   const hasHq = canonicalMemberships.some((m) => m.hasHqAccess || isHQRole(m.role));
   const hqMembership = canonicalMemberships.find((m) => isHQRole(m.role));
-  const primaryRole = (hqMembership?.role || canonicalMemberships[0]?.role || 'member').toLowerCase();
+  // If hasHq is true (user belongs to an HQ org) but no membership has an explicit HQ role,
+  // still return hq_admin — the isHq flag on the organization takes precedence.
+  const primaryRole = hasHq
+    ? 'hq_admin'
+    : (hqMembership?.role || canonicalMemberships[0]?.role || 'member').toLowerCase();
   const primaryZoneId = hqMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
   const primaryOrg = canonicalMemberships[0]?.organization;
   const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
