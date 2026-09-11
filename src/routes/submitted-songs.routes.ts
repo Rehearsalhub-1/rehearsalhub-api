@@ -11,16 +11,22 @@ function shapeSubmission(s: any) {
   const isApproved = (s.status || '').toLowerCase() === 'approved';
   const isRejected = (s.status || '').toLowerCase() === 'rejected';
   const submitter = s.roleAssignments?.find((r: any) => r.role === 'SUBMITTER' || r.role === 'LEAD_SINGER');
+  const user = submitter?.user || {};
+  const firstName = user.firstName || user.first_name || '';
+  const lastName = user.lastName || user.last_name || '';
+  const userFullName = [firstName, lastName].filter(Boolean).join(' ') || user.name || user.email || s.writer || 'Member';
+  const userEmail = user.email || '';
+  const userAvatar = user.avatarUrl || user.profile_image_url || null;
 
   return {
     id: s.id,
     userId: submitter?.userId || s.groupId || null,
-    userName: s.writer || 'Member',
-    userEmail: '',
-    userAvatar: null,
+    userName: userFullName,
+    userEmail: userEmail,
+    userAvatar: userAvatar,
     title: s.title || 'Untitled Song',
-    artist: s.writer || null,
-    writer: s.writer || null,
+    artist: s.writer || userFullName,
+    writer: s.writer || userFullName,
     lyrics: s.lyrics || '',
     audioUrl: s.audioFile || null,
     audioFile: s.audioFile || null,
@@ -28,7 +34,7 @@ function shapeSubmission(s: any) {
     key: s.key || null,
     tempo: s.tempo || null,
     solfas: s.solfas || null,
-    leadSinger: s.leadSinger || null,
+    leadSinger: s.leadSinger || userFullName,
     conductor: s.conductor || null,
     notes: '',
     rejectNotes: null,
@@ -36,7 +42,14 @@ function shapeSubmission(s: any) {
     organizationId: s.organizationId || 'zone-001',
     zoneId: s.organizationId || 'zone-001',
     zoneName: s.organization?.name || s.organizationId || null,
-    submittedBy: { name: s.writer || 'Member' },
+    submittedBy: {
+      id: submitter?.userId || null,
+      name: userFullName,
+      userName: userFullName,
+      email: userEmail,
+      avatarUrl: userAvatar,
+    },
+    submittedByEmail: userEmail,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };
@@ -66,7 +79,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const songs = await prisma.song.findMany({
       where,
-      include: { organization: true, roleAssignments: true },
+      include: { organization: true, roleAssignments: { include: { user: true } } },
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
@@ -107,7 +120,7 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
           },
         ],
       },
-      include: { organization: true, roleAssignments: true },
+      include: { organization: true, roleAssignments: { include: { user: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });

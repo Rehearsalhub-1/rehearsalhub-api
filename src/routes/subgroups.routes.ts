@@ -315,6 +315,108 @@ router.post('/:id/reject', requireAuth, requireTenantAdmin, async (req: Request,
   }
 });
 
+function shapeSubgroupMember(m: any) {
+  const user = m.user || m.profile || {};
+  const firstName = user.firstName || user.first_name || '';
+  const lastName = user.lastName || user.last_name || '';
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || user.name || user.email || 'Singer';
+  const email = user.email || user.userEmail || '';
+  const avatar = user.avatarUrl || user.avatar || user.profile_image_url || null;
+  const churchName = m.group?.name || m.churchName || m.church || null;
+  const churchId = m.groupId || m.churchId || null;
+  const voicePart = m.voicePart || user.voicePart || user.designation || null;
+
+  return {
+    id: m.id,
+    membershipId: m.id,
+    userId: m.userId || user.id || m.id,
+    name: fullName,
+    userName: fullName,
+    displayName: fullName,
+    firstName: firstName || fullName.split(' ')[0] || 'Singer',
+    lastName: lastName || fullName.split(' ').slice(1).join(' ') || '',
+    first_name: firstName || fullName.split(' ')[0] || 'Singer',
+    last_name: lastName || fullName.split(' ').slice(1).join(' ') || '',
+    email,
+    userEmail: email,
+    phone: user.phone || null,
+    avatarUrl: avatar,
+    userAvatar: avatar,
+    profile_image_url: avatar,
+    kingschatId: user.kingschatId || null,
+    organizationId: m.organizationId,
+    zoneId: m.organizationId,
+    zoneName: m.organization?.name || m.organizationId,
+    groupId: churchId,
+    churchId,
+    church: churchName,
+    churchName,
+    role: m.role || 'MEMBER',
+    status: m.status || 'ACTIVE',
+    voicePart,
+    designation: voicePart,
+    joinedAt: m.joinedAt || m.createdAt || new Date(),
+    profile: {
+      ...user,
+      firstName: firstName || fullName.split(' ')[0] || 'Singer',
+      lastName: lastName || fullName.split(' ').slice(1).join(' ') || '',
+      first_name: firstName || fullName.split(' ')[0] || 'Singer',
+      last_name: lastName || fullName.split(' ').slice(1).join(' ') || '',
+      email,
+      avatarUrl: avatar,
+    },
+    user,
+    organization: m.organization,
+    group: m.group,
+  };
+}
+
+/** GET /subgroups/members — List members via query param ?subGroupId=... */
+router.get('/members', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { subGroupId, groupId } = req.query as Record<string, string>;
+    const targetGroupId = subGroupId || groupId;
+    if (!targetGroupId) {
+      return res.status(400).json({ success: false, error: 'subGroupId is required' });
+    }
+    const memberships = await prisma.membership.findMany({
+      where: { groupId: targetGroupId },
+      include: { user: true, organization: true, group: true },
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      count: memberships.length,
+      data: memberships.map(shapeSubgroupMember),
+    });
+  } catch (err) {
+    console.error('[subgroups/members:GET]', err);
+    res.status(500).json({ success: false, error: 'Failed to load group members' });
+  }
+});
+
+/** GET /subgroups/:id/members — List members of a church / subgroup */
+router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const memberships = await prisma.membership.findMany({
+      where: { groupId: id },
+      include: { user: true, organization: true, group: true },
+      orderBy: { joinedAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      count: memberships.length,
+      data: memberships.map(shapeSubgroupMember),
+    });
+  } catch (err) {
+    console.error('[subgroups/:id/members]', err);
+    res.status(500).json({ success: false, error: 'Failed to load group members' });
+  }
+});
+
 /** POST /subgroups/members — Add member to subgroup with body { subGroupId, userId } */
 router.post('/members', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {

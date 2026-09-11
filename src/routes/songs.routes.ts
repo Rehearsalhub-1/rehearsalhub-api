@@ -86,9 +86,20 @@ function shapeSong(song: any) {
   const resolvedConductorPerson = isConductorGuideText(rawConductor) ? '' : rawConductor;
   const resolvedSolfa = isGuideInSolfas ? '' : rawSolfas;
 
+  const leadSingerRole = song.roleAssignments?.find(
+    (r: any) => r.role === 'LEAD_SINGER' || r.role === 'lead_singer'
+  );
+  let resolvedLeadSinger = song.leadSinger || '';
+  if (leadSingerRole?.user) {
+    const u = leadSingerRole.user;
+    const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email;
+    if (name) resolvedLeadSinger = name;
+  }
+  if (!resolvedLeadSinger) resolvedLeadSinger = 'Loveworld Singers';
+
   const historySummary = programName
-    ? `**Ministered at ${programName}**\n\n- **Lead Singer:** ${song.leadSinger || 'Loveworld Singers'}\n- **Conductor:** ${resolvedConductorPerson || '—'}\n- **Key:** ${song.key || '—'} · **Tempo:** ${song.tempo || '—'}\n- **Rehearsal Count:** x${song.rehearsalCount || 0}`
-    : (song.createdAt ? `**Catalog Entry**\n\n- **Lead Singer:** ${song.leadSinger || 'Loveworld Singers'}\n- **Key:** ${song.key || '—'}` : '');
+    ? `**Ministered at ${programName}**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Conductor:** ${resolvedConductorPerson || '—'}\n- **Key:** ${song.key || '—'} · **Tempo:** ${song.tempo || '—'}\n- **Rehearsal Count:** x${song.rehearsalCount || 0}`
+    : (song.createdAt ? `**Catalog Entry**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Key:** ${song.key || '—'}` : '');
 
   return {
     id: song.id,
@@ -108,7 +119,7 @@ function shapeSong(song: any) {
     solfas: resolvedSolfa,
     solfa: resolvedSolfa,
     writer: song.writer || '',
-    leadSinger: song.leadSinger || 'Loveworld Singers',
+    leadSinger: resolvedLeadSinger,
     conductor: resolvedConductorPerson,
     conductorGuide: resolvedConductorGuide,
     drummer: song.drummer || '',
@@ -168,6 +179,7 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
       prisma.song.findMany({
         where,
         include: {
+          roleAssignments: { include: { user: true } },
           programSongs: {
             include: {
               program: {
@@ -274,7 +286,13 @@ const getSongsHandler = async (req: Request, res: Response) => {
         where: { id: targetProgramId },
         include: {
           programSongs: {
-            include: { song: true },
+            include: {
+              song: {
+                include: {
+                  roleAssignments: { include: { user: true } },
+                },
+              },
+            },
             orderBy: { order: 'asc' },
           },
         },
@@ -303,6 +321,9 @@ const getSongsHandler = async (req: Request, res: Response) => {
 
       songs = await prisma.song.findMany({
         where,
+        include: {
+          roleAssignments: { include: { user: true } },
+        },
         orderBy: { title: 'asc' },
       });
     }

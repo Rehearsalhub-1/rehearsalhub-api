@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -181,6 +181,8 @@ app.use('/categories', categoriesRouter);
 app.use('/submitted-songs', submittedSongsRouter);
 app.use('/submissions', submittedSongsRouter);
 app.use('/songs', songsRouter);
+app.use('/praise-night-songs', songsRouter);
+app.use('/praiseNightSongs', songsRouter);
 app.use('/master', masterSongsRouter);
 app.use('/master-songs', masterSongsRouter);
 app.use('/ministered', masterSongsRouter);

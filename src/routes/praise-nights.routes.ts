@@ -69,6 +69,18 @@ function shapeProgram(p: any) {
         .map((ps: any, index: number) => {
           const s = ps.song || ps;
           const { audioUrl, audioUrls } = resolveAudioForSong(s);
+
+          const leadSingerRole = s.roleAssignments?.find(
+            (r: any) => r.role === 'LEAD_SINGER' || r.role === 'lead_singer'
+          );
+          let resolvedLeadSinger = s.leadSinger || s.lead_singer || '';
+          if (leadSingerRole?.user) {
+            const u = leadSingerRole.user;
+            const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email;
+            if (name) resolvedLeadSinger = name;
+          }
+          if (!resolvedLeadSinger) resolvedLeadSinger = 'Loveworld Singers';
+
           return {
             id: s.id,
             praiseNightId: p.id,
@@ -81,7 +93,7 @@ function shapeProgram(p: any) {
             solfas: s.solfas || '',
             solfa: s.solfas || '',
             writer: s.writer || '',
-            leadSinger: s.leadSinger || s.lead_singer || 'Loveworld Singers',
+            leadSinger: resolvedLeadSinger,
             conductor: s.conductor || '',
             conductorGuide: s.conductor || '',
             drummer: s.drummer || '',
@@ -173,7 +185,13 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       where,
       include: {
         programSongs: {
-          include: { song: true },
+          include: {
+            song: {
+              include: {
+                roleAssignments: { include: { user: true } },
+              },
+            },
+          },
           orderBy: { order: 'asc' },
         },
       },
@@ -194,7 +212,13 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
       where: { id: req.params.id },
       include: {
         programSongs: {
-          include: { song: true },
+          include: {
+            song: {
+              include: {
+                roleAssignments: { include: { user: true } },
+              },
+            },
+          },
           orderBy: { order: 'asc' },
         },
       },
@@ -244,7 +268,13 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
       },
       include: {
         programSongs: {
-          include: { song: true },
+          include: {
+            song: {
+              include: {
+                roleAssignments: { include: { user: true } },
+              },
+            },
+          },
         },
       },
     });
@@ -327,7 +357,13 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       },
       include: {
         programSongs: {
-          include: { song: true },
+          include: {
+            song: {
+              include: {
+                roleAssignments: { include: { user: true } },
+              },
+            },
+          },
           orderBy: { order: 'asc' },
         },
       },
