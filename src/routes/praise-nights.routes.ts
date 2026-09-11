@@ -118,15 +118,29 @@ function shapeProgram(p: any) {
 
   const heardCount = programSongsList.filter((s: any) => s.status === 'heard').length;
 
+  const rawStatus = (p.status || p.category || '').toLowerCase().trim();
+  const rawCat = (p.category || '').toLowerCase().trim();
+  const isActive = Boolean(p.isActive || rawStatus === 'active' || rawStatus === 'ongoing' || rawCat === 'ongoing');
+  const isArchived = Boolean(p.isArchived || rawStatus === 'archived' || rawStatus === 'archive' || rawStatus === 'completed' || rawCat === 'archive');
+  const isDraft = rawStatus === 'draft' || rawCat === 'draft';
+  const resolvedStage: 'ongoing' | 'archive' | 'draft' | 'pre-rehearsal' = isActive
+    ? 'ongoing'
+    : isArchived
+    ? 'archive'
+    : isDraft
+    ? 'draft'
+    : 'pre-rehearsal';
+
   return {
     id: p.id,
     name: p.name,
     date: p.date,
-    category: p.category || 'pre-rehearsal',
-    status: p.status || p.category || 'pre-rehearsal',
+    category: resolvedStage,
+    status: resolvedStage,
+    stage: resolvedStage,
     pageCategory: p.pageCategory || p.page_category || programIdToPageCategory[p.id] || null,
-    isActive: typeof p.isActive === 'boolean' ? p.isActive : p.category === 'ongoing',
-    isArchived: typeof p.isArchived === 'boolean' ? p.isArchived : p.category === 'archive',
+    isActive,
+    isArchived,
     organizationId: p.organizationId || p.organization_id || null,
     groupId: p.groupId || p.group_id || null,
     location: p.location || null,
@@ -320,10 +334,26 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       return;
     }
 
-    const nextStatus = status || (category ? category : existing.status);
-    const nextCategory = category || (status ? status : existing.category);
-    const nextIsActive = typeof isActive === 'boolean' ? isActive : nextCategory === 'ongoing';
-    const nextIsArchived = typeof isArchived === 'boolean' ? isArchived : nextCategory === 'archive';
+    const candidateStage = (category || status || '').toLowerCase().trim();
+    const isOngoing = candidateStage === 'ongoing' || candidateStage === 'active' || isActive === true;
+    const isArchive = candidateStage === 'archive' || candidateStage === 'archived' || candidateStage === 'completed' || isArchived === true;
+    const isDraft = candidateStage === 'draft';
+    const isPreReh = candidateStage === 'pre-rehearsal' || candidateStage === 'pre_rehearsal';
+
+    const nextIsActive = typeof isActive === 'boolean' ? isActive : isOngoing;
+    const nextIsArchived = typeof isArchived === 'boolean' ? isArchived : isArchive;
+    const nextStage = nextIsActive
+      ? 'ongoing'
+      : nextIsArchived
+      ? 'archive'
+      : isDraft
+      ? 'draft'
+      : isPreReh
+      ? 'pre-rehearsal'
+      : (status || category || existing.status || existing.category || 'pre-rehearsal');
+
+    const nextStatus = nextStage;
+    const nextCategory = nextStage;
 
     if (Array.isArray(req.body.songIds)) {
       await prisma.programSong.deleteMany({ where: { programId: id } });

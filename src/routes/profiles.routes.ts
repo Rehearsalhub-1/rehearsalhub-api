@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
+import { canManageTenant } from '../auth/permissions';
 import { hashPassword } from '../auth/password';
 import { broadcast } from '../ws/wsServer';
 
@@ -75,15 +76,19 @@ function formatUserProfile(u: any, metaInput?: any) {
     canSeeArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
     canAccessPreRehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
     can_access_pre_rehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
+    canAccessOngoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
+    can_access_ongoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
     hiddenFeatures: meta.hiddenFeatures || {
       hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
       hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
       hideAnnotations: !(meta.canAnnotate ?? false),
+      hideOngoing: !(meta.can_access_ongoing ?? true),
     },
     hidden_features: meta.hiddenFeatures || {
       hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
       hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
       hideAnnotations: !(meta.canAnnotate ?? false),
+      hideOngoing: !(meta.can_access_ongoing ?? true),
     },
     memberships: activeMemberships.map((m: any) => ({
       id: `${m.userId}_${m.organizationId}`,
@@ -394,8 +399,9 @@ router.patch('/:userId', requireAuth, async (req, res) => {
 
   const isOwner = auth?.userId === userId;
   const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin' || auth?.role === 'super_admin';
+  const isAdmin = isHqAdmin || canManageTenant(auth?.role);
 
-  if (!isOwner && !isHqAdmin) {
+  if (!isOwner && !isAdmin) {
     res.status(403).json({ success: false, error: 'Forbidden' });
     return;
   }
@@ -547,9 +553,10 @@ router.post('/:userId/password', requireAuth, async (req, res) => {
     const { userId } = req.params;
     const auth = res.locals.auth;
     const isOwner = auth?.userId === userId;
-    const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin';
+    const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin' || auth?.role === 'super_admin';
+    const isAdmin = isHqAdmin || canManageTenant(auth?.role);
 
-    if (!isOwner && !isHqAdmin) {
+    if (!isOwner && !isAdmin) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }

@@ -150,7 +150,21 @@ const handleCreateNotification = async (req: Request, res: Response) => {
     }
 
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const orgId = targetOrgId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
+    const reqOrgId = targetOrgId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
+
+    // Validate foreign keys to avoid P2003 constraint violations
+    let validOrgId: string | null = null;
+    if (reqOrgId && reqOrgId !== 'global' && reqOrgId !== 'all') {
+      const org = await prisma.organization.findUnique({ where: { id: reqOrgId }, select: { id: true } });
+      if (org) validOrgId = org.id;
+    }
+
+    let validSenderId: string | null = null;
+    const sId = auth.userId || auth.id;
+    if (sId) {
+      const sUser = await prisma.user.findUnique({ where: { id: sId }, select: { id: true } });
+      if (sUser) validSenderId = sUser.id;
+    }
 
     const notif = await prisma.notification.create({
       data: {
@@ -161,8 +175,8 @@ const handleCreateNotification = async (req: Request, res: Response) => {
         category,
         priority,
         actionUrl: actionUrl || null,
-        organizationId: orgId,
-        senderId: auth.userId || auth.id,
+        organizationId: validOrgId,
+        senderId: validSenderId,
       },
     });
 
@@ -173,6 +187,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
       recipientUserIds = [targetUserId];
       await prisma.notificationDelivery.create({
         data: {
+          id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${targetUserId}`,
           notificationId: notifId,
           userId: targetUserId,
           isRead: false,
@@ -190,6 +205,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
       if (recipientUserIds.length > 0) {
         await prisma.notificationDelivery.createMany({
           data: recipientUserIds.map((uid) => ({
+            id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${uid}`,
             notificationId: notifId,
             userId: uid,
             isRead: false,
@@ -198,7 +214,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
         });
       }
       broadcast('notifications', `church_${targetChurchId}`, shapeNotification(notif, false));
-    } else if (targetOrgId) {
+    } else if (targetOrgId && targetOrgId !== 'global' && targetOrgId !== 'all') {
       // Zone-scoped broadcast
       const zoneMembers = await prisma.membership.findMany({
         where: { organizationId: targetOrgId },
@@ -209,6 +225,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
       if (recipientUserIds.length > 0) {
         await prisma.notificationDelivery.createMany({
           data: recipientUserIds.map((uid) => ({
+            id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${uid}`,
             notificationId: notifId,
             userId: uid,
             isRead: false,
@@ -228,6 +245,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
       if (recipientUserIds.length > 0) {
         await prisma.notificationDelivery.createMany({
           data: recipientUserIds.map((uid) => ({
+            id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${uid}`,
             notificationId: notifId,
             userId: uid,
             isRead: false,
@@ -235,7 +253,7 @@ const handleCreateNotification = async (req: Request, res: Response) => {
           skipDuplicates: true,
         });
       }
-      broadcast('notifications', orgId, shapeNotification(notif, false));
+      broadcast('notifications', validOrgId || 'global', shapeNotification(notif, false));
     }
 
     // Dispatch Expo push notification

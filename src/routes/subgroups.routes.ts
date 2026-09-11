@@ -111,19 +111,43 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
       include: { user: true },
     });
 
-    const members = memberships.map((m) => ({
-      id: m.id,
-      userId: m.userId,
-      email: m.user.email,
-      name: [m.user.firstName, m.user.lastName].filter(Boolean).join(' ') || m.user.email || 'Member',
-      firstName: m.user.firstName,
-      lastName: m.user.lastName,
-      avatarUrl: m.user.avatarUrl,
-      role: m.role,
-      status: m.status,
-      voicePart: m.voicePart,
-      joinedAt: m.joinedAt,
-    }));
+    const metaKeys = memberships.map((m) => `profile_meta_${m.userId}`);
+    const metaSettings = await prisma.setting.findMany({ where: { key: { in: metaKeys } } });
+    const metaMap = new Map<string, any>();
+    metaSettings.forEach((s) => metaMap.set(s.key.replace('profile_meta_', ''), s.value));
+
+    const members = memberships.map((m) => {
+      const meta: any = metaMap.get(m.userId) || {};
+      const rawRole = (meta?.role || m.role || 'MEMBER').toLowerCase();
+      const isAdmin = rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'group_admin';
+      const resolvedRole = isAdmin ? 'church_admin' : 'member';
+
+      return {
+        id: m.id,
+        userId: m.userId,
+        email: m.user.email,
+        name: [m.user.firstName, m.user.lastName].filter(Boolean).join(' ') || m.user.email || 'Member',
+        firstName: m.user.firstName,
+        lastName: m.user.lastName,
+        avatarUrl: m.user.avatarUrl,
+        role: resolvedRole,
+        rawRole: meta?.role || m.role,
+        isAdmin,
+        status: m.status,
+        voicePart: m.voicePart,
+        joinedAt: m.joinedAt,
+        canAnnotate: Boolean(meta?.canAnnotate),
+        can_annotate: Boolean(meta?.canAnnotate),
+        canAccessArchive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+        can_access_archive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+        canSeeArchive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+        canAccessPreRehearsal: Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
+        can_access_pre_rehearsal: Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
+        canAccessOngoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
+        can_access_ongoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
+        hiddenFeatures: meta?.hiddenFeatures,
+      };
+    });
 
     res.json({ success: true, count: members.length, data: members });
   } catch (err) {
@@ -625,8 +649,22 @@ router.patch('/praise-nights/:id', requireAuth, requireTenantAdmin, async (req: 
     const data: any = {};
     if (body.name !== undefined || body.title !== undefined) data.name = body.name || body.title;
     if (body.date !== undefined) data.date = body.date;
-    if (body.status !== undefined) data.status = body.status;
-    if (body.category !== undefined) data.category = body.category;
+    if (body.status !== undefined || body.category !== undefined || body.isActive !== undefined || body.isArchived !== undefined) {
+      const candidateStage = (body.category || body.status || '').toLowerCase().trim();
+      const isOngoing = candidateStage === 'ongoing' || candidateStage === 'active' || body.isActive === true;
+      const isArchive = candidateStage === 'archive' || candidateStage === 'archived' || candidateStage === 'completed' || body.isArchived === true;
+      const isDraft = candidateStage === 'draft';
+      const isPreReh = candidateStage === 'pre-rehearsal' || candidateStage === 'pre_rehearsal';
+
+      const nextIsActive = typeof body.isActive === 'boolean' ? body.isActive : isOngoing;
+      const nextIsArchived = typeof body.isArchived === 'boolean' ? body.isArchived : isArchive;
+      const nextStage = nextIsActive ? 'ongoing' : nextIsArchived ? 'archive' : isDraft ? 'draft' : isPreReh ? 'pre-rehearsal' : (body.status || body.category || 'pre-rehearsal');
+
+      data.status = nextStage;
+      data.category = nextStage;
+      data.isActive = nextIsActive;
+      data.isArchived = nextIsArchived;
+    }
     if (body.location !== undefined) data.location = body.location;
     if (body.bannerImage !== undefined) data.bannerImage = body.bannerImage;
 
@@ -740,12 +778,26 @@ router.get('/praise-nights', requireAuth, async (req: Request, res: Response) =>
     res.json({
       success: true,
       count: programs.length,
-      data: programs.map((p) => ({
-        ...p,
-        subGroupId: p.groupId,
-        songs: p.programSongs.map((ps) => ps.song),
-        songCount: p.programSongs.length,
-      })),
+      data: programs.map((p) => {
+        const rawStatus = (p.status || p.category || '').toLowerCase().trim();
+        const rawCat = (p.category || '').toLowerCase().trim();
+        const isActive = Boolean(p.isActive || rawStatus === 'active' || rawStatus === 'ongoing' || rawCat === 'ongoing');
+        const isArchived = Boolean(p.isArchived || rawStatus === 'archived' || rawStatus === 'archive' || rawStatus === 'completed' || rawCat === 'archive');
+        const isDraft = rawStatus === 'draft' || rawCat === 'draft';
+        const resolvedStage = isActive ? 'ongoing' : isArchived ? 'archive' : isDraft ? 'draft' : 'pre-rehearsal';
+
+        return {
+          ...p,
+          subGroupId: p.groupId,
+          status: resolvedStage,
+          category: resolvedStage,
+          stage: resolvedStage,
+          isActive,
+          isArchived,
+          songs: p.programSongs.map((ps) => ps.song),
+          songCount: p.programSongs.length,
+        };
+      }),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to load subgroup programs' });

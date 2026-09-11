@@ -621,6 +621,8 @@ export type MeResult = AuthUser & {
   can_access_pre_rehearsal?: boolean;
   canAnnotate?: boolean;
   can_annotate?: boolean;
+  canAccessOngoing?: boolean;
+  can_access_ongoing?: boolean;
   hiddenFeatures?: Record<string, boolean>;
   hidden_features?: Record<string, boolean>;
   raw?: Record<string, any>;
@@ -739,6 +741,7 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const canAccessArchive = meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? true;
   const canAccessPreRehearsal = meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? true;
   const canAnnotate = meta.canAnnotate ?? true;
+  const canAccessOngoing = meta.can_access_ongoing ?? meta.canAccessOngoing ?? true;
 
   return {
     id: user.id,
@@ -782,17 +785,21 @@ export async function getMe(profileId: string): Promise<MeResult> {
     can_access_archive: canAccessArchive,
     canAccessPreRehearsal,
     can_access_pre_rehearsal: canAccessPreRehearsal,
+    canAccessOngoing,
+    can_access_ongoing: canAccessOngoing,
     canAnnotate,
     can_annotate: canAnnotate,
     hiddenFeatures: meta.hiddenFeatures ?? {
       hideArchives: !canAccessArchive,
       hidePreRehearsal: !canAccessPreRehearsal,
       hideAnnotations: !canAnnotate,
+      hideOngoing: !canAccessOngoing,
     },
     hidden_features: meta.hiddenFeatures ?? {
       hideArchives: !canAccessArchive,
       hidePreRehearsal: !canAccessPreRehearsal,
       hideAnnotations: !canAnnotate,
+      hideOngoing: !canAccessOngoing,
     },
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },

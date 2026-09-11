@@ -13,29 +13,60 @@ function requireMasterEditor(req: Request, res: Response, next: any): void {
   next();
 }
 
-// GET /master-songs — Returns the 822 official Public Master Songs
-router.get('/', async (_req: Request, res: Response) => {
+// GET /master-songs — Returns official Public Master Songs with optional pagination & search
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const songs = await prisma.song.findMany({
-      where: {
-        isMaster: true,
-      },
-      include: {
-        programSongs: {
-          include: {
-            program: {
-              select: { id: true, name: true, bannerImage: true }
-            }
-          },
-          take: 1,
-        }
-      },
-      orderBy: { title: 'asc' },
-    });
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
+    const limitParam = req.query.limit ? parseInt(req.query.limit as string) : (req.query.page ? 50 : 0);
+    const limit = limitParam > 0 ? Math.min(limitParam, 500) : undefined;
+    const skip = limit && hasPagination ? (page - 1) * limit : undefined;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    const where: any = { isMaster: true };
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { writer: { contains: search, mode: 'insensitive' } },
+        { leadSinger: { contains: search, mode: 'insensitive' } },
+        { category: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, songs] = await Promise.all([
+      hasPagination ? prisma.song.count({ where }) : Promise.resolve(0),
+      prisma.song.findMany({
+        where,
+        include: {
+          roleAssignments: { include: { user: true } },
+          programSongs: {
+            include: {
+              program: {
+                select: { id: true, name: true, bannerImage: true }
+              }
+            },
+            take: 1,
+          }
+        },
+        orderBy: { title: 'asc' },
+        ...(skip !== undefined ? { skip } : {}),
+        ...(limit !== undefined ? { take: limit } : {}),
+      }),
+    ]);
 
     const formattedSongs = songs.map((s: any) => {
       const primaryProgram = s.programSongs?.[0]?.program;
       const progName = primaryProgram?.name || null;
+      const leadSingerRole = s.roleAssignments?.find(
+        (r: any) => r.role === 'LEAD_SINGER' || r.role === 'lead_singer'
+      );
+      let resolvedLeadSinger = s.leadSinger || null;
+      if (leadSingerRole?.user) {
+        const u = leadSingerRole.user;
+        const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email;
+        if (name) resolvedLeadSinger = name;
+      }
+
       return {
         id: s.id,
         programId: primaryProgram?.id || null,
@@ -53,7 +84,7 @@ router.get('/', async (_req: Request, res: Response) => {
         audioFile: s.audioFile || null,
         audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
         conductor: s.conductor || null,
-        leadSinger: s.leadSinger || null,
+        leadSinger: resolvedLeadSinger,
         drummer: s.drummer || null,
         bassGuitarist: s.bassGuitarist || null,
         leadKeyboardist: s.leadKeyboardist || null,
@@ -67,7 +98,15 @@ router.get('/', async (_req: Request, res: Response) => {
       };
     });
 
-    res.json({ success: true, count: formattedSongs.length, data: formattedSongs });
+    res.json({
+      success: true,
+      count: formattedSongs.length,
+      total: hasPagination ? total : formattedSongs.length,
+      page: hasPagination ? page : 1,
+      limit: limit || formattedSongs.length,
+      hasMore: hasPagination ? (skip || 0) + formattedSongs.length < total : false,
+      data: formattedSongs,
+    });
   } catch (error) {
     console.error('Error fetching master songs:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch master songs' });

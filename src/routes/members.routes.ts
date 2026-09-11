@@ -5,7 +5,19 @@ import { fetchAllUserMemberships } from '../auth/auth.service';
 
 const router = Router();
 
-function shapeMember(m: any) {
+async function getProfileMetas(userIds: string[]) {
+  if (!userIds.length) return new Map<string, any>();
+  const keys = userIds.map((id) => `profile_meta_${id}`);
+  const rows = await prisma.setting.findMany({ where: { key: { in: keys } } });
+  const map = new Map<string, any>();
+  for (const r of rows) {
+    const uId = r.key.replace('profile_meta_', '');
+    map.set(uId, r.value);
+  }
+  return map;
+}
+
+function shapeMember(m: any, meta: any = {}) {
   const user = m.user || m.profile || {};
   const firstName = user.firstName || user.first_name || '';
   const lastName = user.lastName || user.last_name || '';
@@ -15,6 +27,14 @@ function shapeMember(m: any) {
   const churchName = m.group?.name || m.churchName || m.church || null;
   const churchId = m.groupId || m.churchId || null;
   const voicePart = m.voicePart || user.voicePart || user.designation || null;
+
+  const rawRole = (meta?.role || m.role || 'MEMBER').toLowerCase();
+  const isAdmin = rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'org_admin' || rawRole === 'group_admin';
+  const resolvedRole = isAdmin
+    ? (rawRole.includes('church') || rawRole === 'group_admin' ? 'church_admin'
+      : rawRole.includes('hq') ? 'hq_admin'
+      : 'zone_admin')
+    : 'member';
 
   return {
     id: m.id,
@@ -43,11 +63,28 @@ function shapeMember(m: any) {
     churchId,
     church: churchName,
     churchName,
-    role: m.role || 'MEMBER',
+    role: resolvedRole,
+    rawRole: meta?.role || m.role,
+    isAdmin,
     status: m.status || 'ACTIVE',
     voicePart,
     designation: voicePart,
     joinedAt: m.joinedAt || m.createdAt || new Date(),
+    canAnnotate: Boolean(meta?.canAnnotate),
+    can_annotate: Boolean(meta?.canAnnotate),
+    canAccessArchive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+    can_access_archive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+    canSeeArchive: Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+    canAccessPreRehearsal: Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
+    can_access_pre_rehearsal: Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
+    canAccessOngoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
+    can_access_ongoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
+    hiddenFeatures: meta?.hiddenFeatures || {
+      hideArchives: !Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
+      hidePreRehearsal: !Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
+      hideAnnotations: !Boolean(meta?.canAnnotate),
+      hideOngoing: !(meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false),
+    },
     profile: {
       ...user,
       firstName: firstName || fullName.split(' ')[0] || 'Singer',
@@ -56,6 +93,7 @@ function shapeMember(m: any) {
       last_name: lastName || fullName.split(' ').slice(1).join(' ') || '',
       email,
       avatarUrl: avatar,
+      role: resolvedRole,
     },
     user,
     organization: m.organization,
@@ -102,8 +140,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       orderBy: { joinedAt: 'desc' },
     });
 
+    const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
     const data = memberships.map((m) => {
-      const shaped = shapeMember(m);
+      const shaped = shapeMember(m, metaMap.get(m.userId));
       return {
         ...shaped,
         churchId: m.groupId || null,
@@ -123,11 +162,12 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
     const memberships = await fetchAllUserMemberships(userId);
+    const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
 
-    const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map(shapeMember);
-    const hqMembers = memberships.filter((m) => m.hasHqAccess).map(shapeMember);
+    const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map((m) => shapeMember(m, metaMap.get(m.userId)));
+    const hqMembers = memberships.filter((m) => m.hasHqAccess).map((m) => shapeMember(m, metaMap.get(m.userId)));
 
-    res.json({ success: true, data: { zoneMembers, hqMembers, memberships: memberships.map(shapeMember) } });
+    res.json({ success: true, data: { zoneMembers, hqMembers, memberships: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) } });
   } catch (err) {
     console.error('[members/mine]', err);
     res.status(500).json({ success: false, error: 'Failed to load memberships' });
@@ -144,11 +184,12 @@ router.get('/by-user/:userId', requireAuth, async (req: Request, res: Response) 
     if (!isSelf && !isAdmin) return res.status(403).json({ success: false, error: 'Forbidden' });
 
     const memberships = await fetchAllUserMemberships(userId);
+    const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
 
-    const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map(shapeMember);
-    const hqMembers = memberships.filter((m) => m.hasHqAccess).map(shapeMember);
+    const zoneMembers = memberships.filter((m) => !m.hasHqAccess).map((m) => shapeMember(m, metaMap.get(m.userId)));
+    const hqMembers = memberships.filter((m) => m.hasHqAccess).map((m) => shapeMember(m, metaMap.get(m.userId)));
 
-    res.json({ success: true, data: { zoneMembers, hqMembers, memberships: memberships.map(shapeMember) } });
+    res.json({ success: true, data: { zoneMembers, hqMembers, memberships: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) } });
   } catch (err) {
     console.error('[members/by-user]', err);
     res.status(500).json({ success: false, error: 'Failed to load user memberships' });
@@ -174,7 +215,8 @@ router.get('/hq', requireAuth, async (req: Request, res: Response) => {
       take: 200,
     });
 
-    res.json({ success: true, count: memberships.length, data: memberships.map(shapeMember) });
+    const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
+    res.json({ success: true, count: memberships.length, data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) });
   } catch (err) {
     console.error('[members/hq]', err);
     res.status(500).json({ success: false, error: 'Failed to load HQ members' });
@@ -197,7 +239,8 @@ router.get('/zone/:zoneId', requireAuth, async (req: Request, res: Response) => 
       take: 200,
     });
 
-    res.json({ success: true, count: memberships.length, data: memberships.map(shapeMember) });
+    const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
+    res.json({ success: true, count: memberships.length, data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) });
   } catch (err) {
     console.error('[members/zone]', err);
     res.status(500).json({ success: false, error: 'Failed to load zone members' });
