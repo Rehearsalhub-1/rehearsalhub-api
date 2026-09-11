@@ -831,11 +831,13 @@ export async function getKingschatProfiles(
   kingschatId: string | null,
   email: string | null,
   username: string | null,
-  selectedEmail: string | null
+  selectedEmail: string | null,
+  phone: string | null = null,
 ): Promise<any[]> {
   const orConditions: any[] = [];
   if (kingschatId) {
     orConditions.push({ kingschatId: { equals: kingschatId, mode: 'insensitive' } });
+    orConditions.push({ id: kingschatId });
   }
   if (email) {
     orConditions.push({ email: { equals: email.toLowerCase().trim(), mode: 'insensitive' } });
@@ -844,7 +846,14 @@ export async function getKingschatProfiles(
     orConditions.push({ email: { equals: selectedEmail.toLowerCase().trim(), mode: 'insensitive' } });
   }
   if (username) {
+    orConditions.push({ kingschatId: { equals: username.toLowerCase().trim(), mode: 'insensitive' } });
     orConditions.push({ email: { startsWith: `${username.toLowerCase().trim()}@`, mode: 'insensitive' } });
+  }
+  if (phone) {
+    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    if (cleanPhone.length >= 7) {
+      orConditions.push({ phone: { contains: cleanPhone.slice(-8) } });
+    }
   }
 
   if (orConditions.length === 0) return [];

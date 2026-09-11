@@ -311,7 +311,7 @@ const handleKingsChatLogin = async (req: any, res: any) => {
 
     // 2. If profile data still missing and no selectedEmail, verify with KingsChat Developer API
     const KINGSCHAT_API_KEY = process.env.KINGSCHAT_API_KEY || '';
-    if (KINGSCHAT_API_KEY && (!kcUserId || !verifiedProfileData) && !selectedEmail) {
+    if (KINGSCHAT_API_KEY && !selectedEmail) {
       const p = await fetchKingsChatProfileNative(accessToken, KINGSCHAT_API_KEY);
       if (p) {
         kcUserId = p.id || p.userId || p.user_id || p.kingschatId || p.kingsChatId || kcUserId;
@@ -332,6 +332,7 @@ const handleKingsChatLogin = async (req: any, res: any) => {
       verifiedEmail,
       verifiedProfileData?.username ? String(verifiedProfileData.username).toLowerCase().trim() : null,
       selectedEmail || null,
+      (verifiedProfileData?.phone || verifiedProfileData?.phone_number || null),
     );
 
     if (matchingProfiles.length === 0) {

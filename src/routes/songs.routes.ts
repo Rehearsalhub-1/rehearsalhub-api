@@ -141,6 +141,8 @@ function shapeSong(song: any) {
     organizationId: song.organizationId || null,
     groupId: song.groupId || null,
     history: historySummary,
+    isActive: song.isActive !== undefined ? Boolean(song.isActive) : (song.status === 'live'),
+    isLive: Boolean(song.isActive || song.status === 'live'),
     createdAt: song.createdAt,
     updatedAt: song.updatedAt,
   };
@@ -592,6 +594,35 @@ router.delete('/history/:id', requireAuth, requireTenantAdmin, async (req: Reque
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ACTIVE / LIVE SONGS
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/active', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
+    const activeSongs = await prisma.song.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { isMaster: true },
+          { organizationId: targetOrgId },
+          { organizationId: null },
+        ],
+      },
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: { include: { program: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const formatted = activeSongs.map(formatSong);
+    res.json({ success: true, count: formatted.length, data: formatted });
+  } catch (err) {
+    console.error('[songs:active]', err);
+    res.status(500).json({ success: false, error: 'Failed to load active songs' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4. SONG BY ID
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
@@ -714,6 +745,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (body.isMaster !== undefined) data.isMaster = Boolean(body.isMaster);
     if (body.isMinistered !== undefined) data.isMinistered = Boolean(body.isMinistered);
 
+    if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+
     if (body.isHQOnly !== undefined || body.is_hq_only !== undefined || body.isHqOnly !== undefined || body.scope !== undefined) {
       const isHqOnly = Boolean(body.isHQOnly || body.is_hq_only || body.isHqOnly || body.scope === 'hq');
       const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? { ...(existing.audioUrls as any) } : {};
@@ -726,8 +759,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       data,
     });
 
-    broadcast('songs', songId, formatSong(updated));
-    res.json({ success: true, message: 'Song updated', data: formatSong(updated) });
+    const formatted = formatSong(updated);
+    broadcast('songs', songId, formatted);
+    broadcast('song', songId, formatted);
+    res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
     res.status(500).json({ success: false, error: 'Failed to update song' });
@@ -747,6 +782,7 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
 
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
+    broadcast('song', songId, formatted);
     broadcast('song_status', songId, { id: songId, status: updated.status });
     res.json({ success: true, message: 'Song status updated', data: formatted });
   } catch (err) {
@@ -773,6 +809,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     if (body.writer !== undefined) data.writer = body.writer;
     if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
     if (body.audioFile !== undefined || body.audioUrl !== undefined) data.audioFile = body.audioFile || body.audioUrl;
+    if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
 
     // Map isHeard boolean to status string; isHeard takes priority over status
     if (body.isHeard !== undefined) {
@@ -788,6 +825,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
+    broadcast('song', songId, formatted);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });
