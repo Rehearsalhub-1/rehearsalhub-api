@@ -256,6 +256,7 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
     const effectiveCategory = category || (status === 'ongoing' ? 'ongoing' : status === 'archive' ? 'archive' : 'pre-rehearsal');
     const effectiveStatus = status || effectiveCategory;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const uniqueSongIds = Array.from(new Set(Array.isArray(songIds) ? songIds.map(String) : []));
 
     const row = await prisma.program.create({
       data: {
@@ -269,10 +270,10 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
         isArchived: effectiveStatus === 'archive',
         location: location || null,
         bannerImage: bannerImage || null,
-        ...(Array.isArray(songIds) && songIds.length > 0
+        ...(uniqueSongIds.length > 0
           ? {
               programSongs: {
-                create: songIds.map((sId: string, idx: number) => ({
+          create: uniqueSongIds.map((sId: string, idx: number) => ({
                   songId: sId,
                   order: idx + 1,
                 })),
@@ -356,10 +357,11 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
     const nextCategory = nextStage;
 
     if (Array.isArray(req.body.songIds)) {
+      const uniqueSongIds: string[] = Array.from(new Set<string>(req.body.songIds.map(String)));
       await prisma.programSong.deleteMany({ where: { programId: id } });
-      if (req.body.songIds.length > 0) {
+      if (uniqueSongIds.length > 0) {
         await prisma.programSong.createMany({
-          data: req.body.songIds.map((sId: string, idx: number) => ({
+          data: uniqueSongIds.map((sId: string, idx: number) => ({
             programId: id,
             songId: sId,
             order: idx + 1,

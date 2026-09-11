@@ -29,11 +29,12 @@ function shapeMember(m: any, meta: any = {}) {
   const voicePart = m.voicePart || user.voicePart || user.designation || null;
 
   const rawRole = (meta?.role || m.role || 'MEMBER').toLowerCase();
-  const isAdmin = rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'org_admin' || rawRole === 'group_admin';
-  const resolvedRole = isAdmin
-    ? (rawRole.includes('church') || rawRole === 'group_admin' ? 'church_admin'
-      : rawRole.includes('hq') ? 'hq_admin'
-      : 'zone_admin')
+  const isHQMembership = Boolean(m.organization?.isHq || m.organizationId === 'zone-001' || meta?.hasHqAccess || meta?.has_hq_access);
+  const isAdmin = isHQMembership || rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'org_admin' || rawRole === 'group_admin';
+  const resolvedRole = isHQMembership
+    ? 'hq_admin'
+    : isAdmin
+    ? (rawRole.includes('church') || rawRole === 'group_admin' ? 'church_admin' : 'zone_admin')
     : 'member';
 
   return {

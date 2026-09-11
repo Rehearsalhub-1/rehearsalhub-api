@@ -669,10 +669,11 @@ router.patch('/praise-nights/:id', requireAuth, requireTenantAdmin, async (req: 
     if (body.bannerImage !== undefined) data.bannerImage = body.bannerImage;
 
     if (Array.isArray(body.songIds)) {
+      const uniqueSongIds: string[] = Array.from(new Set<string>(body.songIds.map(String)));
       await prisma.programSong.deleteMany({ where: { programId: id } });
-      if (body.songIds.length > 0) {
+      if (uniqueSongIds.length > 0) {
         await prisma.programSong.createMany({
-          data: body.songIds.map((sId: string, idx: number) => ({
+          data: uniqueSongIds.map((sId: string, idx: number) => ({
             programId: id,
             songId: sId,
             order: idx + 1,
@@ -808,6 +809,7 @@ router.get('/praise-nights', requireAuth, async (req: Request, res: Response) =>
 router.post('/praise-nights', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { name, title, date, location, category, status, subGroupId, groupId, songIds = [] } = req.body;
+    const uniqueSongIds = Array.from(new Set(Array.isArray(songIds) ? songIds.map(String) : []));
     const targetGroupId = subGroupId || groupId;
     if (!targetGroupId) return res.status(400).json({ success: false, error: 'subGroupId is required' });
 
@@ -827,10 +829,10 @@ router.post('/praise-nights', requireAuth, requireTenantAdmin, async (req: Reque
         location: location || null,
         organizationId: group.organizationId,
         groupId: targetGroupId,
-        ...(Array.isArray(songIds) && songIds.length > 0
+        ...(uniqueSongIds.length > 0
           ? {
               programSongs: {
-                create: songIds.map((sId: string, idx: number) => ({
+          create: uniqueSongIds.map((sId: string, idx: number) => ({
                   songId: sId,
                   order: idx + 1,
                 })),

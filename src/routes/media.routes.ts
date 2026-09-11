@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { requireAuth } from '../auth/auth.middleware';
+import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
 import { canManageTenant } from '../auth/permissions';
 
@@ -126,7 +126,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     // Also query media_videos to supply rehearsal and praise night videos
     let combined = shapedAssets;
-    if (!type || type.toLowerCase() === 'video' || type === 'all') {
+    // Legacy media_videos has no reliable per-zone ownership. Only expose it
+    // for the legacy HQ zone; tenant media_assets remain strictly scoped above.
+    if ((!type || type.toLowerCase() === 'video' || type === 'all') && effectiveZoneId === 'zone-001') {
       const videoRows = await fetchMediaVideos(takeCount, search);
       const existingIds = new Set(shapedAssets.map((a) => a.id));
       const newVideos = videoRows.filter((v) => !existingIds.has(v.id));
@@ -163,18 +165,17 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // POST /media - Create media item
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+router.post('/', requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const id = body.id || `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const orgId = body.organizationId || body.zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const orgId = req.tenant?.effectiveZoneId || 'zone-001';
 
     const created = await prisma.mediaAsset.create({
       data: {
         id,
         title: (body.title || body.name || 'Untitled Media').trim(),
         url: body.url || body.videoUrl || '',
-        thumbnail: body.thumbnailUrl || body.thumbnail || null,
         type: body.type || 'audio',
         folder: body.folder || 'general',
         size: Number(body.size) || null,
@@ -211,6 +212,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (updates.views !== undefined) updateData.views = Number(updates.views);
     if (updates.likes !== undefined) updateData.likes = Number(updates.likes);
 
+    const effectiveZoneId = req.tenant?.effectiveZoneId || 'zone-001';
+    const existing = await prisma.mediaAsset.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Media not found' });
+    if (existing.organizationId !== effectiveZoneId && auth?.role !== 'hq_admin') {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
     const updated = await prisma.mediaAsset.update({
       where: { id },
       data: updateData,
@@ -225,11 +233,18 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // DELETE /media/:id - Delete media item
-router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+router.delete('/:id', requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = res.locals.auth;
     if (!canManageTenant(auth?.role)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
+    const effectiveZoneId = req.tenant?.effectiveZoneId || 'zone-001';
+    const existing = await prisma.mediaAsset.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Media not found' });
+    if (existing.organizationId !== effectiveZoneId && auth?.role !== 'hq_admin') {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
