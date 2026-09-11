@@ -2,7 +2,6 @@ export type PlatformRole =
   | 'super_admin'
   | 'admin'
   | 'hq_admin'
-  | 'boss'
   | 'zone_admin'
   | 'zone_coordinator'
   | 'subgroup_admin'
@@ -19,10 +18,6 @@ export function isHQRole(role: unknown): boolean {
   return normalized === 'super_admin' || normalized === 'admin' || normalized === 'hq_admin'
 }
 
-export function isReadOnlyHQRole(role: unknown): boolean {
-  return normalizeRole(role) === 'boss'
-}
-
 export function canAccessAdmin(role: unknown): boolean {
   const normalized = normalizeRole(role)
   return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator' ||
@@ -37,4 +32,13 @@ export function canManageTenant(role: unknown): boolean {
   const normalized = normalizeRole(role)
   return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator' ||
     normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'church_coordinator'
+}
+
+/**
+ * Only Zone Admins and HQ Admins can create churches and appoint church coordinators.
+ * Church coordinators are restricted to managing their own assigned church choir.
+ */
+export function canManageChurches(role: unknown): boolean {
+  const normalized = normalizeRole(role)
+  return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator'
 }

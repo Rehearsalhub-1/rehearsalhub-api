@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
+import { requireAuth, requireTenantAdmin, requireZoneOrHqAdmin } from '../auth/auth.middleware';
 
 const router = Router();
 
@@ -55,63 +55,17 @@ router.get('/coordinated', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-/** GET /subgroups/requests — List pending group approval requests */
-router.get('/requests', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
-  try {
-    const effectiveZoneId = req.tenant?.effectiveZoneId || 'zone-001';
-
-    const groups = await prisma.group.findMany({
-      where: {
-        status: 'pending',
-        OR: [
-          { organizationId: effectiveZoneId },
-          { organizationId: 'zone-001' },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    res.json({ success: true, count: groups.length, data: groups.map(shapeGroup) });
-  } catch (err) {
-    console.error('[subgroups/requests]', err);
-    res.status(500).json({ success: false, error: 'Failed to load group requests' });
-  }
+/** GET /subgroups/requests — Legacy stub, requests are disabled */
+router.get('/requests', requireAuth, async (_req: Request, res: Response) => {
+  res.json({ success: true, count: 0, data: [] });
 });
 
-/** POST /subgroups/requests — Submit request to create or join a church/subgroup */
-router.post('/requests', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const auth = res.locals.auth;
-    const { name, churchName, subgroupName, zoneId, note, description } = req.body;
-    const targetName = (name || churchName || subgroupName || note || '').trim();
-    if (!targetName) {
-      return res.status(400).json({ success: false, error: 'Church name is required' });
-    }
-
-    const orgId = zoneId || req.tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
-    const id = `grp_req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-
-    const group = await prisma.group.create({
-      data: {
-        id,
-        organizationId: orgId,
-        name: targetName,
-        description: description?.trim() || `Requested by user ${auth.userId}`,
-        type: 'church',
-        status: 'pending',
-        estimatedMembers: 1,
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Church request submitted successfully for coordinator approval',
-      data: shapeGroup(group),
-    });
-  } catch (err: any) {
-    console.error('[subgroups/requests POST]', err);
-    res.status(500).json({ success: false, error: err?.message || 'Failed to submit church request' });
-  }
+/** POST /subgroups/requests — Disabled: Only Zone Admins can create churches directly */
+router.post('/requests', requireAuth, async (_req: Request, res: Response) => {
+  res.status(403).json({
+    success: false,
+    error: 'Individual church requests are disabled. Churches can only be created and assigned by Zone Administrators.',
+  });
 });
 
 /** GET /subgroups - List groups */
@@ -240,7 +194,7 @@ router.delete('/:id/members/:userId', requireAuth, requireTenantAdmin, async (re
 });
 
 /** POST /subgroups/:id/assign-coordinator */
-router.post('/:id/assign-coordinator', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { email, userId } = req.body;
@@ -287,7 +241,7 @@ router.post('/:id/assign-coordinator', requireAuth, requireTenantAdmin, async (r
 });
 
 /** POST /subgroups/:id/coordinators — Alias for assign-coordinator */
-router.post('/:id/coordinators', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+router.post('/:id/coordinators', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { email, userId } = req.body;
@@ -425,8 +379,8 @@ router.delete('/members', requireAuth, requireTenantAdmin, async (req: Request, 
   }
 });
 
-/** POST /subgroups - Create group */
-router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+/** POST /subgroups - Create group (Zone Admin & HQ Admin only) */
+router.post('/', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { name, description, type = 'church', zoneId, estimatedMembers } = req.body;
     if (!name || !name.trim()) {
@@ -455,8 +409,8 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
   }
 });
 
-/** PATCH /subgroups/:id - Update group */
-router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+/** PATCH /subgroups/:id - Update group (Zone Admin & HQ Admin only) */
+router.patch('/:id', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, description, type, status, estimatedMembers } = req.body;
@@ -480,8 +434,8 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
   }
 });
 
-/** DELETE /subgroups/:id */
-router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+/** DELETE /subgroups/:id (Zone Admin & HQ Admin only) */
+router.delete('/:id', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await prisma.group.delete({ where: { id } });

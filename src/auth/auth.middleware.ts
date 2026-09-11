@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken, JsonWebTokenError, TokenExpiredError } from './token';
 import { revocationStore } from './revocation';
 import { resolveTenantScope, withTenantTransaction } from '../middleware/tenant.middleware';
-import { canManageTenant } from './permissions';
+import { canManageTenant, canManageChurches } from './permissions';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
@@ -49,6 +49,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 export function requireTenantAdmin(req: Request, res: Response, next: NextFunction): void {
   if (!canManageTenant(res.locals.auth?.role)) {
     res.status(403).json({ success: false, error: 'Forbidden' });
+    return;
+  }
+  next();
+}
+
+/**
+ * Strict role check ensuring ONLY Zone Administrators and HQ Admins
+ * can create churches, edit church details, delete churches, or assign church coordinators.
+ */
+export function requireZoneOrHqAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (!canManageChurches(res.locals.auth?.role)) {
+    res.status(403).json({
+      success: false,
+      error: 'Forbidden: Only Zone Administrators and HQ Admins can create churches and appoint coordinators.',
+    });
     return;
   }
   next();
