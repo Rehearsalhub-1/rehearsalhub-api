@@ -23,9 +23,12 @@ function shapePlaylist(p: any) {
   };
 }
 
-router.get('/me', requireAuth, async (req: Request, res: Response) => {
+const handleGetMyPlaylists = async (req: Request, res: Response) => {
   try {
-    const userId = res.locals.auth.userId as string;
+    const userId = res.locals.auth?.userId as string;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
     const rows = await prisma.playlist.findMany({
       where: { userId },
       include: {
@@ -42,7 +45,10 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
     console.error('[playlists/me]', err);
     res.status(500).json({ success: false, error: 'Failed to load your playlists' });
   }
-});
+};
+
+router.get('/me', requireAuth, handleGetMyPlaylists);
+router.get('/', requireAuth, handleGetMyPlaylists);
 
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {

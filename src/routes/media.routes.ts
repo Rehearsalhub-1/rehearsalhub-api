@@ -64,10 +64,17 @@ async function fetchMediaVideos(limit = 100, search?: string) {
         thumbnailUrl: thumb,
         thumbnail: thumb,
         type: 'video',
-        category,
         folder: 'videos',
+        size: 0,
+        format: 'video/mp4',
         views,
         likes: v.likes || raw.likes || 0,
+        organizationId: 'zone-001',
+        zoneId: 'zone-001',
+        groupId: null,
+        subgroupId: null,
+        churchId: null,
+        category,
         channelName: channel,
         createdAt,
         updatedAt: createdAt,
@@ -117,7 +124,16 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const shapedAssets = assets.map(shapeMedia);
 
-    res.json({ success: true, count: shapedAssets.length, data: shapedAssets });
+    // Also query media_videos to supply rehearsal and praise night videos
+    let combined = shapedAssets;
+    if (!type || type.toLowerCase() === 'video' || type === 'all') {
+      const videoRows = await fetchMediaVideos(takeCount, search);
+      const existingIds = new Set(shapedAssets.map((a) => a.id));
+      const newVideos = videoRows.filter((v) => !existingIds.has(v.id));
+      combined = [...shapedAssets, ...newVideos];
+    }
+
+    res.json({ success: true, count: combined.length, data: combined });
   } catch (err) {
     console.error('[media:get]', err);
     res.status(500).json({ success: false, error: 'Failed to load media assets' });

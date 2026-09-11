@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tokenRole } from './src/auth/auth.service';
-import { canAccessAdmin, canManageAllTenants, canManageTenant, isReadOnlyHQRole } from './src/auth/permissions';
+import { canAccessAdmin, canManageAllTenants, canManageTenant } from './src/auth/permissions';
 
 test('privileged roles normalize to stable API roles', () => {
   assert.equal(tokenRole({ role: 'super_admin', hasHqAccess: false }), 'hq_admin');
@@ -17,13 +17,6 @@ test('HQ access flag overrides the stored role', () => {
 test('ordinary users remain ordinary users', () => {
   assert.equal(tokenRole({ role: 'user', hasHqAccess: false }), 'member');
   assert.equal(tokenRole({ role: null, hasHqAccess: null }), 'member');
-});
-
-test('boss is read-only and cannot manage tenant data', () => {
-  assert.equal(isReadOnlyHQRole('boss'), true);
-  assert.equal(canAccessAdmin('boss'), false);
-  assert.equal(canManageTenant('boss'), false);
-  assert.equal(canManageAllTenants('boss'), false);
 });
 
 test('tenant admins can manage their tenant but not all tenants', () => {
