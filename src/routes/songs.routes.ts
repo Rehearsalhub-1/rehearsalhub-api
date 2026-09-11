@@ -348,39 +348,19 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
     });
 
     const formatted: any[] = history.map((h) => {
-      // Migration didn't map the `type` field — it's buried in raw_data from Firebase.
-      // Pull it out here so migrated records go to the correct HistoryScreen tab.
-      const raw = (h as any).rawData || (h as any).raw_data || {};
-      // First try the stored type, then raw_data type fields
-      const storedType = h.type || raw.type || raw.historyType || raw.changeType || null;
+      // All columns are now properly populated by the backfill script.
+      // Read directly from structured columns — no rawData fallback.
+      const resolvedType        = (h.type        || 'details').toLowerCase().trim();
+      const resolvedNewValue    = h.newValue    || '';
+      const resolvedOldValue    = h.oldValue    || '';
+      const resolvedDescription = h.description || 'Song Update';
 
-      // If no stored type (migration gap — type column was never populated),
-      // infer from the content of newValue so records land in the right tab
-      let resolvedType = storedType;
-      if (!resolvedType) {
-        const val = (h.newValue || raw.new_value || raw.newValue || raw.content || '').trim();
-        const desc = (h.description || raw.description || '').toLowerCase();
-        if (val.startsWith('http') || val.includes('cloudinary') || val.includes('.mp3') || val.includes('.wav') || val.includes('.m4a')) {
-          resolvedType = 'audio';
-        } else if (desc.includes('lyric') || desc.includes('lyrics') || raw.type === 'lyrics') {
-          resolvedType = 'lyrics';
-        } else if (desc.includes('solfa') || desc.includes('notation') || raw.type === 'solfas') {
-          resolvedType = 'solfa';
-        } else if (desc.includes('conductor') || desc.includes('guide') || desc.includes('arrangement')) {
-          resolvedType = 'conductor';
-        } else if (val.length > 200 && (val.includes('\n') || val.includes('<'))) {
-          // Long text with line breaks or HTML — almost certainly lyrics
-          resolvedType = 'lyrics';
-        } else {
-          resolvedType = 'details';
-        }
-      }
+      // Audio URL: newValue is the URL for audio-type entries
+      const resolvedAudioUrl = resolvedType === 'audio' ? resolvedNewValue : null;
 
-      // Pull content from raw_data if the mapped columns are empty (migration gap)
-      const resolvedNewValue = h.newValue || raw.new_value || raw.newValue || raw.content || raw.value || '';
-      const resolvedOldValue = h.oldValue || raw.old_value || raw.oldValue || '';
-      const resolvedDescription = h.description || raw.description || raw.title || 'Song Update';
-      const resolvedAudioUrl = raw.audioUrl || raw.audio_url || raw.url || null;
+      const createdBy = h.user
+        ? [h.user.firstName, h.user.lastName].filter(Boolean).join(' ') || h.user.email || 'Admin'
+        : 'Admin';
 
       return {
         id: h.id,
@@ -393,7 +373,7 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
         oldValue: resolvedOldValue,
         newValue: resolvedNewValue,
         audioUrl: resolvedAudioUrl,
-        createdBy: h.user ? [h.user.firstName, h.user.lastName].filter(Boolean).join(' ') || h.user.email : (raw.createdBy || raw.updatedBy || 'Admin'),
+        createdBy,
         createdAt: h.createdAt,
         created_at: h.createdAt,
       };
