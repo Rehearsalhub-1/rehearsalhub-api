@@ -37,10 +37,6 @@ function asRaw(raw: unknown): Record<string, unknown> {
 export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean | null; rawData?: unknown }): string {
   const raw = profile.rawData && typeof profile.rawData === 'object' && !Array.isArray(profile.rawData)
     ? (profile.rawData as Record<string, unknown>) : {};
-  const hasHq = profile.hasHqAccess === true ||
-    raw.has_hq_access === true || raw.has_hq_access === 'true' ||
-    raw.hasHqAccess === true || raw.hasHqAccess === 'true';
-  if (hasHq) return 'hq_admin';
   const r = (profile.role || String(raw.role || '')).toLowerCase();
   if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
   if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator') return 'zone_admin';
@@ -57,10 +53,10 @@ function zoneIdFromProfile(profile: { rawData?: unknown }): string | null {
 export function profileFromUser(user: any): any {
   if (!user) return null;
   const memberships = Array.isArray(user.memberships) ? user.memberships : [];
-  const hasHq = memberships.some((m: any) => m.organization?.isHq || m.organizationId === 'zone-001' || isHQRole(m.role));
-  const hqMembership = memberships.find((m: any) => isHQRole(m.role) || m.organization?.isHq || m.organizationId === 'zone-001');
-  const primaryRole = (hqMembership?.role || memberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqMembership?.organizationId || memberships[0]?.organizationId || null;
+  const hqAdminMembership = memberships.find((m: any) => isHQRole(m.role));
+  const hasHqAdmin = Boolean(hqAdminMembership);
+  const primaryRole = (hqAdminMembership?.role || memberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqAdminMembership?.organizationId || memberships[0]?.organizationId || null;
 
   return {
     id: user.id,
@@ -73,8 +69,8 @@ export function profileFromUser(user: any): any {
     avatar: user.avatarUrl,
     phone: user.phone,
     role: primaryRole,
-    hasHqAccess: hasHq,
-    has_hq_access: hasHq,
+    hasHqAccess: hasHqAdmin,
+    has_hq_access: hasHqAdmin,
     kingschatId: user.kingschatId,
     profileCompleted: user.profileCompleted ?? true,
     createdAt: user.createdAt,
@@ -90,8 +86,8 @@ export function profileFromUser(user: any): any {
       kingschatId: user.kingschatId,
       kingschat_id: user.kingschatId,
       role: primaryRole,
-      hasHqAccess: hasHq,
-      has_hq_access: hasHq,
+      hasHqAccess: hasHqAdmin,
+      has_hq_access: hasHqAdmin,
       zoneId: primaryZoneId,
     },
   };
@@ -174,7 +170,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
       subgroupId: m.groupId,
       role: m.role || 'MEMBER',
       status: m.status || 'ACTIVE',
-      hasHqAccess: (m as any).organization?.isHq || orgId === 'zone-001' || isHQRole(m.role || ''),
+      hasHqAccess: isHQRole(m.role || ''),
       organization: (m as any).organization
         ? {
             id: (m as any).organization.id,
@@ -340,21 +336,19 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
     canonicalMemberships = await fetchAllUserMemberships(profile.id, profile.rawData);
 
     if (canonicalMemberships.length > 0) {
-      const hasAnyAdminRole = canonicalMemberships.some(m =>
-        ADMIN_MEMBERSHIP_ROLES.has(m.role || '') || m.organization?.isHq || m.organizationId === 'zone-001'
-      );
-      const hqMembership = canonicalMemberships.find(m =>
-        m.organization?.isHq || m.organizationId === 'zone-001' ||
+      const hqAdminMembership = canonicalMemberships.find(m =>
         ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS'].includes(m.role || '')
       );
+      const adminMembership = canonicalMemberships.find(m =>
+        ADMIN_MEMBERSHIP_ROLES.has(m.role || '')
+      );
 
-      if (hqMembership) {
+      if (hqAdminMembership) {
         resolvedRole = 'hq_admin';
-        resolvedZoneId = resolvedZoneId || hqMembership.organizationId;
-      } else if (hasAnyAdminRole) {
-        const adminMembership = canonicalMemberships.find(m => ADMIN_MEMBERSHIP_ROLES.has(m.role || ''));
-        resolvedRole = tokenRole({ ...profile, role: adminMembership?.role || resolvedRole });
-        resolvedZoneId = resolvedZoneId || adminMembership?.organizationId || null;
+        resolvedZoneId = resolvedZoneId || hqAdminMembership.organizationId;
+      } else if (adminMembership) {
+        resolvedRole = tokenRole({ ...profile, role: adminMembership.role });
+        resolvedZoneId = resolvedZoneId || adminMembership.organizationId || null;
       }
     }
   } catch {
@@ -547,11 +541,11 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
   });
   if (!user) throw new AuthError('User not found');
 
-  const hasHq = user.memberships.some((m) => m.organization.isHq || m.organizationId === 'zone-001' || isHQRole(m.role));
-  const hqMembership = user.memberships.find((m) => isHQRole(m.role));
-  const primaryRole = (hqMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqMembership?.organizationId || user.memberships[0]?.organizationId || null;
-  const normalizedRole = tokenRole({ role: primaryRole, hasHqAccess: hasHq });
+  const hqAdminMembership = user.memberships.find((m) => isHQRole(m.role));
+  const hasHqAdmin = Boolean(hqAdminMembership);
+  const primaryRole = (hqAdminMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqAdminMembership?.organizationId || user.memberships[0]?.organizationId || null;
+  const normalizedRole = tokenRole({ role: primaryRole, hasHqAccess: hasHqAdmin });
 
   const newRaw = generateRefreshToken();
   const newHash = await bcrypt.hash(newRaw, 12);
@@ -716,14 +710,12 @@ export async function getMe(profileId: string): Promise<MeResult> {
       userName: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member',
     }));
 
-  const hasHq = canonicalMemberships.some((m) => m.hasHqAccess || isHQRole(m.role));
-  const hqMembership = canonicalMemberships.find((m) => isHQRole(m.role));
-  // If hasHq is true (user belongs to an HQ org) but no membership has an explicit HQ role,
-  // still return hq_admin — the isHq flag on the organization takes precedence.
-  const primaryRole = hasHq
+  const hqAdminMembership = canonicalMemberships.find((m) => isHQRole(m.role));
+  const hasHqAdmin = Boolean(hqAdminMembership || isHQRole(meta?.role) || isHQRole(meta?.administration));
+  const primaryRole = hasHqAdmin
     ? 'hq_admin'
-    : (hqMembership?.role || canonicalMemberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
+    : (canonicalMemberships[0]?.role || 'member').toLowerCase();
+  const primaryZoneId = hqAdminMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
   const primaryOrg = canonicalMemberships[0]?.organization;
   const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
   const zoneName = primaryOrg?.name || primaryZoneId;
@@ -735,12 +727,16 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const region = meta.region || primaryOrg?.region || null;
   const church = meta.church || canonicalMemberships[0]?.subgroup?.name || null;
   const designation = meta.designation || 'Member';
-  const administration = meta.administration || (primaryRole === 'admin' ? 'Admin' : 'Member');
+  const administration = meta.administration || (hasHqAdmin ? 'Admin' : 'Member');
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member';
 
-  const canAccessArchive = meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? true;
-  const canAccessPreRehearsal = meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? true;
-  const canAnnotate = meta.canAnnotate ?? true;
+  // Feature pass permissions:
+  // - HQ Admins automatically have full access.
+  // - Regular members and Zone Admins have Archive, Pre-Rehearsal, and Annotation OFF by default.
+  // - Ongoing rehearsals are ON by default so members can rehearse active songs.
+  const canAccessArchive = hasHqAdmin ? true : Boolean(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false);
+  const canAccessPreRehearsal = hasHqAdmin ? true : Boolean(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false);
+  const canAnnotate = hasHqAdmin ? true : Boolean(meta.canAnnotate ?? false);
   const canAccessOngoing = meta.can_access_ongoing ?? meta.canAccessOngoing ?? true;
 
   return {
@@ -779,8 +775,8 @@ export async function getMe(profileId: string): Promise<MeResult> {
     phone: user.phone || null,
     phoneNumber: user.phone || null,
     phone_number: user.phone || null,
-    hasHqAccess: hasHq,
-    has_hq_access: hasHq,
+    hasHqAccess: hasHqAdmin,
+    has_hq_access: hasHqAdmin,
     canAccessArchive,
     can_access_archive: canAccessArchive,
     canAccessPreRehearsal,
