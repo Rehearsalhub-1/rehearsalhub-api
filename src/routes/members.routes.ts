@@ -28,13 +28,20 @@ function shapeMember(m: any, meta: any = {}) {
   const churchId = m.groupId || m.churchId || null;
   const voicePart = m.voicePart || user.voicePart || user.designation || null;
 
-  const rawRole = (meta?.role || m.role || 'MEMBER').toLowerCase();
-  const isHQMembership = Boolean(m.organization?.isHq || m.organizationId === 'zone-001' || meta?.hasHqAccess || meta?.has_hq_access);
-  const isAdmin = isHQMembership || rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'org_admin' || rawRole === 'group_admin';
-  const resolvedRole = isHQMembership
-    ? 'hq_admin'
-    : isAdmin
-    ? (rawRole.includes('church') || rawRole === 'group_admin' ? 'church_admin' : 'zone_admin')
+  const rawRole = (meta?.role || m.role || user.role || 'MEMBER').toLowerCase();
+  const isHQOrg = Boolean(m.organization?.isHq || m.organizationId === 'zone-001' || meta?.hasHqAccess || meta?.has_hq_access);
+  const isAdmin = Boolean(
+    meta?.isAdmin ||
+    rawRole.includes('admin') ||
+    rawRole.includes('coord') ||
+    rawRole === 'org_admin' ||
+    rawRole === 'group_admin' ||
+    rawRole === 'boss'
+  );
+  const resolvedRole = isAdmin
+    ? (isHQOrg || rawRole.includes('hq') ? 'hq_admin'
+      : rawRole.includes('church') || rawRole === 'group_admin' ? 'church_admin'
+      : 'zone_admin')
     : 'member';
 
   return {

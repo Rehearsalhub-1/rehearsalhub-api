@@ -140,9 +140,8 @@ function shapeSong(song: any) {
     rehearsalCount: song.rehearsalCount || 0,
     organizationId: song.organizationId || null,
     groupId: song.groupId || null,
-    history: historySummary,
-    isActive: song.isActive !== undefined ? Boolean(song.isActive) : (song.status === 'live'),
-    isLive: Boolean(song.isActive || song.status === 'live'),
+    isActive: Boolean(song.status === 'live' || song.isLive === true),
+    isLive: Boolean(song.status === 'live' || song.isLive === true),
     createdAt: song.createdAt,
     updatedAt: song.updatedAt,
   };
@@ -601,7 +600,7 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
     const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
     const activeSongs = await prisma.song.findMany({
       where: {
-        isActive: true,
+        status: 'live',
         OR: [
           { isMaster: true },
           { organizationId: targetOrgId },
@@ -808,8 +807,15 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     if (body.lyrics !== undefined) data.lyrics = body.lyrics;
     if (body.writer !== undefined) data.writer = body.writer;
     if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
-    if (body.audioFile !== undefined || body.audioUrl !== undefined) data.audioFile = body.audioFile || body.audioUrl;
-    if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+    if (body.isActive !== undefined || body.isLive !== undefined) {
+      const nextLive = Boolean(body.isActive ?? body.isLive);
+      data.isActive = nextLive;
+      if (nextLive) {
+        data.status = 'live';
+      } else if (existing.status === 'live') {
+        data.status = 'unheard';
+      }
+    }
 
     // Map isHeard boolean to status string; isHeard takes priority over status
     if (body.isHeard !== undefined) {

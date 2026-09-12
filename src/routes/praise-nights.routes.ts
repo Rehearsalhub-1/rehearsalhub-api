@@ -123,7 +123,10 @@ function shapeProgram(p: any) {
   const isActive = Boolean(p.isActive || rawStatus === 'active' || rawStatus === 'ongoing' || rawCat === 'ongoing');
   const isArchived = Boolean(p.isArchived || rawStatus === 'archived' || rawStatus === 'archive' || rawStatus === 'completed' || rawCat === 'archive');
   const isDraft = rawStatus === 'draft' || rawCat === 'draft';
-  const resolvedStage: 'ongoing' | 'archive' | 'draft' | 'pre-rehearsal' = isActive
+  const isMinistered = rawCat === 'ministered' || rawStatus === 'ministered';
+  const resolvedStage: 'ongoing' | 'archive' | 'draft' | 'pre-rehearsal' | 'ministered' = isMinistered
+    ? 'ministered'
+    : isActive
     ? 'ongoing'
     : isArchived
     ? 'archive'
@@ -172,6 +175,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const where: any = {};
     if (category && category !== 'all') {
       where.category = category;
+    } else {
+      // By default, exclude historical master catalog collections ('ministered') so rehearsal programs only show real setlists
+      where.category = { not: 'ministered' };
     }
 
     // Isolate church/subgroup programs:
