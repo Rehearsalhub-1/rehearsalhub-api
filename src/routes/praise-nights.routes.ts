@@ -198,25 +198,27 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       where.category = { not: 'ministered' };
     }
 
-    // Isolate church/subgroup programs:
-    // If a specific church is requested, filter by that groupId.
-    // Otherwise, for general Repertoire view, only return main programs (groupId is null).
-    if (targetGroup) {
-      where.groupId = targetGroup;
-    } else if (includeChurch !== 'true') {
-      where.groupId = null;
-    }
+    if (category !== 'ministered') {
+      // Isolate church/subgroup programs:
+      // If a specific church is requested, filter by that groupId.
+      // Otherwise, for general Repertoire view, only return main programs (groupId is null).
+      if (targetGroup) {
+        where.groupId = targetGroup;
+      } else if (includeChurch !== 'true') {
+        where.groupId = null;
+      }
 
-    if (targetZone && targetZone !== 'all' && targetZone !== 'global') {
-      // Everyone — admin or singer — sees ONLY their own zone's programs.
-      // No HQ fallback. If a zone has no programs the response is empty.
-      // HQ admins whose zone IS zone-001 will correctly see zone-001 programs.
-      where.organizationId = targetZone;
-    } else if (isHqAdmin && !targetZone) {
-      // HQ admin with no zone filter = see everything (no org constraint)
-    } else if (!isHqAdmin && !targetZone) {
-      // No zone resolved at all — return empty rather than leaking data
-      where.organizationId = '__none__';
+      if (targetZone && targetZone !== 'all' && targetZone !== 'global') {
+        // Everyone — admin or singer — sees ONLY their own zone's programs.
+        // No HQ fallback. If a zone has no programs the response is empty.
+        // HQ admins whose zone IS zone-001 will correctly see zone-001 programs.
+        where.organizationId = targetZone;
+      } else if (isHqAdmin && !targetZone) {
+        // HQ admin with no zone filter = see everything (no org constraint)
+      } else if (!isHqAdmin && !targetZone) {
+        // No zone resolved at all — return empty rather than leaking data
+        where.organizationId = '__none__';
+      }
     }
 
     const programs = await prisma.program.findMany({

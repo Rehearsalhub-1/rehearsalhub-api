@@ -655,7 +655,16 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const body = req.body || {};
     const songId = body.id || `song_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const organizationId = body.zoneId || body.organizationId || req.tenant?.effectiveZoneId || 'zone-001';
-    const programId = body.praiseNightId || body.programId || null;
+    let resolvedProgramId = body.praiseNightId || body.programId || null;
+    const isMasterOrMinistered = Boolean(body.isMaster || body.isMinistered);
+    const candidateProgName = body.program || body.programName || (isMasterOrMinistered ? body.category : null);
+    if (!resolvedProgramId && candidateProgName) {
+      const found = await prisma.program.findFirst({
+        where: { name: { equals: String(candidateProgName).trim(), mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (found) resolvedProgramId = found.id;
+    }
 
     const isHqOnly = Boolean(body.isHQOnly || body.is_hq_only || body.isHqOnly || body.scope === 'hq');
     let audioUrlsData = body.audioUrls || body.audio_urls || null;
@@ -687,11 +696,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         status: isHqOnly ? 'hq_only' : (body.status || 'active'),
         isMaster: Boolean(body.isMaster),
         isMinistered: Boolean(body.isMinistered),
-        ...(programId
+        ...(resolvedProgramId
           ? {
               programSongs: {
                 create: {
-                  programId,
+                  programId: resolvedProgramId,
                   order: body.order || 1,
                 },
               },
@@ -757,6 +766,34 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       where: { id: songId },
       data,
     });
+
+    let resolvedProgramId = body.praiseNightId || body.programId || null;
+    const isMasterOrMinistered = Boolean(body.isMaster !== undefined ? body.isMaster : (existing.isMaster || existing.isMinistered));
+    const candidateProgName = body.program || body.programName || (isMasterOrMinistered && body.category ? body.category : null);
+    if (!resolvedProgramId && candidateProgName) {
+      const found = await prisma.program.findFirst({
+        where: { name: { equals: String(candidateProgName).trim(), mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (found) resolvedProgramId = found.id;
+    }
+
+    if (resolvedProgramId) {
+      await prisma.programSong.upsert({
+        where: {
+          programId_songId: {
+            programId: resolvedProgramId,
+            songId,
+          },
+        },
+        create: {
+          programId: resolvedProgramId,
+          songId,
+          order: body.order || 1,
+        },
+        update: {},
+      }).catch(() => {});
+    }
 
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
