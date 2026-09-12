@@ -302,6 +302,7 @@ model Category {
   name           String
   type           String         @default("PROGRAM") // PROGRAM, SONG, MEDIA
   color          String?
+  image          String?
   order          Int?           @default(0)
 
   organization   Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)

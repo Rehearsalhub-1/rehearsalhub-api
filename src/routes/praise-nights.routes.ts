@@ -9,6 +9,8 @@ import path from 'path';
 const router = Router();
 
 const programIdToPageCategory: Record<string, string> = {};
+const pageCategoryStorePath = path.join(__dirname, '../../data/program_page_categories.json');
+
 try {
   const snapshotPath = path.join(__dirname, '../../backups/snapshot_1787937142839/programs.json');
   if (fs.existsSync(snapshotPath)) {
@@ -22,8 +24,24 @@ try {
       });
     }
   }
+  if (fs.existsSync(pageCategoryStorePath)) {
+    const saved = JSON.parse(fs.readFileSync(pageCategoryStorePath, 'utf8'));
+    if (saved && typeof saved === 'object') {
+      Object.assign(programIdToPageCategory, saved);
+    }
+  }
 } catch (err) {
   console.warn('[praise-nights] could not load snapshot pageCategory map:', err);
+}
+
+function savePageCategoryMap() {
+  try {
+    const dir = path.dirname(pageCategoryStorePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(pageCategoryStorePath, JSON.stringify(programIdToPageCategory, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[praise-nights] could not save program_page_categories.json:', err);
+  }
 }
 
 const programCategoryOrders: Record<string, string[]> = {};
@@ -257,12 +275,17 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 // POST /programs or /praise-nights — Create program
 router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
-    const { name, date, zoneId, category, status, location, bannerImage, songIds } = req.body;
+    const { name, date, zoneId, category, status, location, bannerImage, songIds, pageCategory } = req.body;
     const programId = req.body.id || `prog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const effectiveCategory = category || (status === 'ongoing' ? 'ongoing' : status === 'archive' ? 'archive' : 'pre-rehearsal');
     const effectiveStatus = status || effectiveCategory;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
     const uniqueSongIds = Array.from(new Set(Array.isArray(songIds) ? songIds.map(String) : []));
+
+    if (pageCategory) {
+      programIdToPageCategory[programId] = String(pageCategory).trim();
+      savePageCategoryMap();
+    }
 
     const row = await prisma.program.create({
       data: {
@@ -378,6 +401,11 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
 
     if (Array.isArray(req.body.categoryOrder)) {
       programCategoryOrders[id] = req.body.categoryOrder.map(String);
+    }
+
+    if (req.body.pageCategory !== undefined) {
+      programIdToPageCategory[id] = String(req.body.pageCategory || '').trim();
+      savePageCategoryMap();
     }
 
     const updated = await prisma.program.update({

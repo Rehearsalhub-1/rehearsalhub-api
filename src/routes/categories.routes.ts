@@ -10,6 +10,7 @@ function shapeCategory(c: any) {
     name: c.name,
     type: c.type || 'general',
     color: c.color || '#9333ea',
+    image: c.image || null,
     order: c.order || 0,
     organizationId: c.organizationId || null,
     zoneId: c.organizationId || 'global',
@@ -48,7 +49,9 @@ const handleGetPageCategories = async (_req: Request, res: Response) => {
       where: {
         OR: [
           { type: 'PAGE' },
+          { type: 'page' },
           { type: 'PROGRAM' },
+          { type: 'program' },
         ],
       },
       orderBy: { order: 'asc' },
@@ -66,20 +69,51 @@ router.get('/zone-page', requireAuth, handleGetPageCategories);
 // POST /categories
 router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
-    const { name, color, type = 'general', zoneId, order } = req.body;
+    const { name, color, type = 'general', zoneId, order, image } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'Category name is required' });
     }
 
-    const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const orgId = zoneId || req.tenant?.effectiveZoneId || null;
+    const rawType = String(type || 'general').trim();
+    const normalizedType = rawType.toUpperCase() === 'PAGE' || rawType.toUpperCase() === 'PROGRAM'
+      ? 'PROGRAM'
+      : rawType.toUpperCase() === 'SONG'
+      ? 'SONG'
+      : rawType;
+
+    // Check if category already exists (case-insensitive) to prevent duplicate constraint violation
+    const existing = await prisma.category.findFirst({
+      where: {
+        name: { equals: name.trim(), mode: 'insensitive' },
+        OR: [
+          { organizationId: orgId },
+          { organizationId: null },
+        ],
+        type: normalizedType,
+      },
+    });
+
+    if (existing) {
+      if (image && !existing.image) {
+        const updated = await prisma.category.update({
+          where: { id: existing.id },
+          data: { image },
+        });
+        return res.status(200).json({ success: true, data: shapeCategory(updated) });
+      }
+      return res.status(200).json({ success: true, data: shapeCategory(existing) });
+    }
+
+    const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const row = await prisma.category.create({
       data: {
         id,
         name: name.trim(),
         color: color || '#9333ea',
-        type,
+        image: image || null,
+        type: normalizedType,
         order: Number(order) || 0,
         organizationId: orgId,
       },
@@ -96,11 +130,12 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
 router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, color, type, order } = req.body;
+    const { name, color, type, order, image } = req.body;
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name.trim();
     if (color !== undefined) updateData.color = color;
+    if (image !== undefined) updateData.image = image;
     if (type !== undefined) updateData.type = type;
     if (order !== undefined) updateData.order = Number(order);
 
