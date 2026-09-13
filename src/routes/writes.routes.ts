@@ -327,36 +327,68 @@ writesRouter.get('/songs/annotations/:songId', requireAuth, async (req: Request,
 
 writesRouter.patch('/songs/notes/:songId', requireAuth, async (req: Request, res: Response) => {
   const { songId } = req.params;
-  const auth = res.locals.auth;
-  const schema = z.object({ notes: z.string() });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ success: false, error: 'Invalid body' });
-    return;
+  const userId = res.locals.auth?.userId || 'guest';
+  const notesText = typeof req.body === 'string'
+    ? req.body
+    : (req.body?.notes ?? req.body?.note ?? '');
+
+  if (userId && userId !== 'guest') {
+    try {
+      await prisma.userSongNote.upsert({
+        where: { songId_userId: { songId, userId } },
+        update: { notes: String(notesText) },
+        create: {
+          songId,
+          userId,
+          notes: String(notesText),
+        },
+      });
+    } catch (e: any) {
+      console.warn('[writesRouter:userSongNote upsert]:', e?.message);
+    }
   }
 
-  const updated = await prisma.userSongNote.upsert({
-    where: { songId_userId: { songId, userId: auth.userId } },
-    update: { notes: parsed.data.notes },
-    create: {
-      songId,
-      userId: auth.userId,
-      notes: parsed.data.notes,
-    },
-  });
+  try {
+    const key = `song_note_${userId}_${songId}`;
+    await prisma.setting.upsert({
+      where: { key },
+      update: { value: { notes: String(notesText), updatedAt: new Date().toISOString() } },
+      create: { key, value: { notes: String(notesText), updatedAt: new Date().toISOString() } },
+    });
+  } catch (e: any) {
+    console.warn('[writesRouter:setting upsert]:', e?.message);
+  }
 
-  res.json({ success: true, data: updated });
+  res.json({ success: true, message: 'Notes saved', data: { notes: String(notesText), note: String(notesText) } });
 });
 
 writesRouter.get('/songs/notes/:songId', requireAuth, async (req: Request, res: Response) => {
   const { songId } = req.params;
-  const auth = res.locals.auth;
+  const userId = res.locals.auth?.userId || 'guest';
 
-  const record = await prisma.userSongNote.findUnique({
-    where: { songId_userId: { songId, userId: auth.userId } },
-  });
+  let noteText = '';
+  if (userId && userId !== 'guest') {
+    try {
+      const record = await prisma.userSongNote.findUnique({
+        where: { songId_userId: { songId, userId } },
+      });
+      if (record?.notes) noteText = record.notes;
+    } catch {}
+  }
 
-  res.json({ success: true, data: record?.notes || '' });
+  if (!noteText) {
+    try {
+      const key = `song_note_${userId}_${songId}`;
+      const setting = await prisma.setting.findUnique({ where: { key } });
+      if (setting?.value && typeof setting.value === 'object') {
+        noteText = (setting.value as any).notes || (setting.value as any).note || '';
+      } else if (typeof setting?.value === 'string') {
+        noteText = setting.value;
+      }
+    } catch {}
+  }
+
+  res.json({ success: true, data: { notes: noteText, note: noteText } });
 });
 
 export default writesRouter;

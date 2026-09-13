@@ -89,113 +89,7 @@ interface ScheduleProgram {
   updatedAt?: string;
 }
 
-const DEFAULT_SCHEDULES: ScheduleProgram[] = [
-  {
-    id: 'schedule_hslhs_2026',
-    name: 'JULY HSLHS 2026',
-    date: '2026-07-24',
-    category: 'schedule',
-    status: 'ongoing',
-    organizationId: 'zone-001',
-    zoneId: 'zone-001',
-    isCurrent: true,
-    isArchived: false,
-    currentWeekId: 'week_1',
-    currentDayId: 'day_1',
-    weeks: [
-      { id: 'week_1', name: 'Week 1' },
-      { id: 'week_2', name: 'Week 2' }
-    ],
-    days: [
-      { id: 'day_1', weekId: 'week_1', name: 'Day 1' },
-      { id: 'day_2', weekId: 'week_1', name: 'Day 2' },
-      { id: 'day_3', weekId: 'week_2', name: 'Day 1' }
-    ],
-    dailySchedules: [
-      { id: 'slot_1', weekId: 'week_1', dayId: 'day_1', time: '09:00', title: 'Opening Prayer & Vocal Warmup', key: '—', allotment: 15, status: 'rehearsed', note: 'Vocal warmups with Sis Grace' },
-      { id: 'slot_2', weekId: 'week_1', dayId: 'day_1', time: '09:15', title: 'Lord You Are Awesome', key: 'E', allotment: 20, status: 'rehearsed', note: 'Bridge dynamic lift, check horns' },
-      { id: 'slot_3', weekId: 'week_1', dayId: 'day_1', time: '09:35', title: 'Everlasting King', key: 'G', allotment: 25, status: 'not-rehearsed', note: 'Tenors enter on 2nd verse' },
-      { id: 'slot_4', weekId: 'week_1', dayId: 'day_1', time: '10:00', title: 'Refreshment Break', key: '—', allotment: 15, status: 'break', note: 'Short vocal rest' },
-      { id: 'slot_5', weekId: 'week_1', dayId: 'day_1', time: '10:15', title: 'We Exalt Your Name', key: 'C', allotment: 20, status: 'not-rehearsed', note: 'Full band modulation to D' },
-      { id: 'slot_6', weekId: 'week_1', dayId: 'day_1', time: '10:35', title: 'You Are The Living God', key: 'F#', allotment: 25, status: 'not-rehearsed', note: 'Harmonies on chorus' }
-    ],
-    newSongs: [
-      { id: 'new_1', title: 'Grace Abounding', key: 'Ab', duration: '5:20', submittedBy: 'Bro Daniel', submittedOn: '2026-08-10' },
-      { id: 'new_2', title: 'Living Sacrifice', key: 'D', duration: '4:45', submittedBy: 'Sis Sarah', submittedOn: '2026-08-12' }
-    ],
-    carriedOver: [
-      { id: 'co_1', title: 'Victory Chant', rehearsalCount: 2, originalProgram: 'June Praise Festival', key: 'Bb', reason: 'Need more polish on outro' },
-      { id: 'co_2', title: 'Ancient of Days', rehearsalCount: 1, originalProgram: 'Mid-Year Service', key: 'C', reason: 'Arrangement modified with strings' }
-    ],
-    swapped: [
-      { id: 'sw_1', original: 'Lift Up Your Heads', replacement: 'King of Kings', swappedBy: 'Music Director', swappedOn: '2026-08-14', reason: 'Fits the service theme better' }
-    ],
-    nameChanges: [
-      { id: 'nc_1', from: 'Song of Deliverance (Rough)', to: 'Mighty Deliverer', changedBy: 'Admin', changedOn: '2026-08-15', reason: 'Official title confirmed by composer' }
-    ],
-    invalidSongs: [
-      { id: 'inv_1', title: 'Old Anthem Demo', invalidatedBy: 'HQ Admin', replacedBy: 'Living Sacrifice', date: '2026-08-11', reason: 'Key mismatch with choir lead' }
-    ],
-    submitters: [
-      { id: 'sub_1', name: 'Bro Daniel', role: 'Vocal Lead', submissions: 2, quota: 3, isBlocked: false },
-      { id: 'sub_2', name: 'Sis Sarah', role: 'Soprano Lead', submissions: 3, quota: 3, isBlocked: false },
-      { id: 'sub_3', name: 'Bro Kingsley', role: 'Choir Member', submissions: 1, quota: 2, isBlocked: true, since: '2026-08-01', reason: 'Late submissions repeatedly' }
-    ],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'schedule_midweek_2026',
-    name: 'MID-WEEK REHEARSAL 2026',
-    date: '2026-08-05',
-    category: 'schedule',
-    status: 'ongoing',
-    organizationId: 'zone-001',
-    zoneId: 'zone-001',
-    isCurrent: false,
-    isArchived: false,
-    currentWeekId: 'week_1',
-    currentDayId: 'day_1',
-    weeks: [{ id: 'week_1', name: 'Week 1' }],
-    days: [{ id: 'day_1', weekId: 'week_1', name: 'Day 1' }],
-    dailySchedules: [
-      { id: 'm_1', weekId: 'week_1', dayId: 'day_1', time: '17:00', title: 'Band Setup & Line Check', key: '—', allotment: 30, status: 'rehearsed', note: 'Check in-ear monitors' },
-      { id: 'm_2', weekId: 'week_1', dayId: 'day_1', time: '17:30', title: 'Praise Section Medley', key: 'G', allotment: 30, status: 'not-rehearsed', note: 'Fast tempo 128bpm' }
-    ],
-    newSongs: [],
-    carriedOver: [],
-    swapped: [],
-    nameChanges: [],
-    invalidSongs: [],
-    submitters: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'schedule_may_archive',
-    name: 'MAY PRAISE CELEBRATION',
-    date: '2026-05-15',
-    category: 'schedule',
-    status: 'archive',
-    organizationId: 'zone-001',
-    zoneId: 'zone-001',
-    isCurrent: false,
-    isArchived: true,
-    currentWeekId: 'week_1',
-    currentDayId: 'day_1',
-    weeks: [{ id: 'week_1', name: 'Week 1' }],
-    days: [{ id: 'day_1', weekId: 'week_1', name: 'Day 1' }],
-    dailySchedules: [],
-    newSongs: [],
-    carriedOver: [],
-    swapped: [],
-    nameChanges: [],
-    invalidSongs: [],
-    submitters: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
-];
+const DEFAULT_SCHEDULES: ScheduleProgram[] = [];
 
 let memorySchedules: ScheduleProgram[] = [];
 
@@ -207,16 +101,17 @@ function loadSchedulesFromDisk(): ScheduleProgram[] {
     if (fs.existsSync(SCHEDULE_FILE)) {
       const content = fs.readFileSync(SCHEDULE_FILE, 'utf8');
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        // Strip out any legacy hardcoded mock schedules
+        const filtered = parsed.filter(p => !p.id?.startsWith('schedule_hslhs_') && !p.id?.startsWith('schedule_midweek_') && !p.id?.startsWith('schedule_may_archive'));
+        return filtered;
       }
     }
-    // Write defaults
-    fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(DEFAULT_SCHEDULES, null, 2), 'utf8');
-    return [...DEFAULT_SCHEDULES];
+    fs.writeFileSync(SCHEDULE_FILE, JSON.stringify([], null, 2), 'utf8');
+    return [];
   } catch (err) {
     console.error('[schedule.routes] Error loading schedules from disk:', err);
-    return [...DEFAULT_SCHEDULES];
+    return [];
   }
 }
 
@@ -279,18 +174,36 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       isArchived?: string;
     };
 
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || req.tenant?.zoneId || '';
+    const effectiveChurchId = subGroupId || req.tenant?.effectiveChurchId || req.tenant?.churchId || '';
+
     let list = [...memorySchedules];
 
-    if (subGroupId) {
-      list = list.filter(p => p.subGroupId === subGroupId);
-    } else if (zoneId && zoneId !== 'all' && zoneId !== 'global') {
-      list = list.filter(p => p.zoneId === zoneId || p.organizationId === zoneId || p.zoneId === 'zone-001');
+    // Purge any lingering mock IDs
+    list = list.filter(p => !p.id?.startsWith('schedule_hslhs_') && !p.id?.startsWith('schedule_midweek_') && !p.id?.startsWith('schedule_may_archive'));
+
+    // Strict isolation by Church (subGroupId) or Zone
+    if (effectiveChurchId && effectiveChurchId !== 'all' && effectiveChurchId !== 'global') {
+      list = list.filter(p => p.subGroupId === effectiveChurchId);
+    } else if (effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global') {
+      list = list.filter(p => p.zoneId === effectiveZoneId || p.organizationId === effectiveZoneId);
     }
 
     if (isArchived !== undefined) {
       const archBool = isArchived === 'true';
       list = list.filter(p => Boolean(p.isArchived) === archBool);
     }
+
+    res.json({
+      success: true,
+      count: list.length,
+      data: list.map(shapeFullSchedule),
+    });
+  } catch (err) {
+    console.error('[schedule:get]', err);
+    res.status(500).json({ success: false, error: 'Failed to load schedules' });
+  }
+});
 
     res.json({
       success: true,
