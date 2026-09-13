@@ -174,8 +174,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       isArchived?: string;
     };
 
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || req.tenant?.zoneId || '';
-    const effectiveChurchId = subGroupId || req.tenant?.effectiveChurchId || req.tenant?.churchId || '';
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || '';
+    const effectiveChurchId = subGroupId || req.tenant?.effectiveChurchId || '';
 
     let list = [...memorySchedules];
 
@@ -205,16 +205,6 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-    res.json({
-      success: true,
-      count: list.length,
-      data: list.map(shapeFullSchedule),
-    });
-  } catch (err) {
-    console.error('[schedule:get]', err);
-    res.status(500).json({ success: false, error: 'Failed to load schedules' });
-  }
-});
 
 // ── GET /schedules/:scheduleId ──────────────────────────────────────────────
 router.get('/:scheduleId', requireAuth, async (req: Request, res: Response) => {
