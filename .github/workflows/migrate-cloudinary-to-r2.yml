@@ -1,0 +1,57 @@
+name: Cloudinary → R2 Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (list files only, no upload)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  migrate:
+    name: Migrate Cloudinary files to R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max for large libraries
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Run migration script
+        run: npx ts-node scripts/migrate-cloudinary-to-r2.ts
+        env:
+          DATABASE_URL:           ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET_NAME:         ${{ secrets.R2_BUCKET_NAME }}
+          R2_ACCESS_KEY_ID:       ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          API_BASE_URL:           ${{ secrets.API_BASE_URL }}
+          R2_PUBLIC_URL:          ${{ secrets.R2_PUBLIC_URL }}
+          DRY_RUN:                ${{ inputs.dry_run }}
+
+      - name: Upload migration results
+        if: always()   # Upload even if some files failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudinary-migration-results
+          path: |
+            scripts/cloudinary-migration-map.csv
+            scripts/cloudinary-migration-failed.csv
+          retention-days: 30
