@@ -280,16 +280,30 @@ const handleCreateNotification = async (req: Request, res: Response) => {
 router.post('/', requireAuth, requireTenantAdmin, handleCreateNotification);
 router.post('/broadcast', requireAuth, requireTenantAdmin, handleCreateNotification);
 
-/** GET /notifications/sent — List notifications sent by the current admin */
+/** GET /notifications/sent — List admin-composed announcements sent by this admin.
+ *  Excludes call signals, chat messages, and system noise. */
 router.get('/sent', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
     const adminId = auth.userId || auth.id;
 
+    // Only surface genuine admin-authored announcements — exclude call/chat system noise
+    const ADMIN_CATEGORIES = ['rehearsal', 'announcement', 'reminder', 'admin', 'general', 'praise_night', 'system'];
+    const EXCLUDED_CATEGORIES = ['call', 'call_ring', 'call_end', 'call_reject', 'chat', 'message'];
+
     const notifs = await prisma.notification.findMany({
-      where: { senderId: adminId },
+      where: {
+        senderId: adminId,
+        // Must be a recognised admin category and not a call/chat signal
+        category: {
+          in: ADMIN_CATEGORIES,
+          notIn: EXCLUDED_CATEGORIES,
+        },
+        // Exclude anything with no title (silent system pushes)
+        NOT: { title: null },
+      },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 100,
       include: {
         deliveries: {
           select: { id: true, userId: true, isRead: true },
