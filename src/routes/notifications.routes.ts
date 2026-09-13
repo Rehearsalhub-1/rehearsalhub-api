@@ -351,18 +351,45 @@ router.post('/send', requireAuth, async (req: Request, res: Response) => {
         where: { key: { in: metaKeys } },
       });
 
+      const isCallPush = !!(data?.callId || data?.type === 'call' || data?.screen === 'Call');
       const pushMessages: any[] = [];
       for (const s of settings) {
         const val: any = s.value;
         const token = val?.expoPushToken || val?.expo_push_token;
         if (token && typeof token === 'string' && token.startsWith('ExponentPushToken')) {
-          pushMessages.push({
-            to: token,
-            sound: 'default',
-            title: title || 'New Notification',
-            body: body || '',
-            data: data || {},
-          });
+          if (isCallPush) {
+            // High-priority call push — wakes the app even when killed so Notifee
+            // can show the full-screen incoming call UI on Android and CallKit on iOS.
+            pushMessages.push({
+              to: token,
+              sound: 'default',
+              title: title || 'Incoming Call',
+              body: body || 'Someone is calling you.',
+              priority: 'high',
+              channelId: 'incoming_calls',
+              categoryId: 'incoming_call',
+              contentAvailable: true,
+              _displayInForeground: true,
+              data: {
+                ...(data || {}),
+                type: data?.type || 'call',
+                callId: data?.callId,
+                callType: data?.callType || 'voice',
+                callerName: data?.senderName || title || 'Unknown',
+                callerAvatar: data?.senderAvatar || '',
+                chatId: data?.chatId || '',
+                screen: 'IncomingCall',
+              },
+            });
+          } else {
+            pushMessages.push({
+              to: token,
+              sound: 'default',
+              title: title || 'New Notification',
+              body: body || '',
+              data: data || {},
+            });
+          }
         }
       }
 
