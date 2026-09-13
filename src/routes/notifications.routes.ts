@@ -299,8 +299,8 @@ router.get('/sent', requireAuth, requireTenantAdmin, async (req: Request, res: R
           in: ADMIN_CATEGORIES,
           notIn: EXCLUDED_CATEGORIES,
         },
-        // Exclude anything with no title (silent system pushes)
-        NOT: { title: null },
+        // Exclude silent system pushes that have no title
+        title: { not: '' },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -313,8 +313,8 @@ router.get('/sent', requireAuth, requireTenantAdmin, async (req: Request, res: R
 
     const data = notifs.map((n) => ({
       ...shapeNotification(n, false),
-      recipientCount: n.deliveries.length,
-      readCount: n.deliveries.filter((d) => d.isRead).length,
+      recipientCount: (n as any).deliveries?.length ?? 0,
+      readCount: ((n as any).deliveries ?? []).filter((d: any) => d.isRead).length,
     }));
 
     res.json({ success: true, count: data.length, data });
