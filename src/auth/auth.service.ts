@@ -829,8 +829,12 @@ export async function getKingschatProfiles(
   username: string | null,
   selectedEmail: string | null,
   phone: string | null = null,
+  selectedUserId: string | null = null,
 ): Promise<any[]> {
   const orConditions: any[] = [];
+  if (selectedUserId) {
+    orConditions.push({ id: selectedUserId });
+  }
   if (kingschatId) {
     orConditions.push({ kingschatId: { equals: kingschatId, mode: 'insensitive' } });
     orConditions.push({ id: kingschatId });
@@ -865,7 +869,10 @@ export async function getKingschatProfiles(
     take: 10,
   });
 
-  if (selectedEmail) {
+  if (selectedUserId) {
+    const directUser = users.find(u => u.id === selectedUserId);
+    if (directUser) users = [directUser];
+  } else if (selectedEmail) {
     users = users.filter(u => u.email?.toLowerCase().trim() === selectedEmail.toLowerCase().trim());
   }
 

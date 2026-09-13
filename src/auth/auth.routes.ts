@@ -265,9 +265,11 @@ async function fetchKingsChatProfileNative(accessToken: string, apiKey: string):
 
 const kingsChatLoginSchema = z.object({
   accessToken: z.string().min(1),
-  kingschatUserId: z.string().optional(),
-  email: z.string().optional(),
-  selectedEmail: z.string().optional(),
+  kingschatUserId: z.string().nullable().optional(),
+  selectedUserId: z.string().nullable().optional(),
+  userId: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  selectedEmail: z.string().nullable().optional(),
   profile: z.any().optional(),
 });
 
@@ -280,13 +282,17 @@ const handleKingsChatLogin = async (req: any, res: any) => {
   }
 
   try {
-    const { accessToken, kingschatUserId, email, selectedEmail, profile: clientProfile } = req.body as {
+    const { accessToken, kingschatUserId, selectedUserId, userId, email, selectedEmail, profile: clientProfile } = req.body as {
       accessToken: string;
-      kingschatUserId?: string;
-      email?: string;
-      selectedEmail?: string;
+      kingschatUserId?: string | null;
+      selectedUserId?: string | null;
+      userId?: string | null;
+      email?: string | null;
+      selectedEmail?: string | null;
       profile?: any;
     };
+
+    const targetUserId = selectedUserId || userId || null;
 
     let kcUserId: string | null = kingschatUserId || clientProfile?.userId || clientProfile?.user_id || clientProfile?.id || clientProfile?.kingschatId || clientProfile?.kingsChatId || null;
     let verifiedEmail: string | null = (selectedEmail || email) ? (selectedEmail || email)!.trim().toLowerCase() : (clientProfile?.email ? String(clientProfile.email).trim().toLowerCase() : null);
@@ -309,9 +315,9 @@ const handleKingsChatLogin = async (req: any, res: any) => {
       }
     } catch {}
 
-    // 2. If profile data still missing and no selectedEmail, verify with KingsChat Developer API
+    // 2. If profile data still missing and no selectedEmail or selectedUserId, verify with KingsChat Developer API
     const KINGSCHAT_API_KEY = process.env.KINGSCHAT_API_KEY || '';
-    if (KINGSCHAT_API_KEY && !selectedEmail) {
+    if (KINGSCHAT_API_KEY && !selectedEmail && !targetUserId) {
       const p = await fetchKingsChatProfileNative(accessToken, KINGSCHAT_API_KEY);
       if (p) {
         kcUserId = p.id || p.userId || p.user_id || p.kingschatId || p.kingsChatId || kcUserId;
@@ -320,19 +326,20 @@ const handleKingsChatLogin = async (req: any, res: any) => {
       }
     }
 
-    if (!kcUserId && !verifiedEmail) {
+    if (!kcUserId && !verifiedEmail && !targetUserId) {
       res.status(400).json({ success: false, error: 'Could not identify KingsChat user token' });
       return;
     }
 
     // 3. Robust Multi-level Profile Lookup:
-    // Match by kingschatId column OR rawData jsonb OR verified email OR rawData email
+    // Match by kingschatId column OR rawData jsonb OR verified email OR rawData email OR targetUserId
     const matchingProfiles = await getKingschatProfiles(
       kcUserId,
       verifiedEmail,
       verifiedProfileData?.username ? String(verifiedProfileData.username).toLowerCase().trim() : null,
       selectedEmail || null,
       (verifiedProfileData?.phone || verifiedProfileData?.phone_number || null),
+      targetUserId || null,
     );
 
     if (matchingProfiles.length === 0) {
@@ -351,8 +358,8 @@ const handleKingsChatLogin = async (req: any, res: any) => {
       return;
     }
 
-    // If multiple profiles match and user has not explicitly chosen an email yet -> show chooser
-    if (matchingProfiles.length > 1 && !selectedEmail) {
+    // If multiple profiles match and user has not explicitly chosen an account yet -> show chooser
+    if (matchingProfiles.length > 1 && !selectedEmail && !targetUserId) {
       res.json({
         success: false,
         code: 'MULTIPLE_ACCOUNTS',
@@ -365,6 +372,7 @@ const handleKingsChatLogin = async (req: any, res: any) => {
           role: p.role,
           hasHqAccess: p.hasHqAccess,
           avatarUrl: p.avatarUrl,
+          phone: p.phone,
           zoneCode:
             (p.rawData as any)?.zoneCode ||
             (p.rawData as any)?.zone_code ||
@@ -375,7 +383,9 @@ const handleKingsChatLogin = async (req: any, res: any) => {
       return;
     }
 
-    const profile = selectedEmail
+    const profile = targetUserId
+      ? (matchingProfiles.find((p) => p.id === targetUserId) || matchingProfiles[0])
+      : selectedEmail
       ? (matchingProfiles.find((p) => p.email && p.email.toLowerCase() === selectedEmail.toLowerCase()) || matchingProfiles[0])
       : matchingProfiles[0];
 
