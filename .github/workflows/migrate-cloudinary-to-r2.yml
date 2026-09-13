@@ -35,7 +35,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run migration script
-        run: npx ts-node scripts/migrate-cloudinary-to-r2.ts
+        run: npx tsx scripts/migrate-cloudinary-to-r2.ts
         env:
           DATABASE_URL:           ${{ secrets.DATABASE_URL }}
           CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

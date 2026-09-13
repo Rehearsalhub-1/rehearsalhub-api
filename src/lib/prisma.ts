@@ -10,7 +10,10 @@ export type ExtendedPrismaClient = PrismaClient & {
 };
 
 function createPrismaClient(): ExtendedPrismaClient {
-  const connectionString = process.env.DATABASE_URL!;
+  const connectionString = process.env.DATABASE_URL || process.env.DATABASE_DIRECT_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
   const pool = new pg.Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
