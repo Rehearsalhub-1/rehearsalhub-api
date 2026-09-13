@@ -900,12 +900,30 @@ router.get('/notes/:songId', requireAuth, async (req: Request, res: Response) =>
   try {
     const { songId } = req.params;
     const userId = res.locals.auth?.userId || 'guest';
-    const key = `song_note_${userId}_${songId}`;
 
-    const setting = await prisma.setting.findUnique({ where: { key } });
-    const notes = setting?.value && typeof setting.value === 'object' ? (setting.value as any).notes || '' : '';
+    let noteText = '';
+    if (userId && userId !== 'guest') {
+      try {
+        const record = await prisma.userSongNote.findUnique({
+          where: { songId_userId: { songId, userId } },
+        });
+        if (record?.notes) noteText = record.notes;
+      } catch {}
+    }
 
-    res.json({ success: true, data: { notes, note: notes } });
+    if (!noteText) {
+      try {
+        const key = `song_note_${userId}_${songId}`;
+        const setting = await prisma.setting.findUnique({ where: { key } });
+        if (setting?.value && typeof setting.value === 'object') {
+          noteText = (setting.value as any).notes || (setting.value as any).note || '';
+        } else if (typeof setting?.value === 'string') {
+          noteText = setting.value;
+        }
+      } catch {}
+    }
+
+    res.json({ success: true, data: { notes: noteText, note: noteText } });
   } catch (err) {
     console.error('[songs/notes:GET]', err);
     res.json({ success: true, data: { notes: '', note: '' } });
@@ -916,16 +934,32 @@ router.patch('/notes/:songId', requireAuth, async (req: Request, res: Response) 
   try {
     const { songId } = req.params;
     const userId = res.locals.auth?.userId || 'guest';
-    const key = `song_note_${userId}_${songId}`;
-    const notes = req.body.notes || req.body.note || '';
+    const notes = typeof req.body === 'string' ? req.body : (req.body?.notes ?? req.body?.note ?? '');
 
-    await prisma.setting.upsert({
-      where: { key },
-      update: { value: { notes, updatedAt: new Date().toISOString() } },
-      create: { key, value: { notes, updatedAt: new Date().toISOString() } },
-    });
+    if (userId && userId !== 'guest') {
+      try {
+        await prisma.userSongNote.upsert({
+          where: { songId_userId: { songId, userId } },
+          update: { notes: String(notes) },
+          create: { songId, userId, notes: String(notes) },
+        });
+      } catch (err: any) {
+        console.warn('[songs/notes:userSongNote upsert]:', err?.message);
+      }
+    }
 
-    res.json({ success: true, message: 'Notes saved', data: { notes } });
+    try {
+      const key = `song_note_${userId}_${songId}`;
+      await prisma.setting.upsert({
+        where: { key },
+        update: { value: { notes: String(notes), updatedAt: new Date().toISOString() } },
+        create: { key, value: { notes: String(notes), updatedAt: new Date().toISOString() } },
+      });
+    } catch (err: any) {
+      console.warn('[songs/notes:setting upsert]:', err?.message);
+    }
+
+    res.json({ success: true, message: 'Notes saved', data: { notes: String(notes) } });
   } catch (err) {
     console.error('[songs/notes:PATCH]', err);
     res.status(500).json({ success: false, error: 'Failed to save notes' });
