@@ -6,16 +6,22 @@ import { requireAuth, requireTenantAdmin, requireZoneOrHqAdmin } from '../auth/a
 const router = Router();
 
 function shapeGroup(g: any) {
+  const coord = g.memberships?.[0]?.user;
+  const coordinatorName = coord ? [coord.firstName, coord.lastName].filter(Boolean).join(' ') || coord.email : (g.coordinatorName || undefined);
+  const coordinatorEmail = coord?.email || g.coordinatorEmail || undefined;
+
   return {
     id: g.id,
     name: g.name,
-    code: g.name.slice(0, 4).toUpperCase(),
+    code: g.code || g.name.slice(0, 4).toUpperCase(),
     organizationId: g.organizationId,
     zoneId: g.organizationId,
     type: g.type || 'church',
     status: g.status || 'active',
     description: g.description || '',
     estimatedMembers: g.estimatedMembers || 0,
+    coordinatorName,
+    coordinatorEmail,
     createdAt: g.createdAt,
     updatedAt: g.updatedAt,
   };
@@ -71,14 +77,26 @@ router.post('/requests', requireAuth, async (_req: Request, res: Response) => {
 /** GET /subgroups - List groups */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const effectiveZoneId = req.tenant?.effectiveZoneId || 'zone-001';
+    const queryZoneId = (req.query.zoneId || req.query.zone_code) as string | undefined;
+    const effectiveZoneId = queryZoneId || req.tenant?.effectiveZoneId || 'zone-001';
+
+    const whereClause: any = queryZoneId
+      ? { organizationId: queryZoneId }
+      : {
+          OR: [
+            { organizationId: effectiveZoneId },
+            { organizationId: 'zone-001' },
+          ],
+        };
 
     const groups = await prisma.group.findMany({
-      where: {
-        OR: [
-          { organizationId: effectiveZoneId },
-          { organizationId: 'zone-001' },
-        ],
+      where: whereClause,
+      include: {
+        memberships: {
+          where: { role: 'GROUP_ADMIN' },
+          include: { user: true },
+          take: 1,
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -221,13 +239,17 @@ router.delete('/:id/members/:userId', requireAuth, requireTenantAdmin, async (re
 router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { email, userId } = req.body;
+    const { email, userId, identifier } = req.body;
 
     let targetUser: any = null;
-    if (userId) {
-      targetUser = await prisma.user.findUnique({ where: { id: userId } });
-    } else if (email) {
-      targetUser = await prisma.user.findFirst({ where: { email: email.toLowerCase().trim() } });
+    const lookupId = userId || (!identifier?.includes('@') ? identifier : null);
+    const lookupEmail = (email || (identifier?.includes('@') ? identifier : null))?.toLowerCase().trim();
+
+    if (lookupId) {
+      targetUser = await prisma.user.findUnique({ where: { id: lookupId } });
+    }
+    if (!targetUser && lookupEmail) {
+      targetUser = await prisma.user.findFirst({ where: { email: lookupEmail } });
     }
 
     if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
@@ -256,6 +278,22 @@ router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async 
         },
       });
     }
+
+    // Sync profile_meta for user
+    const metaKey = `profile_meta_${targetUser.id}`;
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+    const currentMeta: any = existingMeta?.value || {};
+    const updatedMeta = {
+      ...currentMeta,
+      role: 'church_coordinator',
+      church: group.name,
+      churchId: group.id,
+    };
+    await prisma.setting.upsert({
+      where: { key: metaKey },
+      create: { key: metaKey, value: updatedMeta },
+      update: { value: updatedMeta },
+    });
 
     res.json({ success: true, message: 'Coordinator assigned successfully' });
   } catch (err) {
@@ -268,13 +306,17 @@ router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async 
 router.post('/:id/coordinators', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { email, userId } = req.body;
+    const { email, userId, identifier } = req.body;
 
     let targetUser: any = null;
-    if (userId) {
-      targetUser = await prisma.user.findUnique({ where: { id: userId } });
-    } else if (email) {
-      targetUser = await prisma.user.findFirst({ where: { email: email.toLowerCase().trim() } });
+    const lookupId = userId || (!identifier?.includes('@') ? identifier : null);
+    const lookupEmail = (email || (identifier?.includes('@') ? identifier : null))?.toLowerCase().trim();
+
+    if (lookupId) {
+      targetUser = await prisma.user.findUnique({ where: { id: lookupId } });
+    }
+    if (!targetUser && lookupEmail) {
+      targetUser = await prisma.user.findFirst({ where: { email: lookupEmail } });
     }
 
     if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
@@ -303,6 +345,22 @@ router.post('/:id/coordinators', requireAuth, requireZoneOrHqAdmin, async (req: 
         },
       });
     }
+
+    // Sync profile_meta for user
+    const metaKey = `profile_meta_${targetUser.id}`;
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+    const currentMeta: any = existingMeta?.value || {};
+    const updatedMeta = {
+      ...currentMeta,
+      role: 'church_coordinator',
+      church: group.name,
+      churchId: group.id,
+    };
+    await prisma.setting.upsert({
+      where: { key: metaKey },
+      create: { key: metaKey, value: updatedMeta },
+      update: { value: updatedMeta },
+    });
 
     res.json({ success: true, message: 'Coordinator assigned successfully' });
   } catch (err) {

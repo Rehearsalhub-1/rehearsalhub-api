@@ -3,21 +3,62 @@ import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
+import { sendExpoPushToUsers } from './notifications.routes';
 
 const router = Router();
 
-function shapeCall(c: any) {
+function shapeCall(c: any, callerMeta?: any, receiverMeta?: any) {
   const caller = c.caller || {};
   const receiver = c.receiver || {};
-  const isGroup = !!c.chatId && (c.chatId.startsWith('group') || c.receiverId.startsWith('group') || c.chatId !== c.receiverId);
+  const isGroup = Boolean(
+    c.isGroup ||
+    (c.chatId && (c.chatId.startsWith('group_') || c.chatId.startsWith('group'))) ||
+    (c.receiverId && c.receiverId.startsWith('group')) ||
+    c.type === 'group'
+  );
+
+  const callerDisplayName =
+    (c.callerName && c.callerName !== 'Caller' && c.callerName !== 'Member' && c.callerName !== 'Me')
+      ? c.callerName
+      : callerMeta?.displayName ||
+        (callerMeta?.firstName ? [callerMeta.firstName, callerMeta.lastName].filter(Boolean).join(' ') : null) ||
+        callerMeta?.name ||
+        [caller.firstName, caller.lastName].filter(Boolean).join(' ') ||
+        caller.email ||
+        'Caller';
+
+  const callerAvatarUrl =
+    c.callerAvatar ||
+    callerMeta?.avatar ||
+    callerMeta?.photoURL ||
+    caller.avatarUrl ||
+    null;
+
+  const receiverDisplayName =
+    (c.receiverName && c.receiverName !== 'Receiver' && c.receiverName !== 'Member')
+      ? c.receiverName
+      : receiverMeta?.displayName ||
+        (receiverMeta?.firstName ? [receiverMeta.firstName, receiverMeta.lastName].filter(Boolean).join(' ') : null) ||
+        receiverMeta?.name ||
+        [receiver.firstName, receiver.lastName].filter(Boolean).join(' ') ||
+        receiver.email ||
+        (isGroup ? 'Group Call' : 'Member');
+
+  const receiverAvatarUrl =
+    c.receiverAvatar ||
+    receiverMeta?.avatar ||
+    receiverMeta?.photoURL ||
+    receiver.avatarUrl ||
+    null;
+
   return {
     id: c.id,
     callerId: c.callerId,
     receiverId: c.receiverId,
-    callerName: c.callerName || [caller.firstName, caller.lastName].filter(Boolean).join(' ') || caller.email || 'Caller',
-    callerAvatar: c.callerAvatar || caller.avatarUrl || null,
-    receiverName: (receiver && receiver.firstName) ? [receiver.firstName, receiver.lastName].filter(Boolean).join(' ') : (isGroup ? 'Group Call' : 'Member'),
-    receiverAvatar: receiver.avatarUrl || null,
+    callerName: callerDisplayName,
+    callerAvatar: callerAvatarUrl,
+    receiverName: receiverDisplayName,
+    receiverAvatar: receiverAvatarUrl,
     type: c.type || 'voice',
     status: c.status || 'ended',
     roomId: c.roomId || c.id,
@@ -86,7 +127,19 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       take: 100,
     });
 
-    res.json({ success: true, count: userCalls.length, data: userCalls.map(shapeCall) });
+    const userIds = Array.from(new Set(userCalls.flatMap((c: any) => [c.callerId, c.receiverId]).filter(Boolean)));
+    const metaKeys = userIds.map((id) => `profile_meta_${id}`);
+    const metaSettings = metaKeys.length > 0 ? await prisma.setting.findMany({
+      where: { key: { in: metaKeys } },
+    }) : [];
+    const metaMap = new Map<string, any>();
+    metaSettings.forEach((s) => metaMap.set(s.key.replace('profile_meta_', ''), s.value));
+
+    res.json({
+      success: true,
+      count: userCalls.length,
+      data: userCalls.map((c: any) => shapeCall(c, metaMap.get(c.callerId), metaMap.get(c.receiverId))),
+    });
   } catch (err: any) {
     console.error('[calls:get]', err);
     res.json({ success: true, count: 0, data: [] });
@@ -101,7 +154,16 @@ router.get('/:callId', requireAuth, async (req: Request, res: Response) => {
       include: { caller: true, receiver: true },
     });
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
-    res.json({ success: true, data: shapeCall(call) });
+
+    const [callerMetaRow, receiverMetaRow] = await Promise.all([
+      prisma.setting.findUnique({ where: { key: `profile_meta_${call.callerId}` } }).catch(() => null),
+      prisma.setting.findUnique({ where: { key: `profile_meta_${call.receiverId}` } }).catch(() => null),
+    ]);
+
+    res.json({
+      success: true,
+      data: shapeCall(call, callerMetaRow?.value, receiverMetaRow?.value),
+    });
   } catch (err) {
     console.error('[calls:get:id]', err);
     res.status(500).json({ success: false, error: 'Failed to load call details' });
@@ -121,13 +183,30 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const callId = req.body.id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+    // Resolve caller and receiver metadata from database
+    const [callerMetaRow, receiverMetaRow] = await Promise.all([
+      prisma.setting.findUnique({ where: { key: `profile_meta_${auth.userId}` } }).catch(() => null),
+      prisma.setting.findUnique({ where: { key: `profile_meta_${receiverId}` } }).catch(() => null),
+    ]);
+    const callerMeta = callerMetaRow?.value as any;
+    const receiverMeta = receiverMetaRow?.value as any;
+
+    const resolvedCallerName =
+      (callerName && callerName !== 'Caller' && callerName !== 'Me')
+        ? callerName
+        : callerMeta?.displayName ||
+          (callerMeta?.firstName ? [callerMeta.firstName, callerMeta.lastName].filter(Boolean).join(' ') : null) ||
+          callerMeta?.name ||
+          'Caller';
+    const resolvedCallerAvatar = callerAvatar || callerMeta?.avatar || callerMeta?.photoURL || null;
+
     const call = await prisma.call.create({
       data: {
         id: callId,
         callerId: auth.userId,
         receiverId,
-        callerName: callerName || null,
-        callerAvatar: callerAvatar || null,
+        callerName: resolvedCallerName,
+        callerAvatar: resolvedCallerAvatar,
         type,
         status: 'ringing',
         roomId: callId,
@@ -136,7 +215,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       include: { caller: true, receiver: true },
     });
 
-    const shaped = shapeCall(call);
+    const shaped = shapeCall(call, callerMeta, receiverMeta);
     const participantIds: string[] = Array.isArray(req.body.participantIds) && req.body.participantIds.length > 0
       ? req.body.participantIds
       : [receiverId];
@@ -148,6 +227,26 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
     if (chatId) broadcast('calls', chatId, { type: 'incoming_call', call: shaped });
     broadcast('call', callId, shaped);
+
+    // Dispatch high-priority incoming call push notification
+    const pushTargets = participantIds.filter((pid) => pid && pid !== auth.userId);
+    if (pushTargets.length > 0) {
+      sendExpoPushToUsers(pushTargets, {
+        title: shaped.isGroup ? `${shaped.receiverName}: Incoming Call` : `Incoming ${type === 'video' ? 'Video' : 'Voice'} Call`,
+        body: `${shaped.callerName} is calling you...`,
+        data: {
+          screen: 'IncomingCall',
+          type: 'call',
+          callId: shaped.id,
+          callType: shaped.type,
+          callerName: shaped.callerName,
+          callerAvatar: shaped.callerAvatar || '',
+          roomId: shaped.chatId || shaped.id,
+          chatId: shaped.chatId || null,
+        },
+      }).catch((e) => console.warn('[calls:push]', e));
+    }
+
     res.status(201).json({ success: true, data: shaped });
   } catch (err) {
     console.error('[calls:post]', err);

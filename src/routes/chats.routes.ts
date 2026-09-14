@@ -131,7 +131,7 @@ function formatMessage(m: any) {
   };
 }
 
-function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string, any> = {}, settingsMap: Record<string, any> = {}) {
+function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string, any> = {}, settingsMap: Record<string, any> = {}, acceptedMap: Record<string, boolean> = {}) {
   const participants: string[] = [];
   const details: Record<string, any> = {};
 
@@ -176,9 +176,31 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     }
   }
 
-  const lastMsg = Array.isArray(c.messages) && c.messages.length > 0 ? c.messages[0] : null;
-  const lastSender = lastMsg?.sender || (lastMsg?.senderId ? extraUsersMap[lastMsg.senderId] || details[lastMsg.senderId] : null);
-  const lastSenderName = getUserDisplayName(lastSender);
+  const isAuditOrSystem = (m: any) => {
+    if (!m) return false;
+    if (m.type === 'system' || m.type === 'audit' || m.type === 'log') return true;
+    const txt = (typeof m.text === 'string' ? m.text : '').trim().toLowerCase();
+    return (
+      txt.includes('created group') ||
+      txt.includes('created the group') ||
+      txt.includes('left the group') ||
+      (txt.includes('promoted') && txt.includes('admin')) ||
+      (txt.includes('dismissed') && txt.includes('admin')) ||
+      (txt.includes('removed') && txt.includes('group')) ||
+      txt.includes('disappearing messages') ||
+      txt.includes('audit log') ||
+      txt.includes('changed group') ||
+      txt.includes('updated group') ||
+      txt.startsWith('[system]') ||
+      txt.startsWith('[audit]')
+    );
+  };
+
+  const lastMsg = Array.isArray(c.messages)
+    ? (c.messages.find((m: any) => !isAuditOrSystem(m)) || null)
+    : null;
+  const lastSender = lastMsg ? (lastMsg.sender || (lastMsg.senderId ? extraUsersMap[lastMsg.senderId] || details[lastMsg.senderId] : null)) : null;
+  const lastSenderName = lastSender ? getUserDisplayName(lastSender) : null;
 
   let lastMsgText = lastMsg?.text || '';
   if (typeof lastMsgText === 'string' && lastMsgText.startsWith('{') && lastMsgText.endsWith('}')) {
@@ -218,6 +240,16 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     }
   }
 
+  const isAccepted = !isDirect
+    ? true
+    : Boolean(
+        acceptedMap[c.id] ||
+        (currentUserId && acceptedMap[`${currentUserId}_${c.id}`]) ||
+        (currentUserId && c.createdById === currentUserId) ||
+        (currentUserId && Array.isArray(c.messages) && c.messages.some((m: any) => m.senderId === currentUserId))
+      );
+  const isRequest = isDirect && !isAccepted;
+
   return {
     id: c.id,
     title,
@@ -245,6 +277,8 @@ function formatChat(c: any, currentUserId?: string, extraUsersMap: Record<string
     unreadCount: myUnreadCount,
     unread: myUnreadCount,
     unreadMap,
+    isAccepted,
+    isRequest,
     createdAt: c.createdAt,
   };
 }
@@ -264,7 +298,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         },
         messages: {
           orderBy: { createdAt: 'desc' },
-          take: 1,
+          take: 10,
           include: { sender: true },
         },
       },
@@ -305,7 +339,18 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       } catch {}
     });
 
-    const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap, settingsMap));
+    // Query acceptance settings for direct chats
+    const acceptKeys = chatRows.flatMap(c => [`chat_accepted_${c.id}`, `chat_accepted_${userId}_${c.id}`]);
+    const acceptList = acceptKeys.length > 0 ? await prisma.setting.findMany({
+      where: { key: { in: acceptKeys } }
+    }).catch(() => []) : [];
+    const acceptedMap: Record<string, boolean> = {};
+    acceptList.forEach((s: any) => {
+      const k = s.key.replace('chat_accepted_', '');
+      acceptedMap[k] = true;
+    });
+
+    const data = chatRows.map((c) => formatChat(c, userId, extraUsersMap, settingsMap, acceptedMap));
     data.sort((a, b) => {
       const timeA = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
       const timeB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
@@ -364,7 +409,16 @@ router.get('/:chatId', requireAuth, async (req: Request, res: Response) => {
     const settingsKey = `chat_settings_${chatId}`;
     const settingsRow = await prisma.setting.findUnique({ where: { key: settingsKey } }).catch(() => null);
     const settingsVal: any = settingsRow?.value || {};
-    const formatted = formatChat(chat, userId);
+
+    const [userAcceptRow, globalAcceptRow] = await Promise.all([
+      prisma.setting.findUnique({ where: { key: `chat_accepted_${userId}_${chatId}` } }).catch(() => null),
+      prisma.setting.findUnique({ where: { key: `chat_accepted_${chatId}` } }).catch(() => null),
+    ]);
+    const acceptedMap: Record<string, boolean> = {};
+    if (userAcceptRow) acceptedMap[`${userId}_${chatId}`] = true;
+    if (globalAcceptRow) acceptedMap[chatId] = true;
+
+    const formatted = formatChat(chat, userId, {}, {}, acceptedMap);
     const savedAdmins = Array.isArray(settingsVal?.admins) ? settingsVal.admins : [];
     formatted.admins = Array.from(new Set([chat.createdById, ...savedAdmins].filter(Boolean)));
 
@@ -410,7 +464,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 10, include: { sender: true } },
       },
     });
 
@@ -433,7 +487,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1, include: { sender: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 10, include: { sender: true } },
       },
     });
 
@@ -920,7 +974,7 @@ router.patch('/:chatId', requireAuth, async (req: Request, res: Response) => {
       where: { id: chatId },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 10, include: { sender: true } },
       },
     });
 
@@ -997,7 +1051,7 @@ router.post('/:chatId/participants', requireAuth, async (req: Request, res: Resp
       where: { id: chatId },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 10, include: { sender: true } },
       },
     });
 
@@ -1026,7 +1080,7 @@ router.delete('/:chatId/participants/:targetUserId', requireAuth, async (req: Re
       where: { id: chatId },
       include: {
         participants: { include: { user: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 10, include: { sender: true } },
       },
     });
 
@@ -1064,16 +1118,37 @@ router.post('/requests/:chatId/accept', requireAuth, async (req: Request, res: R
     const { chatId } = req.params;
     const auth = res.locals.auth;
 
-    // Save acceptance in settings/metadata
-    const key = `chat_accepted_${auth.userId}_${chatId}`;
-    await prisma.setting.upsert({
-      where: { key },
-      create: { key, value: { accepted: true, acceptedAt: new Date().toISOString() } },
-      update: { value: { accepted: true, acceptedAt: new Date().toISOString() } },
-    });
+    // Save acceptance in settings/metadata for both user and global chat
+    const userKey = `chat_accepted_${auth.userId}_${chatId}`;
+    const globalKey = `chat_accepted_${chatId}`;
+    const val = { accepted: true, acceptedBy: auth.userId, acceptedAt: new Date().toISOString() };
 
-    broadcast('chat_accepted', chatId, { chatId, userId: auth.userId });
-    res.json({ success: true, message: 'Chat request accepted' });
+    await Promise.all([
+      prisma.setting.upsert({
+        where: { key: userKey },
+        create: { key: userKey, value: val },
+        update: { value: val },
+      }).catch(() => null),
+      prisma.setting.upsert({
+        where: { key: globalKey },
+        create: { key: globalKey, value: val },
+        update: { value: val },
+      }).catch(() => null),
+      // Clear unread count for this user in chat
+      prisma.chatParticipant.updateMany({
+        where: { chatId, userId: auth.userId },
+        data: { unreadCount: 0 },
+      }).catch(() => null),
+      // Mark messages as read
+      prisma.message.updateMany({
+        where: { chatId, senderId: { not: auth.userId }, status: { in: ['sent', 'delivered'] } },
+        data: { status: 'read' },
+      }).catch(() => null),
+    ]);
+
+    broadcast('chat_accepted', chatId, { chatId, userId: auth.userId, isAccepted: true });
+    broadcast('chats', auth.userId, { type: 'chat_accepted', chatId, isAccepted: true });
+    res.json({ success: true, message: 'Chat request accepted', isAccepted: true });
   } catch (err: any) {
     console.error('[chats:requests:accept]', err);
     res.status(500).json({ success: false, error: err?.message || 'Failed to accept request' });
