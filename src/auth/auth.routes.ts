@@ -493,4 +493,34 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// DELETE /auth/delete-account - Permanently delete user's own account
+router.delete('/delete-account', requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.auth?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
+    // Cascade deletes credentials, tokens, memberships, etc.
+    await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (err: any) {
+    console.error('[auth/delete-account error]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete account' });
+  }
+});
+
 export default router;

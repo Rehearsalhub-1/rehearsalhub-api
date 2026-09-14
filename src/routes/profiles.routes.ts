@@ -583,4 +583,38 @@ router.post('/:userId/password', requireAuth, async (req, res) => {
   }
 });
 
+// DELETE /profiles/:userId
+router.delete('/:userId', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const auth = res.locals.auth;
+    const isOwner = auth?.userId === userId;
+    const isAdmin =
+      auth?.role === 'hq_admin' ||
+      auth?.role === 'admin' ||
+      auth?.role === 'super_admin' ||
+      auth?.role === 'zone_admin' ||
+      auth?.role === 'zone_coordinator';
+
+    if (!isOwner && !isAdmin) {
+      res.status(403).json({ success: false, error: 'Forbidden: Insufficient permissions' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
+    await prisma.user.delete({ where: { id: userId } });
+    broadcast('profiles', userId, { type: 'deleted', id: userId });
+
+    res.json({ success: true, message: 'Profile deleted successfully' });
+  } catch (err: any) {
+    console.error('[profiles/:userId DELETE error]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete profile' });
+  }
+});
+
 export default router;
