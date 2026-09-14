@@ -486,10 +486,36 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
     const text = (req.body.text || req.body.content || req.body.message || '').trim();
     const type = req.body.type || 'text';
 
-    const chat = await prisma.chat.findUnique({
+    let chat = await prisma.chat.findUnique({
       where: { id: chatId },
       include: { participants: true },
     });
+
+    if (!chat && chatId.includes('_')) {
+      const parts = chatId.split('_');
+      if (parts.length === 2 && parts.includes(auth.userId)) {
+        try {
+          chat = await prisma.chat.create({
+            data: {
+              id: chatId,
+              type: 'direct',
+              title: 'Direct Message',
+              createdById: auth.userId,
+              organizationId: req.tenant?.effectiveZoneId || null,
+              participants: {
+                create: parts.map((uId: string) => ({ userId: uId })),
+              },
+            },
+            include: { participants: true },
+          });
+        } catch (createErr) {
+          chat = await prisma.chat.findUnique({
+            where: { id: chatId },
+            include: { participants: true },
+          });
+        }
+      }
+    }
 
     if (!chat) return res.status(404).json({ success: false, error: 'Chat not found' });
     const isParticipant = chat.participants.some((p) => p.userId === auth.userId);
