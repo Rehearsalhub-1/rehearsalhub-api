@@ -129,7 +129,7 @@ function shapeSong(song: any) {
     audioFile: audioUrl,
     audioUrl: audioUrl,
     audioUrls: Object.keys(audioUrls).length > 0 ? audioUrls : (audioUrl ? { full: audioUrl } : null),
-    category: song.category || 'Praise Night',
+    category: song.category || null,
     status: song.status || 'active',
     isMaster: Boolean(song.isMaster),
     isMinistered: Boolean(song.isMinistered),
