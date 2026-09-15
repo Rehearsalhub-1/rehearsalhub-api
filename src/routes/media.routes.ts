@@ -91,7 +91,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const { folder, type, zoneId, limit, search } = req.query as Record<string, string>;
     const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
-    const takeCount = limit ? Math.min(parseInt(limit, 10), 500) : 100;
+    const takeCount = limit ? Math.min(parseInt(limit, 10), 5000) : 2000;
 
     // Tenancy Filter: Strictly enforce organization / zone isolation so zones do not see other orgs' media
     const whereClause: any = effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global'
