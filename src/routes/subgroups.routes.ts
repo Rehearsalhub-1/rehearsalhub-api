@@ -728,15 +728,38 @@ router.patch('/praise-nights/:id', requireAuth, requireTenantAdmin, async (req: 
 
     if (Array.isArray(body.songIds)) {
       const uniqueSongIds: string[] = Array.from(new Set<string>(body.songIds.map(String)));
-      await prisma.programSong.deleteMany({ where: { programId: id } });
-      if (uniqueSongIds.length > 0) {
-        await prisma.programSong.createMany({
-          data: uniqueSongIds.map((sId: string, idx: number) => ({
-            programId: id,
-            songId: sId,
-            order: idx + 1,
-          })),
+      // SAFEGUARD: Check existing song count to prevent accidental bulk-drop / race-condition wipes
+      const currentCount = await prisma.programSong.count({ where: { programId: id } });
+      const isSuspectBulkDrop = currentCount > 3 && uniqueSongIds.length <= 1 && !body.confirmTruncate;
+
+      if (isSuspectBulkDrop) {
+        console.warn(`[SAFETY GUARD BLOCKED] Refused to drop ${currentCount} songs down to ${uniqueSongIds.length} songs for subgroup program ${id} without confirmTruncate flag.`);
+        const existingLinks = await prisma.programSong.findMany({
+          where: { programId: id },
+          orderBy: { order: 'asc' },
         });
+        const existingIdSet = new Set(existingLinks.map(l => l.songId));
+        let maxOrder = existingLinks.reduce((max, l) => Math.max(max, l.order || 0), 0);
+
+        for (const sId of uniqueSongIds) {
+          if (!existingIdSet.has(sId)) {
+            maxOrder += 1;
+            await prisma.programSong.create({
+              data: { programId: id, songId: sId, order: maxOrder },
+            });
+          }
+        }
+      } else {
+        await prisma.programSong.deleteMany({ where: { programId: id } });
+        if (uniqueSongIds.length > 0) {
+          await prisma.programSong.createMany({
+            data: uniqueSongIds.map((sId: string, idx: number) => ({
+              programId: id,
+              songId: sId,
+              order: idx + 1,
+            })),
+          });
+        }
       }
     }
 
