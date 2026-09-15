@@ -375,7 +375,23 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
       const resolvedType        = (h.type        || 'details').toLowerCase().trim();
       const resolvedNewValue    = h.newValue    || '';
       const resolvedOldValue    = h.oldValue    || '';
-      const resolvedDescription = h.description || 'Song Update';
+
+      let resolvedTitle = h.description || 'Song Update';
+      let resolvedNotes = '';
+
+      if (h.description && typeof h.description === 'string' && h.description.trim().startsWith('{') && h.description.trim().endsWith('}')) {
+        try {
+          const parsed = JSON.parse(h.description.trim());
+          if (parsed && typeof parsed === 'object') {
+            resolvedTitle = (parsed.title || parsed.description || resolvedTitle).trim();
+            resolvedNotes = (parsed.notes || '').trim();
+          }
+        } catch {}
+      } else if (h.description && h.description.includes(' — ')) {
+        const parts = h.description.split(' — ');
+        resolvedTitle = parts[0].trim();
+        resolvedNotes = parts.slice(1).join(' — ').trim();
+      }
 
       // Audio URL: newValue is the URL for audio-type entries
       const resolvedAudioUrl = resolvedType === 'audio' ? resolvedNewValue : null;
@@ -388,8 +404,9 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
         id: h.id,
         songId: h.songId,
         type: resolvedType,
-        title: resolvedDescription,
-        description: resolvedDescription,
+        title: resolvedTitle,
+        description: resolvedNotes || resolvedTitle,
+        notes: resolvedNotes,
         old_value: resolvedOldValue,
         new_value: resolvedNewValue,
         oldValue: resolvedOldValue,
@@ -423,7 +440,13 @@ router.post('/history', requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const desc = (description || title || 'Song updated').trim();
+    const cleanTitle = (title || description || 'Song Update').trim();
+    const cleanNotes = (description || '').trim();
+
+    let descToSave = cleanTitle;
+    if (cleanNotes && cleanNotes !== cleanTitle) {
+      descToSave = JSON.stringify({ title: cleanTitle, notes: cleanNotes });
+    }
 
     let validUserId: string | null = null;
     if (res.locals.auth?.userId) {
@@ -439,7 +462,7 @@ router.post('/history', requireAuth, async (req: Request, res: Response) => {
         songId,
         userId: validUserId,
         type: type || 'metadata',
-        description: desc,
+        description: descToSave,
         oldValue: typeof rawOld === 'object' ? JSON.stringify(rawOld) : String(rawOld || ''),
         newValue: typeof rawNew === 'object' ? JSON.stringify(rawNew) : String(rawNew || ''),
       },
@@ -449,8 +472,9 @@ router.post('/history', requireAuth, async (req: Request, res: Response) => {
       id: entry.id,
       songId: entry.songId,
       type: entry.type,
-      title: entry.description,
-      description: entry.description,
+      title: cleanTitle,
+      description: cleanNotes || cleanTitle,
+      notes: cleanNotes,
       old_value: entry.oldValue,
       new_value: entry.newValue,
       oldValue: entry.oldValue,
@@ -484,9 +508,34 @@ router.patch('/history/:id', requireAuth, async (req: Request, res: Response) =>
       return res.status(404).json({ success: false, error: 'History entry not found' });
     }
 
-    const updateData: any = {};
+    let currentTitle = existing.description || 'Song Update';
+    let currentNotes = '';
+    if (existing.description && existing.description.trim().startsWith('{') && existing.description.trim().endsWith('}')) {
+      try {
+        const parsed = JSON.parse(existing.description.trim());
+        if (parsed && typeof parsed === 'object') {
+          currentTitle = parsed.title || currentTitle;
+          currentNotes = parsed.notes || '';
+        }
+      } catch {}
+    } else if (existing.description && existing.description.includes(' — ')) {
+      const parts = existing.description.split(' — ');
+      currentTitle = parts[0].trim();
+      currentNotes = parts.slice(1).join(' — ').trim();
+    }
+
+    const nextTitle = title !== undefined ? String(title).trim() : currentTitle;
+    const nextNotes = description !== undefined ? String(description).trim() : currentNotes;
+
+    let descToSave = nextTitle;
+    if (nextNotes && nextNotes !== nextTitle) {
+      descToSave = JSON.stringify({ title: nextTitle, notes: nextNotes });
+    }
+
+    const updateData: any = {
+      description: descToSave,
+    };
     if (type !== undefined) updateData.type = type;
-    if (description !== undefined || title !== undefined) updateData.description = (description || title).trim();
     if (rawOld !== undefined) updateData.oldValue = typeof rawOld === 'object' ? JSON.stringify(rawOld) : String(rawOld || '');
     if (rawNew !== undefined) updateData.newValue = typeof rawNew === 'object' ? JSON.stringify(rawNew) : String(rawNew || '');
 
@@ -499,8 +548,9 @@ router.patch('/history/:id', requireAuth, async (req: Request, res: Response) =>
       id: updated.id,
       songId: updated.songId,
       type: updated.type,
-      title: updated.description,
-      description: updated.description,
+      title: nextTitle,
+      description: nextNotes || nextTitle,
+      notes: nextNotes,
       old_value: updated.oldValue,
       new_value: updated.newValue,
       oldValue: updated.oldValue,
