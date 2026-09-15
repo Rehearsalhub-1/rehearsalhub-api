@@ -649,6 +649,10 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
       orderBy: { updatedAt: 'desc' },
     });
     const formatted = activeSongs.map(formatSong);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     console.error('[songs:active]', err);
@@ -833,6 +837,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
     broadcast('song', songId, formatted);
+    broadcast('songs', 'all', formatted);
+    broadcast('song', 'all', formatted);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
@@ -854,6 +860,8 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
     broadcast('song', songId, formatted);
+    broadcast('songs', 'all', formatted);
+    broadcast('song', 'all', formatted);
     broadcast('song_status', songId, { id: songId, status: updated.status });
     res.json({ success: true, message: 'Song status updated', data: formatted });
   } catch (err) {
@@ -904,6 +912,8 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     const formatted = formatSong(updated);
     broadcast('songs', songId, formatted);
     broadcast('song', songId, formatted);
+    broadcast('songs', 'all', formatted);
+    broadcast('song', 'all', formatted);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });
@@ -919,6 +929,7 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res:
     await prisma.song.delete({ where: { id: songId } });
 
     broadcast('songs', songId, { id: songId, deleted: true });
+    broadcast('songs', 'all', { id: songId, deleted: true });
     res.json({ success: true, message: 'Song deleted' });
   } catch (err) {
     console.error('[songs:DELETE]', err);

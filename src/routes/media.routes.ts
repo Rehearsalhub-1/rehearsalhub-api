@@ -100,6 +100,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     if (folder && folder !== 'all') {
       whereClause.folder = folder;
+    } else {
+      whereClause.NOT = [
+        { folder: { startsWith: 'audiolab' } },
+        { folder: { startsWith: 'statuses' } },
+        { folder: { startsWith: 'takes' } },
+        { folder: { startsWith: 'avatars' } },
+        { folder: { startsWith: 'personal' } },
+      ];
     }
 
     if (type && type !== 'all') {

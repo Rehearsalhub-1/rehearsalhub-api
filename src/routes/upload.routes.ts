@@ -71,9 +71,22 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
 
     const requestedFolder = (req.body.folder || 'general').toString().replace(/^\/+|\/+$/g, '');
     const folder = `zones/${zoneId}/${requestedFolder || 'general'}`;
+
+    const ext = file.originalname?.includes('.')
+      ? file.originalname.split('.').pop()
+      : (file.mimetype ? file.mimetype.split('/').pop() : 'bin');
+
+    let resolvedFilename = (req.body.name || req.body.title || req.body.filename || file.originalname || '').toString().trim();
+    if (resolvedFilename && ext && !resolvedFilename.toLowerCase().endsWith(`.${ext.toLowerCase()}`)) {
+      resolvedFilename = `${resolvedFilename}.${ext}`;
+    }
+    if (!resolvedFilename) {
+      resolvedFilename = file.originalname;
+    }
+
     const result = await uploadToR2(file.buffer, {
       folder,
-      filename: file.originalname,
+      filename: resolvedFilename,
       contentType: file.mimetype,
     });
 
@@ -83,7 +96,7 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
         url: result.url,
         key: result.key,
         size: result.size,
-        name: file.originalname,
+        name: resolvedFilename,
         mimeType: file.mimetype,
       },
     });
