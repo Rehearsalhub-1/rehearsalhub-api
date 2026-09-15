@@ -401,149 +401,6 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
       };
     });
 
-    if (song) {
-      // ── 1. Program appearances (Details tab) ─────────────────────────────
-      if (song.programSongs && song.programSongs.length > 0) {
-        for (const ps of song.programSongs) {
-          const progName = ps.program?.name || 'Program Repertoire';
-          const progDate = ps.program?.date || (ps.program?.createdAt ? new Date(ps.program.createdAt).toISOString() : song.createdAt);
-          formatted.push({
-            id: `prog-${ps.id}`,
-            songId,
-            type: 'details',
-            title: `Ministered at ${progName}`,
-            description: `Program Edition: ${progName} • Lead Singer: ${song.leadSinger || 'Loveworld Singers'}${song.conductor ? ` • Conductor: ${song.conductor}` : ''}`,
-            new_value: JSON.stringify({
-              program: progName,
-              leadSinger: song.leadSinger || 'Loveworld Singers',
-              conductor: song.conductor || '—',
-              key: song.key || '—',
-              tempo: song.tempo || '—',
-              rehearsalCount: song.rehearsalCount || 0,
-              date: ps.program?.date || '—',
-            }),
-            old_value: '',
-            createdBy: 'Ministry Archive',
-            createdAt: progDate,
-            created_at: progDate,
-          });
-        }
-      }
-
-      // ── 2. Song metadata baseline (Details tab) — always shown ───────────
-      formatted.push({
-        id: `metadata-baseline-${song.id}`,
-        songId,
-        type: 'details',
-        title: `Song Details — ${song.title}`,
-        description: `Ministry catalog entry for ${song.title}`,
-        new_value: JSON.stringify({
-          title: song.title || '—',
-          leadSinger: song.leadSinger || '—',
-          writer: song.writer || '—',
-          conductor: song.conductor || '—',
-          key: song.key || '—',
-          tempo: song.tempo || '—',
-          category: song.category || '—',
-          rehearsalCount: song.rehearsalCount || 0,
-          isMaster: song.isMaster,
-        }),
-        old_value: '',
-        createdBy: 'Ministry Archive',
-        createdAt: song.createdAt,
-        created_at: song.createdAt,
-      });
-
-      // ── 3. Audio baseline (Audio tab) ─────────────────────────────────────
-      const audioUrl = song.audioFile || (song.audioUrls as any)?.full || null;
-      if (audioUrl) {
-        formatted.push({
-          id: `audio-baseline-${song.id}`,
-          songId,
-          type: 'audio',
-          title: `Full Audio Track`,
-          description: `Full recording for ${song.title}`,
-          audioUrl: audioUrl,
-          new_value: audioUrl,
-          old_value: '',
-          createdBy: 'Ministry Archive',
-          createdAt: song.createdAt,
-          created_at: song.createdAt,
-        });
-      }
-
-      // ── 4. Lyrics baseline (Lyrics tab) — always shown if lyrics exist ────
-      if (song.lyrics) {
-        formatted.push({
-          id: `lyrics-baseline-${song.id}`,
-          songId,
-          type: 'lyrics',
-          title: `Official Lyrics — ${song.title}`,
-          description: `Archived ministry lyrics`,
-          new_value: song.lyrics,
-          old_value: '',
-          createdBy: song.writer ? `Written by ${song.writer}` : 'Ministry Archive',
-          createdAt: song.createdAt,
-          created_at: song.createdAt,
-        });
-      }
-
-      // ── 5. Conductor guide (Conductor tab) — check both conductor and solfas fields ──
-      // conductor field may hold the guide text; solfas field sometimes holds it too
-      const conductorGuideText = isConductorGuideText(song.conductor)
-        ? song.conductor
-        : isConductorGuideText(song.solfas)
-        ? song.solfas
-        : null;
-
-      // Even if no guide text, still emit a conductor entry if conductor name is known
-      if (conductorGuideText) {
-        formatted.push({
-          id: `conductor-baseline-${song.id}`,
-          songId,
-          type: 'conductor',
-          title: `Conductor Arrangement Guide`,
-          description: song.conductor ? `Arrangement cues for ${song.conductor}` : 'Arrangement cues',
-          new_value: conductorGuideText,
-          old_value: '',
-          createdBy: song.conductor ? `Conductor ${song.conductor}` : 'Director Archive',
-          createdAt: song.createdAt,
-          created_at: song.createdAt,
-        });
-      } else if (song.conductor) {
-        // conductor name exists but no guide text — still show a conductor entry
-        formatted.push({
-          id: `conductor-name-${song.id}`,
-          songId,
-          type: 'conductor',
-          title: `Conductor — ${song.conductor}`,
-          description: `Conducted by ${song.conductor}`,
-          new_value: song.conductor,
-          old_value: '',
-          createdBy: 'Ministry Archive',
-          createdAt: song.createdAt,
-          created_at: song.createdAt,
-        });
-      }
-
-      // ── 6. Solfa notation (Solfa tab) — always shown if solfa exists ──────
-      const resolvedSolfa = !isConductorGuideText(song.solfas) ? song.solfas : null;
-      if (resolvedSolfa) {
-        formatted.push({
-          id: `solfa-baseline-${song.id}`,
-          songId,
-          type: 'solfa',
-          title: `Solfa Notation — ${song.title}`,
-          description: `Ministry solfa notation`,
-          new_value: resolvedSolfa,
-          old_value: '',
-          createdBy: song.writer ? `Written by ${song.writer}` : 'Ministry Archive',
-          createdAt: song.createdAt,
-          created_at: song.createdAt,
-        });
-      }
-    }
-
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     console.error('[songs/history:GET]', err);
@@ -557,34 +414,96 @@ router.get('/:id/history', requireAuth, getSongHistoryHandler);
 router.post('/history', requireAuth, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
-    const { songId, type, description, old_value, new_value } = body;
+    const { songId, type, title, description, old_value, new_value } = body;
 
     if (!songId) {
       res.status(400).json({ success: false, error: 'Missing songId' });
       return;
     }
 
+    const desc = (description || title || 'Song updated').trim();
+
     const entry = await prisma.songHistory.create({
       data: {
         songId,
         userId: res.locals.auth?.userId || null,
         type: type || 'metadata',
-        description: description || 'Song updated',
+        description: desc,
         oldValue: typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || ''),
         newValue: typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || ''),
       },
     });
 
-    res.status(201).json({ success: true, data: entry });
+    res.status(201).json({
+      success: true,
+      data: {
+        id: entry.id,
+        songId: entry.songId,
+        type: entry.type,
+        title: entry.description,
+        description: entry.description,
+        old_value: entry.oldValue,
+        new_value: entry.newValue,
+        createdAt: entry.createdAt,
+        created_at: entry.createdAt,
+      },
+    });
   } catch (err) {
     console.error('[songs/history:POST]', err);
     res.status(500).json({ success: false, error: 'Failed to record song history' });
   }
 });
 
-router.delete('/history/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+router.patch('/history/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    await prisma.songHistory.delete({ where: { id: req.params.id } });
+    const { id } = req.params;
+    const body = req.body || {};
+    const { type, title, description, old_value, new_value } = body;
+
+    const existing = await prisma.songHistory.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'History entry not found' });
+    }
+
+    const updateData: any = {};
+    if (type !== undefined) updateData.type = type;
+    if (description !== undefined || title !== undefined) updateData.description = (description || title).trim();
+    if (old_value !== undefined) updateData.oldValue = typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || '');
+    if (new_value !== undefined) updateData.newValue = typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || '');
+
+    const updated = await prisma.songHistory.update({
+      where: { id },
+      data: updateData,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: updated.id,
+        songId: updated.songId,
+        type: updated.type,
+        title: updated.description,
+        description: updated.description,
+        old_value: updated.oldValue,
+        new_value: updated.newValue,
+        createdAt: updated.createdAt,
+        created_at: updated.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('[songs/history:PATCH]', err);
+    res.status(500).json({ success: false, error: 'Failed to update song history' });
+  }
+});
+
+router.delete('/history/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.songHistory.findUnique({ where: { id } });
+    if (!existing) {
+      return res.json({ success: true, message: 'History entry already deleted' });
+    }
+    await prisma.songHistory.delete({ where: { id } });
     res.json({ success: true, message: 'History entry deleted' });
   } catch (err) {
     console.error('[songs/history:DELETE]', err);
