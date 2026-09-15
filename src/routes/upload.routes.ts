@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { uploadToR2, getR2Object } from '../services/r2Service';
-import { requireTenantAdmin } from '../auth/auth.middleware';
+import { requireAuth } from '../auth/auth.middleware';
 
 const router = Router();
 const upload = multer({
@@ -48,7 +48,7 @@ router.get('/file/:key(*)', async (req, res) => {
 });
 
 // Upload media directly to Cloudflare R2
-router.post('/', requireTenantAdmin, upload.single('file'), async (req, res) => {
+router.post('/', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
