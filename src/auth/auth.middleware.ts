@@ -82,7 +82,8 @@ export async function requireAdminMembership(req: Request, res: Response, next: 
   }
 
   const role = (auth.role || '').toLowerCase();
-  const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin';
+  const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin' ||
+    role === 'president' || role === 'director' || role === 'oftp' || role === 'executive' || role === 'boss';
   const isAdminRole = isHQRole || role === 'zone_admin' || role === 'zone_coordinator' ||
     role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
 
@@ -102,6 +103,7 @@ export async function requireAdminMembership(req: Request, res: Response, next: 
           in: [
             'ZONE_ADMIN', 'zone_admin', 'zone_coordinator', 'ZONE_COORDINATOR',
             'HQ_ADMIN', 'hq_admin', 'admin', 'super_admin',
+            'PRESIDENT', 'president', 'DIRECTOR', 'director', 'OFTP', 'oftp', 'EXECUTIVE', 'executive',
             'SUBGROUP_ADMIN', 'subgroup_admin', 'subgroup_coordinator', 'SUBGROUP_COORDINATOR',
             'church_coordinator', 'CHURCH_COORDINATOR',
           ],

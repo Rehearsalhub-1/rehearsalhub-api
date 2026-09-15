@@ -35,7 +35,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run migration script
-        run: npx tsx scripts/migrate-cloudinary-to-r2.ts
+        run: npx tsx scripts/sync-cloudinary-to-r2.ts
         env:
           DATABASE_URL:           ${{ secrets.DATABASE_URL }}
           CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -44,6 +44,9 @@ jobs:
           R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
           API_BASE_URL:           ${{ secrets.API_BASE_URL }}
           R2_PUBLIC_URL:          ${{ secrets.R2_PUBLIC_URL }}
+          CLOUDINARY_CLOUD_NAME:  ${{ secrets.CLOUDINARY_CLOUD_NAME || 'dvtjjt3js' }}
+          CLOUDINARY_API_KEY:     ${{ secrets.CLOUDINARY_API_KEY || '696485534226686' }}
+          CLOUDINARY_API_SECRET:  ${{ secrets.CLOUDINARY_API_SECRET || 'rBWR9HSNegYoEQ5lLzrMqGOv0zk' }}
           DRY_RUN:                ${{ inputs.dry_run }}
 
       - name: Upload migration results

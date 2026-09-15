@@ -36,7 +36,7 @@ declare global {
 }
 
 /** The canonical list of role strings that get full HQ Admin access. */
-const HQ_ROLES = new Set(['super_admin', 'admin', 'hq_admin']);
+const HQ_ROLES = new Set(['super_admin', 'admin', 'hq_admin', 'president', 'director', 'oftp', 'executive', 'boss']);
 
 /**
  * TENANCY MIDDLEWARE — runs after requireAuth on every protected route.

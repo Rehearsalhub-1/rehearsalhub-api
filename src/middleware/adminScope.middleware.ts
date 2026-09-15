@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 
-const ADMIN_ROLES = new Set(['super_admin', 'admin', 'hq_admin', 'zone_admin', 'zone_coordinator', 'subgroup_admin', 'subgroup_coordinator', 'church_coordinator']);
+const ADMIN_ROLES = new Set(['super_admin', 'admin', 'hq_admin', 'president', 'director', 'oftp', 'executive', 'boss', 'zone_admin', 'zone_coordinator', 'subgroup_admin', 'subgroup_coordinator', 'church_coordinator']);
 
 /**
  * DB-VERIFIED ADMIN SCOPE MIDDLEWARE
@@ -10,7 +10,7 @@ const ADMIN_ROLES = new Set(['super_admin', 'admin', 'hq_admin', 'zone_admin', '
  * memberships table — not from headers or JWT claims alone.
  * 
  * Rules:
- * - HQ admin (hq_admin/admin/super_admin): scope = their HQ org (isHq=true or zone-001)
+ * - HQ admin (hq_admin/admin/super_admin/president/director/oftp): scope = their HQ org (isHq=true or zone-001)
  *   They can optionally filter by zone via header, but only within their HQ scope.
  * - Zone admin (zone_admin/zone_coordinator): scope LOCKED to their ONE admin org.
  *   Header overrides are IGNORED — even if they send a different x-zone-id.
@@ -26,7 +26,8 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
     }
 
     const role = (auth.role || '').toLowerCase();
-    const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin';
+    const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin' ||
+      role === 'president' || role === 'director' || role === 'oftp' || role === 'executive' || role === 'boss';
     const isZoneAdminRole = role === 'zone_admin' || role === 'zone_coordinator';
     const isSubgroupRole = role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
 
@@ -161,7 +162,8 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
 export function attachAdminScope(req: Request, res: Response, next: NextFunction): void {
   const auth = res.locals.auth;
   const role = (auth?.role || '').toLowerCase();
-  const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin';
+  const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin' ||
+    role === 'president' || role === 'director' || role === 'oftp' || role === 'executive' || role === 'boss';
   const isZoneAdminRole = role === 'zone_admin' || role === 'zone_coordinator';
   const isSubgroupRole = role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
 

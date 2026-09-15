@@ -39,6 +39,7 @@ export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean 
     ? (profile.rawData as Record<string, unknown>) : {};
   const r = (profile.role || String(raw.role || '')).toLowerCase();
   if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
+  if (r === 'president' || r === 'director' || r === 'oftp' || r === 'executive') return r;
   if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator') return 'zone_admin';
   if (r === 'church_coordinator') return 'church_coordinator';
   return 'member';
@@ -121,7 +122,8 @@ export type AuthTokenResult = { accessToken: string; refreshToken: string; user:
 
 const ADMIN_MEMBERSHIP_ROLES = new Set([
   'hq_admin', 'HQ_ADMIN', 'admin', 'ADMIN', 'super_admin', 'SUPER_ADMIN',
-  'boss', 'BOSS', 'zone_admin', 'ZONE_ADMIN', 'zone_coordinator', 'ZONE_COORDINATOR',
+  'boss', 'BOSS', 'president', 'PRESIDENT', 'director', 'DIRECTOR', 'oftp', 'OFTP', 'executive', 'EXECUTIVE',
+  'zone_admin', 'ZONE_ADMIN', 'zone_coordinator', 'ZONE_COORDINATOR',
   'coordinator', 'COORDINATOR', 'subgroup_admin', 'SUBGROUP_ADMIN',
   'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
 ]);
@@ -337,14 +339,19 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
 
     if (canonicalMemberships.length > 0) {
       const hqAdminMembership = canonicalMemberships.find(m =>
-        ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS'].includes(m.role || '')
+        ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS','president','PRESIDENT','director','DIRECTOR','oftp','OFTP','executive','EXECUTIVE'].includes(m.role || '')
       );
       const adminMembership = canonicalMemberships.find(m =>
         ADMIN_MEMBERSHIP_ROLES.has(m.role || '')
       );
 
       if (hqAdminMembership) {
-        resolvedRole = 'hq_admin';
+        const mRole = (hqAdminMembership.role || '').toLowerCase();
+        if (['president', 'director', 'oftp', 'executive'].includes(mRole)) {
+          resolvedRole = mRole;
+        } else {
+          resolvedRole = 'hq_admin';
+        }
         resolvedZoneId = resolvedZoneId || hqAdminMembership.organizationId;
       } else if (adminMembership) {
         resolvedRole = tokenRole({ ...profile, role: adminMembership.role });
@@ -385,8 +392,8 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
       profile_image_url: profile.avatarUrl || profile.avatar || null,
       phone: profile.phone || null,
       phoneNumber: profile.phone || null,
-      hasHqAccess: profile.hasHqAccess || false,
-      has_hq_access: profile.hasHqAccess || false,
+      hasHqAccess: profile.hasHqAccess || ['president', 'director', 'oftp', 'executive', 'hq_admin', 'admin', 'super_admin'].includes(resolvedRole),
+      has_hq_access: profile.hasHqAccess || ['president', 'director', 'oftp', 'executive', 'hq_admin', 'admin', 'super_admin'].includes(resolvedRole),
       memberships: canonicalMemberships,
     },
   };
@@ -480,13 +487,31 @@ export async function login(identifier: string, password: string): Promise<AuthT
   const norm = (identifier || '').toLowerCase().trim().replace(/^@/, '');
   if (!norm) throw new AuthError('Identifier and password required');
 
+  const leadershipAliases: Record<string, string> = {
+    'president': 'president@loveworldhq.org',
+    'thepresident': 'president@loveworldhq.org',
+    'thepresident2': 'thepresident2@loveworld.com',
+    'president2': 'thepresident2@loveworld.com',
+    'president 2': 'thepresident2@loveworld.com',
+    'director': 'director@loveworldhq.org',
+    'thedirector': 'director@loveworldhq.org',
+    'oftp.daba': 'oftp.daba@loveworldhq.org',
+    'daba': 'oftp.daba@loveworldhq.org',
+    'oftp.bisola': 'oftp.bisola@loveworldhq.org',
+    'bisola': 'oftp.bisola@loveworldhq.org',
+    'oftp.rita': 'oftp.rita@loveworldhq.org',
+    'rita': 'oftp.rita@loveworldhq.org',
+  };
+  const aliasEmail = leadershipAliases[norm] || leadershipAliases[norm.replace(/\s+/g, '')];
+
   const users = await prisma.user.findMany({
     where: {
       OR: [
-        { email: { equals: norm, mode: 'insensitive' } },
-        { kingschatId: { equals: norm, mode: 'insensitive' } },
-        { firstName: { equals: norm, mode: 'insensitive' } },
-        { lastName: { equals: norm, mode: 'insensitive' } },
+        ...(aliasEmail ? [{ email: { equals: aliasEmail, mode: 'insensitive' as const } }] : []),
+        { email: { equals: norm, mode: 'insensitive' as const } },
+        { kingschatId: { equals: norm, mode: 'insensitive' as const } },
+        { firstName: { equals: norm, mode: 'insensitive' as const } },
+        { lastName: { equals: norm, mode: 'insensitive' as const } },
       ],
     },
     include: {

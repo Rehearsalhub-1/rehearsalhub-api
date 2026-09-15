@@ -2,6 +2,11 @@ export type PlatformRole =
   | 'super_admin'
   | 'admin'
   | 'hq_admin'
+  | 'president'
+  | 'director'
+  | 'oftp'
+  | 'executive'
+  | 'boss'
   | 'zone_admin'
   | 'zone_coordinator'
   | 'subgroup_admin'
@@ -15,7 +20,9 @@ export function normalizeRole(role: unknown): PlatformRole | string {
 
 export function isHQRole(role: unknown): boolean {
   const normalized = normalizeRole(role)
-  return normalized === 'super_admin' || normalized === 'admin' || normalized === 'hq_admin'
+  return normalized === 'super_admin' || normalized === 'admin' || normalized === 'hq_admin' ||
+         normalized === 'president' || normalized === 'director' || normalized === 'oftp' ||
+         normalized === 'executive' || normalized === 'boss'
 }
 
 export function canAccessAdmin(role: unknown): boolean {
