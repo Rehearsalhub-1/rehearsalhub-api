@@ -33,14 +33,14 @@ function shapeMedia(m: any) {
 }
 
 // Helper to extract videos from media_videos table
-async function fetchMediaVideos(limit = 100, search?: string) {
+async function fetchMediaVideos(limit?: number, search?: string) {
   try {
     let query = `SELECT * FROM media_videos`;
     if (search && search.trim()) {
       const sanitized = search.trim().replace(/'/g, "''");
       query += ` WHERE title ILIKE '%${sanitized}%' OR raw_data->>'title' ILIKE '%${sanitized}%'`;
     }
-    query += ` ORDER BY COALESCE(created_at, (raw_data->>'createdAt')::timestamptz, NOW()) DESC LIMIT ${Math.min(limit, 500)}`;
+    query += ` ORDER BY COALESCE(created_at, (raw_data->>'createdAt')::timestamptz, NOW()) DESC`;
 
     const rows: any[] = await prisma.$queryRawUnsafe(query);
     if (!Array.isArray(rows)) return [];
@@ -89,9 +89,9 @@ async function fetchMediaVideos(limit = 100, search?: string) {
 // GET /media - List media
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { folder, type, zoneId, limit, search } = req.query as Record<string, string>;
+    const { folder, type, zoneId, search } = req.query as Record<string, string>;
     const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
-    const takeCount = limit ? Math.min(parseInt(limit, 10), 5000) : 2000;
+    // No limit — return every record so admins see the full library
 
     // Tenancy Filter: Strictly enforce organization / zone isolation so zones do not see other orgs' media
     const whereClause: any = effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global'
@@ -119,7 +119,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const assets = await prisma.mediaAsset.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' },
-      take: takeCount,
+      // No take — return all records
     });
 
     const shapedAssets = assets.map(shapeMedia);
@@ -129,7 +129,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     // Legacy media_videos has no reliable per-zone ownership. Only expose it
     // for the legacy HQ zone; tenant media_assets remain strictly scoped above.
     if ((!type || type.toLowerCase() === 'video' || type === 'all') && effectiveZoneId === 'zone-001') {
-      const videoRows = await fetchMediaVideos(takeCount, search);
+      const videoRows = await fetchMediaVideos(undefined, search);
       const existingIds = new Set(shapedAssets.map((a) => a.id));
       const newVideos = videoRows.filter((v) => !existingIds.has(v.id));
       combined = [...shapedAssets, ...newVideos];
