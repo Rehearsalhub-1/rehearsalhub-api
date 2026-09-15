@@ -282,7 +282,7 @@ const getSongsHandler = async (req: Request, res: Response) => {
     let songs: any[] = [];
 
     if (targetProgramId) {
-      // Find songs attached to this program via program_songs junction
+      // ── Path A: songs linked via programSongs junction table (canonical) ──────
       const program = await prisma.program.findUnique({
         where: { id: targetProgramId },
         include: {
@@ -300,12 +300,52 @@ const getSongsHandler = async (req: Request, res: Response) => {
       });
 
       if (program && Array.isArray(program.programSongs)) {
-        songs = program.programSongs.map((ps) => ({
-          ...ps.song,
-          order: ps.order,
-          praiseNightId: targetProgramId,
-          programId: targetProgramId,
-        }));
+        songs = program.programSongs
+          .filter((ps) => ps.song) // guard against orphaned junction rows
+          .map((ps) => ({
+            ...ps.song,
+            order: ps.order,
+            praiseNightId: targetProgramId,
+            programId: targetProgramId,
+          }));
+      }
+
+      // ── Path B: legacy songs that store programId as a direct column ──────────
+      // Some songs were added before the junction table existed; include them too.
+      if (songs.length === 0) {
+        const legacySongs = await prisma.song.findMany({
+          where: { programId: targetProgramId } as any,
+          include: { roleAssignments: { include: { user: true } } },
+          orderBy: { createdAt: 'asc' },
+        }).catch(() => [] as any[]);
+
+        if (legacySongs.length > 0) {
+          songs = legacySongs.map((s: any, idx: number) => ({
+            ...s,
+            order: s.order ?? idx + 1,
+            praiseNightId: targetProgramId,
+            programId: targetProgramId,
+          }));
+        }
+      } else {
+        // Merge: add any legacy songs not already covered by the junction
+        const junctionIds = new Set(songs.map((s: any) => s.id));
+        const legacySongs = await prisma.song.findMany({
+          where: { programId: targetProgramId } as any,
+          include: { roleAssignments: { include: { user: true } } },
+          orderBy: { createdAt: 'asc' },
+        }).catch(() => [] as any[]);
+
+        legacySongs.forEach((s: any, idx: number) => {
+          if (!junctionIds.has(s.id)) {
+            songs.push({
+              ...s,
+              order: s.order ?? songs.length + idx + 1,
+              praiseNightId: targetProgramId,
+              programId: targetProgramId,
+            });
+          }
+        });
       }
     } else {
       // Query songs for this organization or public master library

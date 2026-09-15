@@ -169,7 +169,18 @@ router.post('/', requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const id = body.id || `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const orgId = req.tenant?.effectiveZoneId || 'zone-001';
+    const requestedOrg = (
+      body.organizationId ||
+      body.zoneId ||
+      req.headers['x-zone-id'] ||
+      req.headers['x-organization-id'] ||
+      req.tenant?.effectiveZoneId ||
+      ''
+    ).toString().trim();
+
+    const orgId = requestedOrg && requestedOrg !== 'all' && requestedOrg !== 'global'
+      ? requestedOrg
+      : (req.tenant?.effectiveZoneId || 'zone-001');
 
     const created = await prisma.mediaAsset.create({
       data: {

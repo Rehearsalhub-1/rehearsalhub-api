@@ -56,7 +56,19 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
       return;
     }
 
-    const zoneId = req.tenant?.effectiveZoneId || 'zone-001';
+    const requestedZoneId = (
+      req.body.zoneId ||
+      req.body.organizationId ||
+      req.headers['x-zone-id'] ||
+      req.headers['x-organization-id'] ||
+      req.tenant?.effectiveZoneId ||
+      ''
+    ).toString().trim();
+
+    const zoneId = requestedZoneId && requestedZoneId !== 'all' && requestedZoneId !== 'global'
+      ? requestedZoneId
+      : (req.tenant?.effectiveZoneId || 'zone-001');
+
     const requestedFolder = (req.body.folder || 'general').toString().replace(/^\/+|\/+$/g, '');
     const folder = `zones/${zoneId}/${requestedFolder || 'general'}`;
     const result = await uploadToR2(file.buffer, {
