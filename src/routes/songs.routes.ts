@@ -414,7 +414,9 @@ router.get('/:id/history', requireAuth, getSongHistoryHandler);
 router.post('/history', requireAuth, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
-    const { songId, type, title, description, old_value, new_value } = body;
+    const { songId, type, title, description } = body;
+    const rawOld = body.old_value !== undefined ? body.old_value : body.oldValue;
+    const rawNew = body.new_value !== undefined ? body.new_value : body.newValue;
 
     if (!songId) {
       res.status(400).json({ success: false, error: 'Missing songId' });
@@ -423,30 +425,45 @@ router.post('/history', requireAuth, async (req: Request, res: Response) => {
 
     const desc = (description || title || 'Song updated').trim();
 
+    let validUserId: string | null = null;
+    if (res.locals.auth?.userId) {
+      const userExists = await prisma.user.findUnique({
+        where: { id: res.locals.auth.userId },
+        select: { id: true },
+      });
+      if (userExists) validUserId = userExists.id;
+    }
+
     const entry = await prisma.songHistory.create({
       data: {
         songId,
-        userId: res.locals.auth?.userId || null,
+        userId: validUserId,
         type: type || 'metadata',
         description: desc,
-        oldValue: typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || ''),
-        newValue: typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || ''),
+        oldValue: typeof rawOld === 'object' ? JSON.stringify(rawOld) : String(rawOld || ''),
+        newValue: typeof rawNew === 'object' ? JSON.stringify(rawNew) : String(rawNew || ''),
       },
     });
 
+    const formattedEntry = {
+      id: entry.id,
+      songId: entry.songId,
+      type: entry.type,
+      title: entry.description,
+      description: entry.description,
+      old_value: entry.oldValue,
+      new_value: entry.newValue,
+      oldValue: entry.oldValue,
+      newValue: entry.newValue,
+      createdAt: entry.createdAt,
+      created_at: entry.createdAt,
+    };
+
+    broadcast('song_history', entry.songId, formattedEntry);
+
     res.status(201).json({
       success: true,
-      data: {
-        id: entry.id,
-        songId: entry.songId,
-        type: entry.type,
-        title: entry.description,
-        description: entry.description,
-        old_value: entry.oldValue,
-        new_value: entry.newValue,
-        createdAt: entry.createdAt,
-        created_at: entry.createdAt,
-      },
+      data: formattedEntry,
     });
   } catch (err) {
     console.error('[songs/history:POST]', err);
@@ -458,7 +475,9 @@ router.patch('/history/:id', requireAuth, async (req: Request, res: Response) =>
   try {
     const { id } = req.params;
     const body = req.body || {};
-    const { type, title, description, old_value, new_value } = body;
+    const { type, title, description } = body;
+    const rawOld = body.old_value !== undefined ? body.old_value : body.oldValue;
+    const rawNew = body.new_value !== undefined ? body.new_value : body.newValue;
 
     const existing = await prisma.songHistory.findUnique({ where: { id } });
     if (!existing) {
@@ -468,27 +487,33 @@ router.patch('/history/:id', requireAuth, async (req: Request, res: Response) =>
     const updateData: any = {};
     if (type !== undefined) updateData.type = type;
     if (description !== undefined || title !== undefined) updateData.description = (description || title).trim();
-    if (old_value !== undefined) updateData.oldValue = typeof old_value === 'object' ? JSON.stringify(old_value) : String(old_value || '');
-    if (new_value !== undefined) updateData.newValue = typeof new_value === 'object' ? JSON.stringify(new_value) : String(new_value || '');
+    if (rawOld !== undefined) updateData.oldValue = typeof rawOld === 'object' ? JSON.stringify(rawOld) : String(rawOld || '');
+    if (rawNew !== undefined) updateData.newValue = typeof rawNew === 'object' ? JSON.stringify(rawNew) : String(rawNew || '');
 
     const updated = await prisma.songHistory.update({
       where: { id },
       data: updateData,
     });
 
+    const formattedUpdated = {
+      id: updated.id,
+      songId: updated.songId,
+      type: updated.type,
+      title: updated.description,
+      description: updated.description,
+      old_value: updated.oldValue,
+      new_value: updated.newValue,
+      oldValue: updated.oldValue,
+      newValue: updated.newValue,
+      createdAt: updated.createdAt,
+      created_at: updated.createdAt,
+    };
+
+    broadcast('song_history', updated.songId, formattedUpdated);
+
     res.json({
       success: true,
-      data: {
-        id: updated.id,
-        songId: updated.songId,
-        type: updated.type,
-        title: updated.description,
-        description: updated.description,
-        old_value: updated.oldValue,
-        new_value: updated.newValue,
-        createdAt: updated.createdAt,
-        created_at: updated.createdAt,
-      },
+      data: formattedUpdated,
     });
   } catch (err) {
     console.error('[songs/history:PATCH]', err);
@@ -504,6 +529,7 @@ router.delete('/history/:id', requireAuth, async (req: Request, res: Response) =
       return res.json({ success: true, message: 'History entry already deleted' });
     }
     await prisma.songHistory.delete({ where: { id } });
+    broadcast('song_history', existing.songId, { id: existing.id, songId: existing.songId, deleted: true });
     res.json({ success: true, message: 'History entry deleted' });
   } catch (err) {
     console.error('[songs/history:DELETE]', err);
