@@ -4,11 +4,14 @@ import { requireAuth } from '../auth/auth.middleware';
 import prisma from '../lib/prisma';
 
 const router = Router();
-const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'rehearsalhub-livekit-key';
-const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || process.env.JWT_SECRET || 'rehearsalhub-livekit-secret-32chars';
-const LIVEKIT_URL = process.env.LIVEKIT_URL || 'wss://rehearsal-hub-livekit.cloud';
+const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || '';
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || process.env.JWT_SECRET || '';
+const LIVEKIT_URL = process.env.LIVEKIT_URL || '';
 
 async function generateToken(room: string, participant: string): Promise<string> {
+  if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+    throw new Error('LiveKit credentials are not configured');
+  }
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, { identity: participant, ttl: '4h' });
   at.addGrant({ room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true });
   return at.toJwt();

@@ -8,10 +8,16 @@ const router = Router();
 
 function shapeMedia(m: any) {
   const thumb = m.thumbnail || m.thumbnailUrl || null;
+  let title = (m.title || m.name || 'Untitled Media').trim();
+  if (/^[a-z0-9_-]{15,35}$/i.test(title)) {
+    const d = m.createdAt ? new Date(m.createdAt) : new Date();
+    const dateStr = d && !isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    title = `Rehearsal Asset ${dateStr}`.trim();
+  }
   return {
     id: m.id,
-    title: m.title || m.name || 'Untitled Media',
-    name: m.title || m.name || 'Untitled Media',
+    title,
+    name: title,
     url: m.url || m.videoUrl || '',
     videoUrl: m.url || m.videoUrl || '',
     thumbnailUrl: thumb,

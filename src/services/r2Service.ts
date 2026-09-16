@@ -3,25 +3,26 @@ dotenv.config();
 
 import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
+import { Readable } from 'stream';
 
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'b2e5411830e116cf4ce6e91e90843db0';
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
 const bucketName = process.env.R2_BUCKET_NAME || 'rehearsalhub-media';
-const accessKeyId = process.env.R2_ACCESS_KEY_ID || '53609880149dce49393f0d762b8b4baf';
-const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || 'dfec6c0153c47aa9c036d9e8bbbe2739ec738352f55afa2f8fd70df95f67ae90';
-const apiBase = (process.env.API_BASE_URL || 'https://rehearsalhub-api-production-6a17.up.railway.app').replace(/\/+$/, '');
+const accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
+const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
+const apiBase = (process.env.API_BASE_URL || '').replace(/\/+$/, '');
 const envPublicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
 // If R2_PUBLIC_URL is empty or points to the private/disabled r2.dev domain, serve through the API proxy
 export const publicUrlBase = (envPublicUrl && !envPublicUrl.includes('r2.dev'))
   ? envPublicUrl
-  : `${apiBase}/upload/file`;
+  : (apiBase ? `${apiBase}/upload/file` : '/upload/file');
 
 export const r2Client = new S3Client({
   region: 'auto',
-  endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-  credentials: {
+  endpoint: accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined,
+  credentials: (accessKeyId && secretAccessKey) ? {
     accessKeyId,
     secretAccessKey,
-  },
+  } : undefined,
 });
 
 export interface UploadOptions {
@@ -58,8 +59,8 @@ function resolveMimeType(filename?: string, contentType?: string): string {
 }
 
 export async function uploadToR2(
-  fileBuffer: Buffer,
-  options: UploadOptions = {}
+  fileData: Buffer | Readable,
+  options: UploadOptions & { contentLength?: number } = {}
 ): Promise<{ url: string; key: string; size: number }> {
   const folder = (options.folder || 'general').replace(/^\/+|\/+$/g, '');
   const ext = options.filename ? options.filename.split('.').pop() : 'bin';
@@ -70,12 +71,14 @@ export async function uploadToR2(
 
   const key = folder ? `${folder}/${safeFilename}` : safeFilename;
   const finalContentType = resolveMimeType(options.filename, options.contentType);
+  const size = options.contentLength ?? (Buffer.isBuffer(fileData) ? fileData.length : 0);
 
   const command = new PutObjectCommand({
     Bucket: bucketName,
     Key: key,
-    Body: fileBuffer,
+    Body: fileData,
     ContentType: finalContentType,
+    ...(size > 0 ? { ContentLength: size } : {}),
     CacheControl: options.cacheControl || 'public, max-age=31536000, immutable',
   });
 
@@ -85,7 +88,7 @@ export async function uploadToR2(
   return {
     url,
     key,
-    size: fileBuffer.length,
+    size,
   };
 }
 

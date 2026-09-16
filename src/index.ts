@@ -95,7 +95,7 @@ const corsOptions: cors.CorsOptions = {
     if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
-      callback(null, true); // Allow rather than crash, while respecting standard headers
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -136,7 +136,6 @@ app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(limiter);
-app.use(tenantMiddleware);
 
 // Health check
 app.get('/health', (_, res) => {

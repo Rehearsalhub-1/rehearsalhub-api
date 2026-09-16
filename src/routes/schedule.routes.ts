@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
+import prisma from '../lib/prisma';
 import fs from 'fs';
 import path from 'path';
 
@@ -124,10 +125,29 @@ function saveSchedulesToDisk(items: ScheduleProgram[]) {
   } catch (err) {
     console.error('[schedule.routes] Error saving schedules to disk:', err);
   }
+
+  // Durable backup to PostgreSQL settings table
+  prisma.setting.upsert({
+    where: { key: 'rehearsal_schedules_backup' },
+    update: { value: { schedules: items as any } },
+    create: { key: 'rehearsal_schedules_backup', value: { schedules: items as any } },
+  }).catch((err: any) => console.warn('[schedule.routes] DB backup error:', err?.message));
 }
 
 // Initial load
 memorySchedules = loadSchedulesFromDisk();
+
+async function loadSchedulesWithDbFallback(): Promise<void> {
+  if (memorySchedules.length === 0) {
+    try {
+      const row = await prisma.setting.findUnique({ where: { key: 'rehearsal_schedules_backup' } });
+      if (row && typeof row.value === 'object' && Array.isArray((row.value as any)?.schedules)) {
+        memorySchedules = (row.value as any).schedules;
+        saveSchedulesToDisk(memorySchedules);
+      }
+    } catch {}
+  }
+}
 
 function shapeFullSchedule(p: ScheduleProgram) {
   const weeks = Array.isArray(p.weeks) && p.weeks.length > 0
@@ -168,6 +188,8 @@ function shapeFullSchedule(p: ScheduleProgram) {
 // ── GET /schedules or /schedule ─────────────────────────────────────────────
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
+    await loadSchedulesWithDbFallback();
+
     const { zoneId, subGroupId, isArchived } = req.query as {
       zoneId?: string;
       subGroupId?: string;
@@ -182,9 +204,17 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     // Purge any lingering mock IDs
     list = list.filter(p => !p.id?.startsWith('schedule_hslhs_') && !p.id?.startsWith('schedule_midweek_') && !p.id?.startsWith('schedule_may_archive'));
 
-    // Strict isolation by Church (subGroupId) or Zone
+    // Graceful hierarchy: If a church is scoped, check if it has church-specific schedules.
+    // If not, fallback to parent Zone schedules so church singers can rehearse the zone program!
     if (effectiveChurchId && effectiveChurchId !== 'all' && effectiveChurchId !== 'global') {
-      list = list.filter(p => p.subGroupId === effectiveChurchId);
+      const churchSpecific = list.filter(p => p.subGroupId === effectiveChurchId);
+      if (churchSpecific.length > 0) {
+        list = churchSpecific;
+      } else if (effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global') {
+        list = list.filter(p => (p.zoneId === effectiveZoneId || p.organizationId === effectiveZoneId) && !p.subGroupId);
+      } else {
+        list = list.filter(p => !p.subGroupId);
+      }
     } else if (effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global') {
       list = list.filter(p => p.zoneId === effectiveZoneId || p.organizationId === effectiveZoneId);
     }
@@ -209,6 +239,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 // ── GET /schedules/:scheduleId ──────────────────────────────────────────────
 router.get('/:scheduleId', requireAuth, async (req: Request, res: Response) => {
   try {
+    await loadSchedulesWithDbFallback();
     const item = memorySchedules.find(p => p.id === req.params.scheduleId);
     if (!item) {
       return res.status(404).json({ success: false, error: 'Schedule program not found' });

@@ -35,8 +35,10 @@ function asRaw(raw: unknown): Record<string, unknown> {
 }
 
 export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean | null; rawData?: unknown }): string {
+  if (profile.hasHqAccess) return 'hq_admin';
   const raw = profile.rawData && typeof profile.rawData === 'object' && !Array.isArray(profile.rawData)
     ? (profile.rawData as Record<string, unknown>) : {};
+  if (raw.hasHqAccess || raw.has_hq_access) return 'hq_admin';
   const r = (profile.role || String(raw.role || '')).toLowerCase();
   if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
   if (r === 'president' || r === 'director' || r === 'oftp' || r === 'executive') return r;
@@ -128,29 +130,13 @@ const ADMIN_MEMBERSHIP_ROLES = new Set([
   'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
 ]);
 
-export async function fetchAllUserMemberships(userId: string, userRawData?: any) {
-  // 1. Relational memberships from Prisma
-  const dbMemberships = await prisma.membership.findMany({
-    where: { userId, status: { in: ['ACTIVE', 'active', 'PENDING', 'pending'] } },
-    include: {
-      organization: true,
-      group: true,
-    },
-  }).catch(() => []);
+let orgLookupCache: { orgMap: Map<string, any>; orgCodeMap: Map<string, any>; expiresAt: number } | null = null;
 
-  // 2. Legacy zone_members and hq_members tables
-  const [legacyZoneRows, legacyHqRows] = await Promise.all([
-    prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM zone_members WHERE user_id = $1`,
-      userId
-    ).catch(() => []),
-    prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM hq_members WHERE user_id = $1`,
-      userId
-    ).catch(() => []),
-  ]);
-
-  // 3. All organizations from database for name & code resolution
+async function getCachedOrganizations() {
+  const now = Date.now();
+  if (orgLookupCache && orgLookupCache.expiresAt > now) {
+    return orgLookupCache;
+  }
   const allOrgs = await prisma.organization.findMany().catch(() => []);
   const orgMap = new Map<string, any>();
   const orgCodeMap = new Map<string, any>();
@@ -159,6 +145,19 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
     const code = o.invitationCode || o.code;
     if (code) orgCodeMap.set(code.toUpperCase(), o);
   }
+  orgLookupCache = { orgMap, orgCodeMap, expiresAt: now + 10 * 60 * 1000 };
+  return orgLookupCache;
+}
+
+export async function fetchAllUserMemberships(userId: string, userRawData?: any) {
+  // 1. Relational memberships from Prisma (fast, indexed)
+  const dbMemberships = await prisma.membership.findMany({
+    where: { userId, status: { in: ['ACTIVE', 'active', 'PENDING', 'pending'] } },
+    include: {
+      organization: true,
+      group: true,
+    },
+  }).catch(() => []);
 
   const combinedMap = new Map<string, any>();
 
@@ -203,21 +202,117 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
     });
   }
 
-  // Ingest legacy zone_members
-  for (const zm of legacyZoneRows) {
-    const rawZId = zm.zone_id || zm.zoneId;
-    if (rawZId) {
-      const org: any = orgMap.get(String(rawZId).toLowerCase()) || orgCodeMap.get(String(rawZId).toUpperCase());
-      const effectiveOrgId = org?.id || rawZId;
+  // 2. Only check legacy zone_members/hq_members and raw zone codes if relational memberships are empty
+  if (dbMemberships.length === 0) {
+    const [legacyZoneRows, legacyHqRows] = await Promise.all([
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM zone_members WHERE user_id = $1`,
+        userId
+      ).catch(() => []),
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM hq_members WHERE user_id = $1`,
+        userId
+      ).catch(() => []),
+    ]);
+
+    const { orgMap, orgCodeMap } = await getCachedOrganizations();
+
+    // Ingest legacy zone_members
+    for (const zm of legacyZoneRows) {
+      const rawZId = zm.zone_id || zm.zoneId;
+      if (rawZId) {
+        const org: any = orgMap.get(String(rawZId).toLowerCase()) || orgCodeMap.get(String(rawZId).toUpperCase());
+        const effectiveOrgId = org?.id || rawZId;
+        const key = String(effectiveOrgId).toLowerCase();
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, {
+            id: zm.id || `zm_${effectiveOrgId}`,
+            userId,
+            organizationId: effectiveOrgId,
+            subgroupId: null,
+            role: (zm.role || 'MEMBER').toUpperCase(),
+            status: (zm.status || 'ACTIVE').toUpperCase(),
+            hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
+            organization: org
+              ? {
+                  id: org.id,
+                  name: org.name,
+                  code: org.code,
+                  country: org.country,
+                  region: org.region,
+                  isHq: org.isHq,
+                  invitationCode: org.invitationCode,
+                }
+              : {
+                  id: effectiveOrgId,
+                  name: effectiveOrgId,
+                  code: effectiveOrgId,
+                  country: null,
+                  region: null,
+                  isHq: effectiveOrgId === 'zone-001',
+                  invitationCode: effectiveOrgId,
+                },
+            subgroup: null,
+          });
+        }
+      }
+    }
+
+    // Ingest legacy hq_members
+    for (const hm of legacyHqRows) {
+      const rawHqId = hm.hq_group_id || hm.hqGroupId || 'zone-001';
+      if (rawHqId) {
+        const org: any = orgMap.get(String(rawHqId).toLowerCase()) || orgCodeMap.get(String(rawHqId).toUpperCase());
+        const effectiveOrgId = org?.id || rawHqId;
+        const key = String(effectiveOrgId).toLowerCase();
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, {
+            id: hm.id || `hm_${effectiveOrgId}`,
+            userId,
+            organizationId: effectiveOrgId,
+            subgroupId: null,
+            role: (hm.role || 'HQ_ADMIN').toUpperCase(),
+            status: (hm.status || 'ACTIVE').toUpperCase(),
+            hasHqAccess: true,
+            organization: org
+              ? {
+                  id: org.id,
+                  name: org.name,
+                  code: org.code,
+                  country: org.country,
+                  region: org.region,
+                  isHq: true,
+                  invitationCode: org.invitationCode,
+                }
+              : {
+                  id: effectiveOrgId,
+                  name: effectiveOrgId,
+                  code: effectiveOrgId,
+                  country: null,
+                  region: null,
+                  isHq: true,
+                  invitationCode: effectiveOrgId,
+                },
+            subgroup: null,
+          });
+        }
+      }
+    }
+
+    // Ingest rawData zone_code if present and not yet captured
+    const rawZoneCode = userRawData?.zone_code || userRawData?.zoneCode || userRawData?.zone_id || userRawData?.zoneId;
+    if (rawZoneCode) {
+      const org: any = orgMap.get(String(rawZoneCode).toLowerCase()) || orgCodeMap.get(String(rawZoneCode).toUpperCase());
+      const effectiveOrgId = org?.id || rawZoneCode;
       const key = String(effectiveOrgId).toLowerCase();
       if (!combinedMap.has(key)) {
         combinedMap.set(key, {
-          id: zm.id || `zm_${effectiveOrgId}`,
+          id: `raw_${effectiveOrgId}`,
           userId,
           organizationId: effectiveOrgId,
           subgroupId: null,
-          role: (zm.role || 'MEMBER').toUpperCase(),
-          status: (zm.status || 'ACTIVE').toUpperCase(),
+          role: 'MEMBER',
+          status: 'ACTIVE',
           hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
           organization: org
             ? {
@@ -241,86 +336,6 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
           subgroup: null,
         });
       }
-    }
-  }
-
-  // Ingest legacy hq_members
-  for (const hm of legacyHqRows) {
-    const rawHqId = hm.hq_group_id || hm.hqGroupId || 'zone-001';
-    if (rawHqId) {
-      const org: any = orgMap.get(String(rawHqId).toLowerCase()) || orgCodeMap.get(String(rawHqId).toUpperCase());
-      const effectiveOrgId = org?.id || rawHqId;
-      const key = String(effectiveOrgId).toLowerCase();
-      if (!combinedMap.has(key)) {
-        combinedMap.set(key, {
-          id: hm.id || `hm_${effectiveOrgId}`,
-          userId,
-          organizationId: effectiveOrgId,
-          subgroupId: null,
-          role: (hm.role || 'HQ_ADMIN').toUpperCase(),
-          status: (hm.status || 'ACTIVE').toUpperCase(),
-          hasHqAccess: true,
-          organization: org
-            ? {
-                id: org.id,
-                name: org.name,
-                code: org.code,
-                country: org.country,
-                region: org.region,
-                isHq: true,
-                invitationCode: org.invitationCode,
-              }
-            : {
-                id: effectiveOrgId,
-                name: effectiveOrgId,
-                code: effectiveOrgId,
-                country: null,
-                region: null,
-                isHq: true,
-                invitationCode: effectiveOrgId,
-              },
-          subgroup: null,
-        });
-      }
-    }
-  }
-
-  // Ingest rawData zone_code if present and not yet captured
-  const rawZoneCode = userRawData?.zone_code || userRawData?.zoneCode || userRawData?.zone_id || userRawData?.zoneId;
-  if (rawZoneCode) {
-    const org: any = orgMap.get(String(rawZoneCode).toLowerCase()) || orgCodeMap.get(String(rawZoneCode).toUpperCase());
-    const effectiveOrgId = org?.id || rawZoneCode;
-    const key = String(effectiveOrgId).toLowerCase();
-    if (!combinedMap.has(key)) {
-      combinedMap.set(key, {
-        id: `raw_${effectiveOrgId}`,
-        userId,
-        organizationId: effectiveOrgId,
-        subgroupId: null,
-        role: 'MEMBER',
-        status: 'ACTIVE',
-        hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
-        organization: org
-          ? {
-              id: org.id,
-              name: org.name,
-              code: org.code,
-              country: org.country,
-              region: org.region,
-              isHq: org.isHq,
-              invitationCode: org.invitationCode,
-            }
-          : {
-              id: effectiveOrgId,
-              name: effectiveOrgId,
-              code: effectiveOrgId,
-              country: null,
-              region: null,
-              isHq: effectiveOrgId === 'zone-001',
-              invitationCode: effectiveOrgId,
-            },
-        subgroup: null,
-      });
     }
   }
 

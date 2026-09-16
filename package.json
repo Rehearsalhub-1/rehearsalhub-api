@@ -16,6 +16,7 @@
     "fix:zones-chats-media": "tsx scripts/fix_zones_chats_media.ts",
     "db:backup": "node scripts/backup-database.js",
     "db:restore": "node scripts/restore-database.js",
+    "media:resolve-titles": "node scripts/resolve-media-titles.js",
     "start": "node dist/index.js"
   },
   "dependencies": {

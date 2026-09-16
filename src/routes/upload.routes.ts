@@ -1,11 +1,19 @@
 import { Router } from 'express';
 import multer from 'multer';
+import fs from 'fs';
+import os from 'os';
 import { uploadToR2, getR2Object } from '../services/r2Service';
 import { requireAuth } from '../auth/auth.middleware';
 
 const router = Router();
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, file, cb) => {
+      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${uniqueSuffix}-${file.originalname}`);
+    },
+  }),
   limits: {
     fileSize: 150 * 1024 * 1024, // 150 MB max per file
   },
@@ -84,11 +92,18 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
       resolvedFilename = file.originalname;
     }
 
-    const result = await uploadToR2(file.buffer, {
-      folder,
-      filename: resolvedFilename,
-      contentType: file.mimetype,
-    });
+    const stream = fs.createReadStream(file.path);
+    let result;
+    try {
+      result = await uploadToR2(stream, {
+        folder,
+        filename: resolvedFilename,
+        contentType: file.mimetype,
+        contentLength: file.size,
+      });
+    } finally {
+      fs.promises.unlink(file.path).catch(() => {});
+    }
 
     res.json({
       success: true,

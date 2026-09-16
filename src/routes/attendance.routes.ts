@@ -29,17 +29,20 @@ function shapeAttendance(row: any) {
 /** GET /attendance — List attendance */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId, programId, date } = req.query as Record<string, string>;
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const { zoneId, programId } = req.query as Record<string, string>;
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || null;
+    const isGlobal = req.tenant?.isHQAdmin && (req.tenant?.isGlobalView || !effectiveZoneId);
+
+    const whereClause: any = {};
+    if (!isGlobal) {
+      whereClause.organizationId = effectiveZoneId || 'zone-001';
+    }
+    if (programId) {
+      whereClause.programId = programId;
+    }
 
     const rows = await prisma.attendance.findMany({
-      where: {
-        OR: [
-          { organizationId: effectiveZoneId },
-          { organizationId: 'zone-001' },
-        ],
-        ...(programId ? { programId } : {}),
-      },
+      where: whereClause,
       include: {
         user: true,
       },
@@ -140,7 +143,9 @@ const handleCheckIn = async (req: Request, res: Response) => {
     const targetUserId = userId || auth.userId;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
     const now = new Date();
-    const id = req.body.id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const id = (typeof req.body.id === 'string' && req.body.id.trim())
+      ? req.body.id.trim()
+      : `att_${crypto.randomUUID()}`;
 
     // Guard: Check if clock-in session is open for this zone
     const sessionKey = `clockin_session_${orgId}`;
@@ -162,10 +167,7 @@ const handleCheckIn = async (req: Request, res: Response) => {
     if (!resolvedProgramId) {
       const activeProgram = await prisma.program.findFirst({
         where: {
-          OR: [
-            { organizationId: orgId },
-            { organizationId: 'zone-001' },
-          ],
+          organizationId: orgId,
           isActive: true,
         },
         select: { id: true },
