@@ -116,7 +116,8 @@ function loadSchedulesFromDisk(): ScheduleProgram[] {
   }
 }
 
-function saveSchedulesToDisk(items: ScheduleProgram[]) {
+async function saveSchedulesToDisk(items: ScheduleProgram[]): Promise<void> {
+  memorySchedules = items;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -126,26 +127,36 @@ function saveSchedulesToDisk(items: ScheduleProgram[]) {
     console.error('[schedule.routes] Error saving schedules to disk:', err);
   }
 
-  // Durable backup to PostgreSQL settings table
-  prisma.setting.upsert({
-    where: { key: 'rehearsal_schedules_backup' },
-    update: { value: { schedules: items as any } },
-    create: { key: 'rehearsal_schedules_backup', value: { schedules: items as any } },
-  }).catch((err: any) => console.warn('[schedule.routes] DB backup error:', err?.message));
+  // Durable primary backup to PostgreSQL settings table
+  try {
+    await prisma.setting.upsert({
+      where: { key: 'rehearsal_schedules_backup' },
+      update: { value: { schedules: items as any } },
+      create: { key: 'rehearsal_schedules_backup', value: { schedules: items as any } },
+    });
+  } catch (err: any) {
+    console.warn('[schedule.routes] DB backup error:', err?.message);
+  }
 }
 
 // Initial load
 memorySchedules = loadSchedulesFromDisk();
+loadSchedulesWithDbFallback().catch(console.error);
 
 async function loadSchedulesWithDbFallback(): Promise<void> {
+  try {
+    const row = await prisma.setting.findUnique({ where: { key: 'rehearsal_schedules_backup' } });
+    if (row && typeof row.value === 'object' && Array.isArray((row.value as any)?.schedules) && (row.value as any).schedules.length > 0) {
+      memorySchedules = (row.value as any).schedules;
+      try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(memorySchedules, null, 2), 'utf8');
+      } catch {}
+      return;
+    }
+  } catch {}
   if (memorySchedules.length === 0) {
-    try {
-      const row = await prisma.setting.findUnique({ where: { key: 'rehearsal_schedules_backup' } });
-      if (row && typeof row.value === 'object' && Array.isArray((row.value as any)?.schedules)) {
-        memorySchedules = (row.value as any).schedules;
-        saveSchedulesToDisk(memorySchedules);
-      }
-    } catch {}
+    memorySchedules = loadSchedulesFromDisk();
   }
 }
 

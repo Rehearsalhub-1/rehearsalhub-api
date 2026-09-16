@@ -9,12 +9,16 @@ const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
 const bucketName = process.env.R2_BUCKET_NAME || 'rehearsalhub-media';
 const accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
 const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
-const apiBase = (process.env.API_BASE_URL || '').replace(/\/+$/, '');
+const apiBase = (
+  process.env.API_BASE_URL ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '') ||
+  'https://rehearsalhub-api-production-6a17.up.railway.app'
+).replace(/\/+$/, '');
 const envPublicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
 // If R2_PUBLIC_URL is empty or points to the private/disabled r2.dev domain, serve through the API proxy
 export const publicUrlBase = (envPublicUrl && !envPublicUrl.includes('r2.dev'))
   ? envPublicUrl
-  : (apiBase ? `${apiBase}/upload/file` : '/upload/file');
+  : `${apiBase}/upload/file`;
 
 export const r2Client = new S3Client({
   region: 'auto',

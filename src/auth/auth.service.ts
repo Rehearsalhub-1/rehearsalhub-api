@@ -23,6 +23,22 @@ export class AuthError extends Error {
   }
 }
 
+export function hashRefreshToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+export async function verifyRefreshTokenMatch(rawToken: string, storedHash: string): Promise<boolean> {
+  if (storedHash.startsWith('$2b$') || storedHash.startsWith('$2a$')) {
+    return await bcrypt.compare(rawToken, storedHash);
+  }
+  const calculatedHash = hashRefreshToken(rawToken);
+  try {
+    return crypto.timingSafeEqual(Buffer.from(calculatedHash, 'hex'), Buffer.from(storedHash, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '365', 10);
 function refreshExpiresAt(): Date {
   const d = new Date();
@@ -378,7 +394,7 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
   }
 
   const rawRefresh = generateRefreshToken();
-  const tokenHash = await bcrypt.hash(rawRefresh, 12);
+  const tokenHash = hashRefreshToken(rawRefresh);
   await prisma.refreshToken.create({
     data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() },
   });
@@ -555,10 +571,15 @@ export async function login(identifier: string, password: string): Promise<AuthT
 }
 
 export async function refresh(rawToken: string, profileId: string): Promise<{ accessToken: string; refreshToken: string }> {
+  // Purge any expired refresh tokens for this user
+  prisma.refreshToken.deleteMany({
+    where: { userId: profileId, expiresAt: { lte: new Date() } }
+  }).catch(() => {});
+
   const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
   let matchedRow: (typeof rows)[number] | undefined;
   for (const row of rows) {
-    if (await bcrypt.compare(rawToken, row.tokenHash)) { matchedRow = row; break; }
+    if (await verifyRefreshTokenMatch(rawToken, row.tokenHash)) { matchedRow = row; break; }
   }
 
   if (!matchedRow) {
@@ -588,7 +609,7 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
   const normalizedRole = tokenRole({ role: primaryRole, hasHqAccess: hasHqAdmin });
 
   const newRaw = generateRefreshToken();
-  const newHash = await bcrypt.hash(newRaw, 12);
+  const newHash = hashRefreshToken(newRaw);
   await prisma.refreshToken.create({
     data: {
       id: crypto.randomUUID(),
@@ -611,7 +632,7 @@ export async function logout(jti: string, exp: number, profileId: string, rawRef
   if (rawRefreshToken && profileId) {
     const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
     for (const row of rows) {
-      if (await bcrypt.compare(rawRefreshToken, row.tokenHash)) {
+      if (await verifyRefreshTokenMatch(rawRefreshToken, row.tokenHash)) {
         await prisma.refreshToken.deleteMany({ where: { id: row.id } });
         break;
       }

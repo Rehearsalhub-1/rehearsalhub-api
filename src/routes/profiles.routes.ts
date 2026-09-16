@@ -90,6 +90,8 @@ function formatUserProfile(u: any, metaInput?: any) {
       hideAnnotations: !(meta.canAnnotate ?? false),
       hideOngoing: !(meta.can_access_ongoing ?? true),
     },
+    expoPushToken: meta.expoPushToken || meta.expo_push_token || null,
+    expo_push_token: meta.expoPushToken || meta.expo_push_token || null,
     memberships: activeMemberships.map((m: any) => ({
       id: `${m.userId}_${m.organizationId}`,
       organizationId: m.organizationId,
@@ -145,6 +147,7 @@ const updateProfileSchema = z.object({
   avatar_url: z.string().optional(),
   avatar: z.string().optional(),
   expo_push_token: z.string().optional(),
+  expoPushToken: z.string().optional(),
 }).passthrough();
 
 // GET /profiles/check-username/:username
@@ -480,6 +483,10 @@ router.patch('/:userId', requireAuth, async (req, res) => {
       ...(body.can_access_pre_rehearsal !== undefined ? { can_access_pre_rehearsal: body.can_access_pre_rehearsal } : {}),
       ...(body.canAnnotate !== undefined ? { canAnnotate: body.canAnnotate } : {}),
       ...(body.hiddenFeatures !== undefined ? { hiddenFeatures: body.hiddenFeatures } : {}),
+      ...((body.expoPushToken || body.expo_push_token) !== undefined ? {
+        expoPushToken: body.expoPushToken || body.expo_push_token,
+        expo_push_token: body.expoPushToken || body.expo_push_token,
+      } : {}),
     };
 
     await prisma.setting.upsert({
