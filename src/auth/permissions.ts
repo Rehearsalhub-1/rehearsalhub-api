@@ -27,8 +27,12 @@ export function isHQRole(role: unknown): boolean {
 
 export function canAccessAdmin(role: unknown): boolean {
   const normalized = normalizeRole(role)
-  return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator' ||
-    normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'church_coordinator'
+  return isHQRole(normalized) ||
+    normalized === 'org_admin' ||
+    normalized === 'zone_admin' || normalized === 'zone_coordinator' || normalized === 'zone_leader' ||
+    normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'subgroup_leader' ||
+    normalized === 'church_admin' || normalized === 'church_coordinator' || normalized === 'church_leader' ||
+    normalized === 'choir_leader' || normalized === 'music_director' || normalized === 'leader'
 }
 
 export function canManageAllTenants(role: unknown): boolean {
@@ -37,8 +41,12 @@ export function canManageAllTenants(role: unknown): boolean {
 
 export function canManageTenant(role: unknown): boolean {
   const normalized = normalizeRole(role)
-  return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator' ||
-    normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'church_coordinator'
+  return isHQRole(normalized) ||
+    normalized === 'org_admin' ||
+    normalized === 'zone_admin' || normalized === 'zone_coordinator' || normalized === 'zone_leader' ||
+    normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'subgroup_leader' ||
+    normalized === 'church_admin' || normalized === 'church_coordinator' || normalized === 'church_leader' ||
+    normalized === 'choir_leader' || normalized === 'music_director' || normalized === 'leader'
 }
 
 /**

@@ -5,10 +5,10 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, Get
 import crypto from 'crypto';
 import { Readable } from 'stream';
 
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'b2e5411830e116cf4ce6e91e90843db0';
 const bucketName = process.env.R2_BUCKET_NAME || 'rehearsalhub-media';
-const accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
-const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
+const accessKeyId = process.env.R2_ACCESS_KEY_ID || '53609880149dce49393f0d762b8b4baf';
+const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || 'dfec6c0153c47aa9c036d9e8bbbe2739ec738352f55afa2f8fd70df95f67ae90';
 const apiBase = (
   process.env.API_BASE_URL ||
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '') ||
@@ -22,11 +22,12 @@ export const publicUrlBase = (envPublicUrl && !envPublicUrl.includes('r2.dev'))
 
 export const r2Client = new S3Client({
   region: 'auto',
-  endpoint: accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined,
-  credentials: (accessKeyId && secretAccessKey) ? {
+  endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+  credentials: {
     accessKeyId,
     secretAccessKey,
-  } : undefined,
+  },
+  forcePathStyle: true,
 });
 
 export interface UploadOptions {
