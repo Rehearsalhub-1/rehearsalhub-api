@@ -349,7 +349,7 @@ router.post('/:id/reply', requireAuth, async (req: Request, res: Response) => {
 });
 
 /** PATCH /submitted-songs/:id/approve */
-router.patch('/:id/approve', requireTenantAdmin, async (req: Request, res: Response) => {
+router.patch('/:id/approve', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = res.locals.auth;
@@ -421,7 +421,7 @@ router.patch('/:id/approve', requireTenantAdmin, async (req: Request, res: Respo
 });
 
 /** PATCH /submitted-songs/:id/reject */
-router.patch('/:id/reject', requireTenantAdmin, async (req: Request, res: Response) => {
+router.patch('/:id/reject', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = res.locals.auth;

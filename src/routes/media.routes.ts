@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
-import { canManageTenant } from '../auth/permissions';
+import { canManageTenant, canAccessAdmin } from '../auth/permissions';
 
 const router = Router();
 
@@ -179,7 +179,7 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // POST /media - Create media item
-router.post('/', requireTenantAdmin, async (req: Request, res: Response) => {
+router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const id = body.id || `media_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -223,7 +223,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = res.locals.auth;
-    if (!canManageTenant(auth?.role)) {
+    if (!canManageTenant(auth?.role) && !canAccessAdmin(auth?.role)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
@@ -258,11 +258,11 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 // DELETE /media/:id - Delete media item
-router.delete('/:id', requireTenantAdmin, async (req: Request, res: Response) => {
+router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = res.locals.auth;
-    if (!canManageTenant(auth?.role)) {
+    if (!canManageTenant(auth?.role) && !canAccessAdmin(auth?.role)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 

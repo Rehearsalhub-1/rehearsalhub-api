@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken, JsonWebTokenError, TokenExpiredError } from './token';
 import { revocationStore } from './revocation';
 import { resolveTenantScope, withTenantTransaction } from '../middleware/tenant.middleware';
-import { canManageTenant, canManageChurches } from './permissions';
+import { canManageTenant, canManageChurches, canAccessAdmin } from './permissions';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
@@ -47,7 +47,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function requireTenantAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!canManageTenant(res.locals.auth?.role)) {
+  if (!res.locals.auth) {
+    return requireAuth(req, res, () => {
+      const role = res.locals.auth?.role;
+      if (!canManageTenant(role) && !canAccessAdmin(role)) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+      next();
+    });
+  }
+
+  const role = res.locals.auth?.role;
+  if (!canManageTenant(role) && !canAccessAdmin(role)) {
     res.status(403).json({ success: false, error: 'Forbidden' });
     return;
   }
