@@ -175,8 +175,8 @@ function shapeFullSchedule(p: ScheduleProgram) {
     date: p.date || new Date().toISOString().split('T')[0],
     category: p.category || 'schedule',
     status: p.status || (p.isArchived ? 'archive' : 'ongoing'),
-    organizationId: p.organizationId || p.zoneId || 'zone-001',
-    zoneId: p.zoneId || p.organizationId || 'zone-001',
+    organizationId: p.organizationId || p.zoneId || '',
+    zoneId: p.zoneId || p.organizationId || '',
     subGroupId: p.subGroupId || null,
     isCurrent: Boolean(p.isCurrent),
     isArchived: Boolean(p.isArchived),
@@ -199,7 +199,9 @@ function shapeFullSchedule(p: ScheduleProgram) {
 // ── GET /schedules or /schedule ─────────────────────────────────────────────
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    await loadSchedulesWithDbFallback();
+    if (memorySchedules.length === 0) {
+      await loadSchedulesWithDbFallback();
+    }
 
     const { zoneId, subGroupId, isArchived } = req.query as {
       zoneId?: string;
@@ -207,30 +209,41 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       isArchived?: string;
     };
 
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || '';
-    const effectiveChurchId = subGroupId || req.tenant?.effectiveChurchId || '';
+    const cleanZoneId = zoneId && zoneId !== 'all' ? zoneId.trim() : '';
+    const cleanSubGroupId = subGroupId && subGroupId !== 'all' ? subGroupId.trim() : '';
+
+    const effectiveZoneId = cleanZoneId || req.tenant?.effectiveZoneId || '';
+    // If client explicitly passed subGroupId as empty string, treat as no church filter
+    const effectiveChurchId = cleanSubGroupId || (cleanSubGroupId === '' && req.query.subGroupId !== undefined ? '' : (req.tenant?.effectiveChurchId || ''));
 
     let list = [...memorySchedules];
 
-    // Purge any lingering mock IDs
+    // Purge any lingering legacy mock IDs
     list = list.filter(p => !p.id?.startsWith('schedule_hslhs_') && !p.id?.startsWith('schedule_midweek_') && !p.id?.startsWith('schedule_may_archive'));
 
-    // Graceful hierarchy: If a church is scoped, check if it has church-specific schedules.
-    // If not, fallback to parent Zone schedules so church singers can rehearse the zone program!
-    if (effectiveChurchId && effectiveChurchId !== 'all' && effectiveChurchId !== 'global') {
+    // 1. Church-specific filter: If scoped to a church
+    if (effectiveChurchId && effectiveChurchId !== 'all') {
       const churchSpecific = list.filter(p => p.subGroupId === effectiveChurchId);
       if (churchSpecific.length > 0) {
         list = churchSpecific;
-      } else if (effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global') {
-        list = list.filter(p => (p.zoneId === effectiveZoneId || p.organizationId === effectiveZoneId) && !p.subGroupId);
       } else {
+        // Fallback to zone schedules for church singers if church hasn't made a dedicated schedule
         list = list.filter(p => !p.subGroupId);
       }
-    } else if (effectiveZoneId && effectiveZoneId !== 'all' && effectiveZoneId !== 'global') {
+    } else {
+      // By default for zone schedule view, show non-church-specific schedules
+      const mainList = list.filter(p => !p.subGroupId);
+      if (mainList.length > 0) {
+        list = mainList;
+      }
+    }
+
+    // 2. Zone scoping
+    if (effectiveZoneId && effectiveZoneId !== 'all') {
       list = list.filter(p => p.zoneId === effectiveZoneId || p.organizationId === effectiveZoneId);
     }
 
-    if (isArchived !== undefined) {
+    if (isArchived !== undefined && isArchived !== '') {
       const archBool = isArchived === 'true';
       list = list.filter(p => Boolean(p.isArchived) === archBool);
     }
@@ -269,11 +282,19 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
     const id = req.body.id || `schedule_${Date.now()}`;
     const name = (req.body.name || req.body.title || 'Rehearsal Schedule').trim();
     const date = req.body.date || now.toISOString().split('T')[0];
-    const orgId = req.body.zoneId || req.tenant?.effectiveZoneId || 'zone-001';
-    const subGroupId = req.body.subGroupId || undefined;
+    const orgId = (req.body.zoneId || req.body.organizationId || req.tenant?.effectiveZoneId || '').trim();
+    const subGroupId = req.body.subGroupId ? String(req.body.subGroupId).trim() : undefined;
 
     const newWeekId = `week_${Date.now()}`;
     const newDayId = `day_${Date.now()}`;
+
+    // Auto-make current if first active schedule in this zone or explicitly requested
+    const hasActiveCurrentInZone = memorySchedules.some(p =>
+      Boolean(p.isCurrent) &&
+      !p.isArchived &&
+      ((p.zoneId && orgId && p.zoneId === orgId) || (p.organizationId && orgId && p.organizationId === orgId) || (!p.zoneId && !orgId))
+    );
+    const shouldBeCurrent = req.body.isCurrent !== undefined ? Boolean(req.body.isCurrent) : !hasActiveCurrentInZone;
 
     const newProgram: ScheduleProgram = {
       id,
@@ -284,7 +305,7 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
       organizationId: orgId,
       zoneId: orgId,
       subGroupId,
-      isCurrent: false,
+      isCurrent: shouldBeCurrent,
       isArchived: false,
       currentWeekId: newWeekId,
       currentDayId: newDayId,
@@ -301,8 +322,18 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
       updatedAt: now.toISOString(),
     };
 
+    if (shouldBeCurrent) {
+      memorySchedules = memorySchedules.map(p => {
+        const sameZone = (p.zoneId && orgId && p.zoneId === orgId) || (p.organizationId && orgId && p.organizationId === orgId) || (!p.zoneId && !orgId);
+        if (sameZone) {
+          return { ...p, isCurrent: false };
+        }
+        return p;
+      });
+    }
+
     memorySchedules = [newProgram, ...memorySchedules];
-    saveSchedulesToDisk(memorySchedules);
+    await saveSchedulesToDisk(memorySchedules);
 
     const shaped = shapeFullSchedule(newProgram);
     broadcast('schedule', 'all', { type: 'create', data: shaped });
@@ -332,7 +363,8 @@ router.patch('/:scheduleId', requireAuth, requireTenantAdmin, async (req: Reques
     // If making this schedule current, unmark others in this zone
     if (req.body.isCurrent === true) {
       memorySchedules = memorySchedules.map(p => {
-        if (p.id !== scheduleId && (p.zoneId === current.zoneId || p.organizationId === current.organizationId)) {
+        const sameZone = (p.zoneId && current.zoneId && p.zoneId === current.zoneId) || (p.organizationId && current.organizationId && p.organizationId === current.organizationId) || (!p.zoneId && !current.zoneId);
+        if (p.id !== scheduleId && sameZone) {
           return { ...p, isCurrent: false };
         }
         return p;
@@ -346,7 +378,7 @@ router.patch('/:scheduleId', requireAuth, requireTenantAdmin, async (req: Reques
     };
 
     memorySchedules[index] = updated;
-    saveSchedulesToDisk(memorySchedules);
+    await saveSchedulesToDisk(memorySchedules);
 
     const shaped = shapeFullSchedule(updated);
     broadcast('schedule', 'all', { type: 'update', data: shaped });
@@ -370,7 +402,7 @@ router.delete('/:scheduleId', requireAuth, requireTenantAdmin, async (req: Reque
     memorySchedules = memorySchedules.filter(p => p.id !== scheduleId);
 
     if (memorySchedules.length !== prevLen) {
-      saveSchedulesToDisk(memorySchedules);
+      await saveSchedulesToDisk(memorySchedules);
       broadcast('schedule', 'all', { type: 'delete', scheduleId });
     }
 
