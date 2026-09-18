@@ -383,6 +383,42 @@ router.get('/zone', requireAuth, getSongsHandler);
 router.get('/zone-songs', requireAuth, getSongsHandler);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LIVE SONGS — precise single-query endpoint, no scanning
+// GET /songs/active?zoneId=xxx
+// Returns ONLY songs with status='live' scoped to the caller's zone.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/active', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const zoneId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
+
+    const liveSongs = await prisma.song.findMany({
+      where: {
+        status: 'live',
+        isActive: true,
+        OR: [
+          { organizationId: zoneId },
+          { isMaster: true },
+        ],
+      },
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: {
+          include: { program: { select: { id: true, name: true } } },
+          take: 1,
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const formatted = liveSongs.map(formatSong);
+    res.json({ success: true, count: formatted.length, data: formatted });
+  } catch (err) {
+    console.error('[songs:active]', err);
+    res.status(500).json({ success: false, error: 'Failed to load live songs' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. SONG HISTORY (Must be BEFORE /:id so Express does not capture /history as an ID!)
 // ─────────────────────────────────────────────────────────────────────────────
 const getSongHistoryHandler = async (req: Request, res: Response) => {
@@ -884,9 +920,13 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     const songId = req.params.id;
     const { status } = req.body;
 
+    const isGoingLive = status === 'live';
     const updated = await prisma.song.update({
       where: { id: songId },
-      data: { status: status || 'active' },
+      data: {
+        status: status || 'active',
+        isActive: isGoingLive,
+      },
     });
 
     const formatted = formatSong(updated);
@@ -895,6 +935,8 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     broadcast('songs', 'all', formatted);
     broadcast('song', 'all', formatted);
     broadcast('song_status', songId, { id: songId, status: updated.status });
+    // Dedicated live_song event — clients listen to this directly instead of scanning
+    broadcast('live_song', 'all', isGoingLive ? formatted : { id: songId, status: updated.status, isActive: false });
     res.json({ success: true, message: 'Song status updated', data: formatted });
   } catch (err) {
     console.error('[songs:status]', err);
@@ -925,7 +967,8 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       if (nextLive) {
         data.status = 'live';
       } else if (existing.status === 'live') {
-        data.status = 'unheard';
+        // Song was live and is now being stopped — mark as heard (it was just performed)
+        data.status = 'heard';
       }
     }
 
@@ -946,6 +989,9 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     broadcast('song', songId, formatted);
     broadcast('songs', 'all', formatted);
     broadcast('song', 'all', formatted);
+    // Dedicated live_song event — clients update widget instantly without scanning
+    const isNowLive = updated.status === 'live' && updated.isActive;
+    broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: updated.status, isActive: false });
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });
