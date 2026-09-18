@@ -806,6 +806,38 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       data,
     });
 
+    // Auto-record history if rehearsal audio changed
+    if (data.audioFile && data.audioFile !== existing.audioFile) {
+      try {
+        const titleDesc = `MOST UPDATED REHEARSAL (${updated.title})`;
+        const notesDesc = `Recorded Rehearsal - ${updated.leadSinger || 'Loveworld Singers'}`;
+        const autoEntry = await prisma.songHistory.create({
+          data: {
+            songId,
+            userId: res.locals.auth?.userId || null,
+            type: 'audio',
+            description: JSON.stringify({ title: titleDesc, notes: notesDesc }),
+            oldValue: existing.audioFile || '',
+            newValue: data.audioFile,
+          },
+        });
+        broadcast('song_history', songId, {
+          id: autoEntry.id,
+          songId,
+          type: 'audio',
+          title: titleDesc,
+          description: notesDesc,
+          notes: notesDesc,
+          audioUrl: data.audioFile,
+          new_value: data.audioFile,
+          old_value: existing.audioFile || '',
+          created_at: autoEntry.createdAt,
+        });
+      } catch (e) {
+        console.warn('[songs:PATCH] Auto-record audio history failed:', e);
+      }
+    }
+
     let resolvedProgramId = body.praiseNightId || body.programId || null;
     const isMasterOrMinistered = Boolean(body.isMaster !== undefined ? body.isMaster : (existing.isMaster || existing.isMinistered));
     const candidateProgName = body.program || body.programName || (isMasterOrMinistered && body.category ? body.category : null);
