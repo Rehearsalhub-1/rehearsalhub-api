@@ -259,16 +259,56 @@ router.get('/zone/:zoneId', requireAuth, async (req: Request, res: Response) => 
 router.post('/zone-join', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const { zone_id, is_hq } = req.body;
-    const orgId = is_hq ? 'zone-001' : (zone_id || req.tenant?.effectiveZoneId || 'zone-001');
+    const { zone_id, is_hq, invitationCode, invitation_code, code } = req.body || {};
+    const inputCode = String(invitationCode || invitation_code || code || zone_id || '').trim();
+
+    if (!inputCode && !is_hq) {
+      return res.status(400).json({ success: false, error: 'Invitation code or zone ID is required' });
+    }
+
+    let targetOrg: any = null;
+    if (is_hq) {
+      targetOrg = await prisma.organization.findFirst({
+        where: { OR: [{ id: 'zone-001' }, { isHq: true }] }
+      });
+    } else if (inputCode) {
+      targetOrg = await prisma.organization.findFirst({
+        where: {
+          OR: [
+            { invitationCode: { equals: inputCode, mode: 'insensitive' } },
+            { code: { equals: inputCode, mode: 'insensitive' } },
+            { id: { equals: inputCode, mode: 'insensitive' } },
+            { name: { equals: inputCode, mode: 'insensitive' } },
+          ],
+        },
+      });
+    }
+
+    if (!targetOrg) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invalid invitation code. Please check the code and try again.',
+      });
+    }
 
     await prisma.membership.upsert({
-      where: { userId_organizationId: { userId, organizationId: orgId } },
-      create: { userId, organizationId: orgId, role: 'MEMBER', status: 'ACTIVE' },
+      where: { userId_organizationId: { userId, organizationId: targetOrg.id } },
+      create: { userId, organizationId: targetOrg.id, role: 'MEMBER', status: 'ACTIVE' },
       update: { status: 'ACTIVE' },
     });
 
-    res.json({ success: true, message: 'Successfully joined organization' });
+    res.json({
+      success: true,
+      message: `Successfully joined ${targetOrg.name}!`,
+      data: {
+        id: targetOrg.id,
+        name: targetOrg.name,
+        code: targetOrg.code,
+        invitationCode: targetOrg.invitationCode,
+        region: targetOrg.region,
+        isHq: targetOrg.isHq,
+      },
+    });
   } catch (err) {
     console.error('[members/zone-join]', err);
     res.status(500).json({ success: false, error: 'Failed to join organization' });

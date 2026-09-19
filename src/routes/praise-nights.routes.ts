@@ -97,7 +97,33 @@ function shapeProgram(p: any) {
             const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email;
             if (name) resolvedLeadSinger = name;
           }
-          if (!resolvedLeadSinger) resolvedLeadSinger = 'Loveworld Singers';
+          const rawComments = s.comments;
+          let parsedCommentsList: any[] = [];
+          if (Array.isArray(rawComments)) {
+            parsedCommentsList = rawComments;
+          } else if (typeof rawComments === 'string' && rawComments.trim().length > 0) {
+            const trimmed = rawComments.trim();
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(trimmed);
+                parsedCommentsList = Array.isArray(parsed) ? parsed : [parsed];
+              } catch {
+                parsedCommentsList = [{ id: `comment-${s.id}`, text: trimmed, author: 'Coordinator', date: s.updatedAt || s.createdAt }];
+              }
+            } else {
+              parsedCommentsList = [{ id: `comment-${s.id}`, text: trimmed, author: 'Coordinator', date: s.updatedAt || s.createdAt }];
+            }
+          }
+
+          if (parsedCommentsList.length === 0 && s.notes) {
+            parsedCommentsList = [{ id: `comment-${s.id}`, text: s.notes, author: 'Coordinator', date: s.updatedAt || s.createdAt }];
+          }
+
+          const latestCommentObj = parsedCommentsList.length > 0 ? parsedCommentsList[parsedCommentsList.length - 1] : null;
+          const resolvedCommentText = s.notes || (latestCommentObj ? (typeof latestCommentObj === 'string' ? latestCommentObj : (latestCommentObj.text || latestCommentObj.comment || latestCommentObj.content || '')) : '');
+          const resolvedCommentAudio = latestCommentObj?.audioUrl || s.coordinatorAudioUrl || '';
+          const resolvedRehearsalCount = Math.max(0, parseInt(s.rehearsalCount ?? s.rehearsal_count, 10) || 0);
+          const resolvedImageUrl = s.imageUrl || s.image_url || '';
 
           return {
             id: s.id,
@@ -125,9 +151,15 @@ function shapeProgram(p: any) {
             status: s.status || 'unheard',
             isMaster: Boolean(s.isMaster || s.is_master),
             isMinistered: Boolean(s.isMinistered || s.is_ministered),
-            rehearsalCount: s.rehearsalCount || s.rehearsal_count || 0,
+            rehearsalCount: resolvedRehearsalCount,
             organizationId: s.organizationId || s.organization_id || null,
             groupId: s.groupId || s.group_id || null,
+            imageUrl: resolvedImageUrl,
+            customParts: s.customParts || s.custom_parts || null,
+            comments: parsedCommentsList,
+            notes: resolvedCommentText,
+            coordinatorComment: resolvedCommentText,
+            coordinatorAudioUrl: resolvedCommentAudio,
             createdAt: s.createdAt || s.created_at,
             updatedAt: s.updatedAt || s.updated_at,
           };

@@ -181,7 +181,7 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
         socket.send(JSON.stringify({ type: 'subscribed', resource: msg.resource, id: msg.id }));
 
         const since = Number(msg.since);
-        if (Number.isFinite(since) && since >= 0) {
+        if (Number.isFinite(since) && since > 0 && msg.resource !== 'live_song') {
           eventHistory
             .filter((event) => event.sequence > since && event.resource === msg.resource && (event.id === msg.id || msg.id === 'all'))
             .forEach((event) => socket.send(JSON.stringify({ type: 'event', ...event })));

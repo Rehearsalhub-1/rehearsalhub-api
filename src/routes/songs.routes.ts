@@ -129,6 +129,8 @@ function shapeSong(song: any) {
     audioFile: audioUrl,
     audioUrl: audioUrl,
     audioUrls: Object.keys(audioUrls).length > 0 ? audioUrls : (audioUrl ? { full: audioUrl } : null),
+    imageUrl: song.imageUrl || (song as any).image_url || null,
+    image: song.imageUrl || (song as any).image_url || null,
     category: song.category || null,
     status: song.status || 'active',
     isMaster: Boolean(song.isMaster),
@@ -137,11 +139,45 @@ function shapeSong(song: any) {
     is_hq_only: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
     isHqOnly: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
     scope: (song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly) ? 'hq' : 'global',
-    rehearsalCount: song.rehearsalCount || 0,
+    rehearsalCount: Math.max(0, parseInt((song.rehearsalCount ?? (song as any).rehearsal_count) as any, 10) || 0),
     organizationId: song.organizationId || null,
     groupId: song.groupId || null,
-    isActive: Boolean(song.status === 'live' || song.isLive === true),
-    isLive: Boolean(song.status === 'live' || song.isLive === true),
+    isActive: Boolean(song.status === 'live' && song.isActive !== false),
+    isLive: Boolean(song.status === 'live' && song.isActive !== false),
+    ...(() => {
+      let commentsList: any[] = [];
+      const rawComments = song.comments;
+      if (Array.isArray(rawComments)) {
+        commentsList = rawComments;
+      } else if (typeof rawComments === 'string' && rawComments.trim().length > 0) {
+        const trimmed = rawComments.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            commentsList = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            commentsList = [{ id: `comment-${song.id}`, text: trimmed, date: song.updatedAt || song.createdAt, author: 'Coordinator' }];
+          }
+        } else {
+          commentsList = [{ id: `comment-${song.id}`, text: trimmed, date: song.updatedAt || song.createdAt, author: 'Coordinator' }];
+        }
+      }
+
+      if (commentsList.length === 0 && song.notes) {
+        commentsList = [{ id: `comment-${song.id}`, text: song.notes, date: song.updatedAt || song.createdAt, author: 'Coordinator' }];
+      }
+
+      const latestComment = commentsList.length > 0 ? commentsList[commentsList.length - 1] : null;
+      const commentText = song.notes || (latestComment ? (typeof latestComment === 'string' ? latestComment : (latestComment.text || latestComment.comment || latestComment.content || '')) : '');
+      const commentAudio = latestComment?.audioUrl || (song as any).coordinatorAudioUrl || '';
+
+      return {
+        comments: commentsList,
+        notes: commentText,
+        coordinatorComment: commentText,
+        coordinatorAudioUrl: commentAudio,
+      };
+    })(),
     createdAt: song.createdAt,
     updatedAt: song.updatedAt,
   };
@@ -172,6 +208,10 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
         { writer: { contains: search, mode: 'insensitive' } },
         { leadSinger: { contains: search, mode: 'insensitive' } },
         { category: { contains: search, mode: 'insensitive' } },
+        { lyrics: { contains: search, mode: 'insensitive' } },
+        { notes: { contains: search, mode: 'insensitive' } },
+        { comments: { contains: search, mode: 'insensitive' } },
+        { solfas: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -214,6 +254,182 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
   }
 };
 
+function stripHtmlText(html: string): string {
+  if (!html) return '';
+  return String(html)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractChatSnippet(fullText: string, targetQuery: string, targetWords: string[]): string {
+  const lower = fullText.toLowerCase();
+  let idx = -1;
+  let foundWord = targetQuery;
+
+  idx = lower.indexOf(targetQuery.toLowerCase());
+  if (idx === -1) {
+    const noPunctFull = fullText.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').replace(/\s+/g, ' ');
+    const qClean = targetQuery.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').replace(/\s+/g, ' ');
+    const pIdx = noPunctFull.indexOf(qClean);
+    if (pIdx !== -1) {
+      idx = Math.min(pIdx, fullText.length - 1);
+    }
+  }
+
+  if (idx === -1 && targetWords.length > 0) {
+    for (const w of targetWords) {
+      if (w.length < 2) continue;
+      const i = lower.indexOf(w);
+      if (i !== -1 && (idx === -1 || i < idx)) {
+        idx = i;
+        foundWord = w;
+      }
+    }
+  }
+
+  if (idx === -1) return '';
+
+  const start = Math.max(0, idx - 26);
+  const end = Math.min(fullText.length, idx + foundWord.length + 42);
+  let snippet = fullText.slice(start, end).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (start > 0) snippet = '...' + snippet;
+  if (end < fullText.length) snippet = snippet + '...';
+  return snippet;
+}
+
+// Universal Search across ALL songs in the database (master catalog, ministered programs, zone songs)
+const universalSearchHandler = async (req: Request, res: Response) => {
+  try {
+    const rawQ = String(req.query.q || req.query.query || req.query.search || '').trim();
+    if (!rawQ) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+
+    const limitParam = req.query.limit ? parseInt(req.query.limit as string) : 60;
+    const limit = Math.min(100, Math.max(1, isNaN(limitParam) ? 60 : limitParam));
+    const cleanQ = rawQ.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
+    const queryWords = cleanQ.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').split(/\s+/).filter(w => w.length > 0);
+
+    const orConditions: any[] = [
+      { title: { contains: cleanQ, mode: 'insensitive' } },
+      { lyrics: { contains: cleanQ, mode: 'insensitive' } },
+      { writer: { contains: cleanQ, mode: 'insensitive' } },
+      { leadSinger: { contains: cleanQ, mode: 'insensitive' } },
+      { category: { contains: cleanQ, mode: 'insensitive' } },
+      { notes: { contains: cleanQ, mode: 'insensitive' } },
+      { comments: { contains: cleanQ, mode: 'insensitive' } },
+      { solfas: { contains: cleanQ, mode: 'insensitive' } },
+    ];
+
+    if (queryWords.length > 1) {
+      orConditions.push({
+        AND: queryWords.map(word => ({
+          OR: [
+            { title: { contains: word, mode: 'insensitive' } },
+            { lyrics: { contains: word, mode: 'insensitive' } },
+            { writer: { contains: word, mode: 'insensitive' } },
+            { leadSinger: { contains: word, mode: 'insensitive' } },
+          ]
+        }))
+      });
+    }
+
+    const rows = await prisma.song.findMany({
+      where: {
+        OR: orConditions,
+      },
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: {
+          include: {
+            program: {
+              select: { id: true, name: true, bannerImage: true }
+            }
+          },
+          take: 1
+        }
+      },
+      take: limit * 2,
+    });
+
+    const scoredSongs = rows.map((s: any) => {
+      const formatted = formatSong(s);
+      const titleLower = (formatted.title || '').toLowerCase();
+      const lyricsClean = stripHtmlText(formatted.lyrics || '');
+      const lyricsLower = lyricsClean.toLowerCase();
+      const singerLower = (formatted.leadSinger || '').toLowerCase();
+      const writerLower = (formatted.writer || '').toLowerCase();
+      const commentsClean = stripHtmlText(formatted.notes || formatted.coordinatorComment || '');
+      const commentsLower = commentsClean.toLowerCase();
+
+      let score = 0;
+      let matchField = '';
+      let snippet = '';
+
+      if (titleLower.includes(cleanQ)) {
+        score = 100;
+        matchField = 'title';
+      } else if (queryWords.length > 1 && queryWords.every(w => titleLower.includes(w))) {
+        score = 88;
+        matchField = 'title';
+      } else if (singerLower.includes(cleanQ) || writerLower.includes(cleanQ)) {
+        score = 75;
+        matchField = singerLower.includes(cleanQ) ? 'leadSinger' : 'writer';
+      } else if (lyricsLower.includes(cleanQ)) {
+        score = 55;
+        matchField = 'lyrics';
+        snippet = extractChatSnippet(lyricsClean, cleanQ, queryWords);
+      } else if (queryWords.length > 1 && queryWords.every(w => lyricsLower.includes(w))) {
+        score = 45;
+        matchField = 'lyrics';
+        snippet = extractChatSnippet(lyricsClean, queryWords[0], queryWords);
+      } else if (commentsLower.includes(cleanQ)) {
+        score = 40;
+        matchField = 'comments';
+        snippet = extractChatSnippet(commentsClean, cleanQ, queryWords);
+      } else if (lyricsLower.length > 0 && queryWords.some(w => w.length >= 3 && lyricsLower.includes(w))) {
+        score = 30;
+        matchField = 'lyrics';
+        snippet = extractChatSnippet(lyricsClean, queryWords[0], queryWords);
+      } else {
+        score = 20;
+        matchField = 'title';
+      }
+
+      return {
+        ...formatted,
+        searchResult: {
+          isMatch: true,
+          score,
+          matchField,
+          snippet: snippet || undefined,
+          matchTokens: [cleanQ, ...queryWords],
+        }
+      };
+    });
+
+    scoredSongs.sort((a, b) => b.searchResult.score - a.searchResult.score);
+    const finalResults = scoredSongs.slice(0, limit);
+
+    res.json({
+      success: true,
+      count: finalResults.length,
+      data: finalResults,
+    });
+  } catch (err) {
+    console.error('[songs/universal-search]', err);
+    res.status(500).json({ success: false, error: 'Failed to search songs' });
+  }
+};
+
+router.get('/universal-search', universalSearchHandler);
+router.get('/search', universalSearchHandler);
 router.get('/master', requireAuth, getMinisteredSongsHandler);
 router.get('/ministered', requireAuth, getMinisteredSongsHandler);
 
@@ -771,6 +987,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         status: isHqOnly ? 'hq_only' : (body.status || 'active'),
         isMaster: Boolean(body.isMaster),
         isMinistered: Boolean(body.isMinistered),
+        rehearsalCount: Math.max(0, parseInt(body.rehearsalCount ?? body.rehearsal_count, 10) || 0),
+        comments: typeof body.comments === 'object' ? JSON.stringify(body.comments) : (body.comments || null),
+        notes: typeof body.notes === 'string' ? body.notes : (body.coordinatorComment || null),
         ...(resolvedProgramId
           ? {
               programSongs: {
@@ -825,10 +1044,60 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
     if (body.category !== undefined) data.category = body.category;
     if (body.status !== undefined) data.status = body.status;
-    if (body.isMaster !== undefined) data.isMaster = Boolean(body.isMaster);
-    if (body.isMinistered !== undefined) data.isMinistered = Boolean(body.isMinistered);
-
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+    if (data.status === 'live') {
+      data.isActive = true;
+    } else if (data.status && ['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(data.status).toLowerCase())) {
+      data.isActive = false;
+    }
+
+    if (body.rehearsalCount !== undefined || body.rehearsal_count !== undefined) {
+      data.rehearsalCount = Math.max(0, parseInt(body.rehearsalCount ?? body.rehearsal_count, 10) || 0);
+    }
+
+    if (body.comments !== undefined || body.coordinatorComment !== undefined || body.notes !== undefined) {
+      let resolvedNotes = '';
+      if (typeof body.notes === 'string' && body.notes.trim()) {
+        resolvedNotes = body.notes.trim();
+      } else if (typeof body.coordinatorComment === 'string' && body.coordinatorComment.trim()) {
+        resolvedNotes = body.coordinatorComment.trim();
+      }
+
+      let commentsArr: any[] = [];
+      if (Array.isArray(body.comments)) {
+        commentsArr = body.comments;
+      } else if (typeof body.comments === 'string' && body.comments.trim()) {
+        const trimmed = body.comments.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            commentsArr = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            commentsArr = [{ id: `comment-${Date.now()}`, text: trimmed, author: 'Coordinator', date: new Date().toISOString() }];
+          }
+        } else {
+          commentsArr = [{ id: `comment-${Date.now()}`, text: trimmed, author: 'Coordinator', date: new Date().toISOString() }];
+        }
+      }
+
+      if (commentsArr.length === 0 && resolvedNotes) {
+        commentsArr = [{
+          id: `comment-${Date.now()}`,
+          text: resolvedNotes,
+          author: 'Coordinator',
+          date: new Date().toISOString(),
+          audioUrl: typeof body.coordinatorAudioUrl === 'string' ? body.coordinatorAudioUrl : ''
+        }];
+      }
+
+      if (!resolvedNotes && commentsArr.length > 0) {
+        const last = commentsArr[commentsArr.length - 1];
+        resolvedNotes = typeof last === 'string' ? last : (last?.text || last?.comment || last?.content || '');
+      }
+
+      data.comments = JSON.stringify(commentsArr);
+      data.notes = resolvedNotes;
+    }
 
     if (body.isHQOnly !== undefined || body.is_hq_only !== undefined || body.isHqOnly !== undefined || body.scope !== undefined) {
       const isHqOnly = Boolean(body.isHQOnly || body.is_hq_only || body.isHqOnly || body.scope === 'hq');
@@ -921,6 +1190,26 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     const { status } = req.body;
 
     const isGoingLive = status === 'live';
+
+    if (isGoingLive) {
+      // Deactivate any other currently live songs in the same program
+      const existingWithPrograms = await prisma.song.findUnique({
+        where: { id: songId },
+        include: { programSongs: true },
+      });
+      const programIds = existingWithPrograms?.programSongs?.map((ps) => ps.programId) || [];
+      if (programIds.length > 0) {
+        await prisma.song.updateMany({
+          where: {
+            id: { not: songId },
+            status: 'live',
+            programSongs: { some: { programId: { in: programIds } } },
+          },
+          data: { status: 'heard', isActive: false },
+        }).catch(() => {});
+      }
+    }
+
     const updated = await prisma.song.update({
       where: { id: songId },
       data: {
@@ -960,14 +1249,72 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     if (body.tempo !== undefined) data.tempo = body.tempo;
     if (body.lyrics !== undefined) data.lyrics = body.lyrics;
     if (body.writer !== undefined) data.writer = body.writer;
+    if (body.conductor !== undefined || body.conductorGuide !== undefined) data.conductor = body.conductor || body.conductorGuide;
+    if (body.leadSinger !== undefined || body.lead_singer !== undefined) data.leadSinger = body.leadSinger || body.lead_singer;
+    if (body.drummer !== undefined) data.drummer = body.drummer;
+    if (body.leadKeyboardist !== undefined || body.lead_keyboardist !== undefined) data.leadKeyboardist = body.leadKeyboardist || body.lead_keyboardist;
+    if (body.leadGuitarist !== undefined || body.lead_guitarist !== undefined) data.leadGuitarist = body.leadGuitarist || body.lead_guitarist;
+    if (body.bassGuitarist !== undefined || body.bass_guitarist !== undefined) data.bassGuitarist = body.bassGuitarist || body.bass_guitarist;
     if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
+    if (body.audioFile !== undefined || body.audio_file !== undefined || body.audioUrl !== undefined) {
+      data.audioFile = body.audioFile || body.audio_file || body.audioUrl;
+    }
+    if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
+    if (body.category !== undefined) data.category = body.category;
+    if (body.rehearsalCount !== undefined || body.rehearsal_count !== undefined) {
+      data.rehearsalCount = Math.max(0, parseInt(body.rehearsalCount ?? body.rehearsal_count, 10) || 0);
+    }
+
+    if (body.comments !== undefined || body.coordinatorComment !== undefined || body.notes !== undefined) {
+      let resolvedNotes = '';
+      if (typeof body.notes === 'string' && body.notes.trim()) {
+        resolvedNotes = body.notes.trim();
+      } else if (typeof body.coordinatorComment === 'string' && body.coordinatorComment.trim()) {
+        resolvedNotes = body.coordinatorComment.trim();
+      }
+
+      let commentsArr: any[] = [];
+      if (Array.isArray(body.comments)) {
+        commentsArr = body.comments;
+      } else if (typeof body.comments === 'string' && body.comments.trim()) {
+        const trimmed = body.comments.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            commentsArr = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            commentsArr = [{ id: `comment-${Date.now()}`, text: trimmed, author: 'Coordinator', date: new Date().toISOString() }];
+          }
+        } else {
+          commentsArr = [{ id: `comment-${Date.now()}`, text: trimmed, author: 'Coordinator', date: new Date().toISOString() }];
+        }
+      }
+
+      if (commentsArr.length === 0 && resolvedNotes) {
+        commentsArr = [{
+          id: `comment-${Date.now()}`,
+          text: resolvedNotes,
+          author: 'Coordinator',
+          date: new Date().toISOString(),
+          audioUrl: typeof body.coordinatorAudioUrl === 'string' ? body.coordinatorAudioUrl : ''
+        }];
+      }
+
+      if (!resolvedNotes && commentsArr.length > 0) {
+        const last = commentsArr[commentsArr.length - 1];
+        resolvedNotes = typeof last === 'string' ? last : (last?.text || last?.comment || last?.content || '');
+      }
+
+      data.comments = JSON.stringify(commentsArr);
+      data.notes = resolvedNotes;
+    }
+
     if (body.isActive !== undefined || body.isLive !== undefined) {
       const nextLive = Boolean(body.isActive ?? body.isLive);
       data.isActive = nextLive;
       if (nextLive) {
         data.status = 'live';
-      } else if (existing.status === 'live') {
-        // Song was live and is now being stopped — mark as heard (it was just performed)
+      } else {
         data.status = 'heard';
       }
     }
@@ -975,8 +1322,40 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     // Map isHeard boolean to status string; isHeard takes priority over status
     if (body.isHeard !== undefined) {
       data.status = body.isHeard ? 'heard' : 'unheard';
+      data.isActive = false;
     } else if (body.status !== undefined) {
       data.status = body.status;
+      if (body.status === 'live') {
+        data.isActive = true;
+      } else if (['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase())) {
+        data.isActive = false;
+      }
+    }
+
+    // Safety sync: status='live' MUST have isActive=true; non-live status MUST have isActive=false
+    if (data.status === 'live') {
+      data.isActive = true;
+    } else if (data.status && ['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(data.status).toLowerCase())) {
+      data.isActive = false;
+    }
+
+    if (data.status === 'live' && data.isActive) {
+      // Deactivate any other live songs in the same program
+      const existingWithPrograms = await prisma.song.findUnique({
+        where: { id: songId },
+        include: { programSongs: true },
+      });
+      const programIds = existingWithPrograms?.programSongs?.map((ps) => ps.programId) || [];
+      if (programIds.length > 0) {
+        await prisma.song.updateMany({
+          where: {
+            id: { not: songId },
+            status: 'live',
+            programSongs: { some: { programId: { in: programIds } } },
+          },
+          data: { status: 'heard', isActive: false },
+        }).catch(() => {});
+      }
     }
 
     const updated = await prisma.song.update({

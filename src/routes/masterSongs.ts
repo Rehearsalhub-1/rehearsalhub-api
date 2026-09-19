@@ -81,6 +81,8 @@ router.get('/', async (req: Request, res: Response) => {
         writer: s.writer || null,
         solfas: s.solfas || null,
         category: s.category || 'Master Library',
+        imageUrl: s.imageUrl || (s as any).image_url || null,
+        image: s.imageUrl || (s as any).image_url || null,
         audioFile: s.audioFile || null,
         audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
         conductor: s.conductor || null,
@@ -92,7 +94,21 @@ router.get('/', async (req: Request, res: Response) => {
         status: s.status || 'active',
         isMaster: true,
         isMinistered: s.isMinistered,
-        rehearsalCount: s.rehearsalCount,
+        rehearsalCount: Math.max(0, parseInt(s.rehearsalCount ?? (s as any).rehearsal_count, 10) || 0),
+        comments: (() => {
+          if (!s.comments) return s.notes ? [{ id: `comment-${s.id}`, text: s.notes, date: s.updatedAt || s.createdAt, author: 'Coordinator' }] : [];
+          if (typeof s.comments === 'string') {
+            try {
+              const p = JSON.parse(s.comments);
+              return Array.isArray(p) ? p : [p];
+            } catch {
+              return [{ id: `comment-${s.id}`, text: s.comments, date: s.updatedAt || s.createdAt, author: 'Coordinator' }];
+            }
+          }
+          return Array.isArray(s.comments) ? s.comments : [];
+        })(),
+        notes: s.notes || (typeof s.comments === 'string' && !s.comments.trim().startsWith('[') ? s.comments : ''),
+        coordinatorComment: s.notes || (typeof s.comments === 'string' && !s.comments.trim().startsWith('[') ? s.comments : ''),
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
       };
@@ -188,6 +204,14 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     if (body.leadGuitarist !== undefined || body.lead_guitarist !== undefined) data.leadGuitarist = body.leadGuitarist || body.lead_guitarist;
     if (body.solfas !== undefined || body.solfa !== undefined) data.solfas = body.solfas || body.solfa;
     if (body.status !== undefined) data.status = body.status;
+    if (body.rehearsalCount !== undefined || body.rehearsal_count !== undefined) {
+      data.rehearsalCount = Math.max(0, parseInt(body.rehearsalCount ?? body.rehearsal_count, 10) || 0);
+    }
+    if (body.comments !== undefined || body.notes !== undefined || body.coordinatorComment !== undefined) {
+      const commentText = body.notes || body.coordinatorComment || (typeof body.comments === 'string' ? body.comments : '');
+      data.comments = typeof body.comments === 'object' ? JSON.stringify(body.comments) : (body.comments || commentText);
+      data.notes = commentText;
+    }
 
     const updated = await prisma.song.update({ where: { id: songId }, data });
     res.json({ success: true, message: 'Master song updated', data: updated });

@@ -177,6 +177,8 @@ model Song {
   isMaster        Boolean       @default(false) @map("is_master") // Public catalog accessible to all orgs
   isMinistered    Boolean       @default(false) @map("is_ministered")
   status          String        @default("active") // active, heard, unheard
+  comments        String?       @db.Text
+  notes           String?       @db.Text
   rehearsalCount  Int           @default(0) @map("rehearsal_count")
   isActive        Boolean       @default(true) @map("is_active")
   createdAt       DateTime      @default(now()) @map("created_at")
