@@ -479,7 +479,7 @@ export async function register(input: {
               create: {
                 organizationId: org.id,
                 role: 'MEMBER',
-                status: isHQRequest ? 'PENDING' : 'ACTIVE',
+                status: 'ACTIVE',
               },
             },
           }
@@ -490,25 +490,6 @@ export async function register(input: {
       memberships: { include: { organization: true, group: true } },
     },
   });
-
-  if (isHQRequest) {
-    try {
-      await prisma.notification.create({
-        data: {
-          id: crypto.randomUUID(),
-          type: 'join_request',
-          title: 'New HQ Join Request',
-          body: `${input.firstName.trim()} ${input.lastName.trim()} (${email}) has requested to join an HQ group using zone code ${cleanZoneCode}. Please review and approve or reject their account.`,
-          category: 'join_request',
-          priority: 'high',
-          senderId: id,
-        },
-      });
-    } catch {
-      // Non-blocking notification
-    }
-    return { pendingApproval: true, userId: id };
-  }
 
   const profile = profileFromUser(createdUser);
   return issueTokens(profile);
