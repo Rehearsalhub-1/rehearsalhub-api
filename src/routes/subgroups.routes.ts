@@ -124,10 +124,21 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const memberships = await prisma.membership.findMany({
-      where: { groupId: id },
-      include: { user: true },
-    });
+    const page = req.query.page ? Math.max(1, parseInt(req.query.page as string, 10)) : undefined;
+    const limit = req.query.limit ? Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10))) : (page ? 50 : undefined);
+    const skip = page && limit ? (page - 1) * limit : undefined;
+
+    const where = { groupId: id };
+    const [total, memberships] = await Promise.all([
+      prisma.membership.count({ where }),
+      prisma.membership.findMany({
+        where,
+        include: { user: true },
+        skip,
+        take: limit,
+        orderBy: { joinedAt: 'desc' },
+      }),
+    ]);
 
     const metaKeys = memberships.map((m) => `profile_meta_${m.userId}`);
     const metaSettings = await prisma.setting.findMany({ where: { key: { in: metaKeys } } });
@@ -167,7 +178,16 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
       };
     });
 
-    res.json({ success: true, count: members.length, data: members });
+    res.json({
+      success: true,
+      count: members.length,
+      total,
+      page: page || 1,
+      limit: limit || total,
+      totalPages: limit ? Math.ceil(total / limit) : 1,
+      hasMore: skip !== undefined && limit !== undefined ? skip + memberships.length < total : false,
+      data: members,
+    });
   } catch (err) {
     console.error('[subgroups/:id/members:get]', err);
     res.status(500).json({ success: false, error: 'Failed to load members' });

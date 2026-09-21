@@ -212,19 +212,39 @@ router.get('/hq', requireAuth, async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const memberships = await prisma.membership.findMany({
-      where: {
-        OR: [
-          { organizationId: 'zone-001' },
-          { organization: { isHq: true } },
-        ],
-      },
-      include: { user: true, organization: true, group: true },
-      take: 200,
-    });
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [
+        { organizationId: 'zone-001' },
+        { organization: { isHq: true } },
+      ],
+    };
+
+    const [total, memberships] = await Promise.all([
+      prisma.membership.count({ where }),
+      prisma.membership.findMany({
+        where,
+        include: { user: true, organization: true, group: true },
+        skip,
+        take: limit,
+        orderBy: { joinedAt: 'desc' },
+      }),
+    ]);
 
     const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
-    res.json({ success: true, count: memberships.length, data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) });
+    res.json({
+      success: true,
+      count: memberships.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: skip + memberships.length < total,
+      data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))),
+    });
   } catch (err) {
     console.error('[members/hq]', err);
     res.status(500).json({ success: false, error: 'Failed to load HQ members' });
@@ -241,14 +261,34 @@ router.get('/zone/:zoneId', requireAuth, async (req: Request, res: Response) => 
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const memberships = await prisma.membership.findMany({
-      where: { organizationId: targetZoneId },
-      include: { user: true, organization: true, group: true },
-      take: 200,
-    });
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
+    const skip = (page - 1) * limit;
+
+    const where = { organizationId: targetZoneId };
+
+    const [total, memberships] = await Promise.all([
+      prisma.membership.count({ where }),
+      prisma.membership.findMany({
+        where,
+        include: { user: true, organization: true, group: true },
+        skip,
+        take: limit,
+        orderBy: { joinedAt: 'desc' },
+      }),
+    ]);
 
     const metaMap = await getProfileMetas(memberships.map((m) => m.userId));
-    res.json({ success: true, count: memberships.length, data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))) });
+    res.json({
+      success: true,
+      count: memberships.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      hasMore: skip + memberships.length < total,
+      data: memberships.map((m) => shapeMember(m, metaMap.get(m.userId))),
+    });
   } catch (err) {
     console.error('[members/zone]', err);
     res.status(500).json({ success: false, error: 'Failed to load zone members' });
