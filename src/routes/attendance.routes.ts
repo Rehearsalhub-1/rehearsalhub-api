@@ -81,7 +81,10 @@ router.get('/personal', requireAuth, handleGetMyAttendance);
 router.get('/session', requireAuth, async (req: Request, res: Response) => {
   try {
     const { zoneId } = req.query as { zoneId?: string };
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
+    if (!effectiveZoneId) {
+      return res.status(400).json({ success: false, error: 'zoneId query param or tenant scope is required' });
+    }
     const key = `clockin_session_${effectiveZoneId}`;
 
     const setting = await prisma.setting.findUnique({ where: { key } });
@@ -107,7 +110,10 @@ router.post('/session/toggle', requireAuth, requireTenantAdmin, async (req: Requ
   try {
     const auth = res.locals.auth;
     const { zoneId, isOpen } = req.body;
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
+    if (!effectiveZoneId) {
+      return res.status(400).json({ success: false, error: 'zoneId is required to toggle session' });
+    }
     const key = `clockin_session_${effectiveZoneId}`;
 
     const updatedValue = {
@@ -150,9 +156,20 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 const handleCheckIn = async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { userId, programId, eventName, qrCode, zoneId, latitude, longitude } = req.body;
+    const { userId, programId, eventName, qrCode, zoneId, churchId, subGroupId, latitude, longitude } = req.body;
     const targetUserId = userId || auth.userId;
-    const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    if (!orgId) {
+      const userMem = await prisma.membership.findFirst({
+        where: { userId: targetUserId, status: 'ACTIVE' },
+        select: { organizationId: true },
+      });
+      orgId = userMem?.organizationId;
+    }
+    if (!orgId) {
+      return res.status(400).json({ success: false, error: 'Zone identification is required for attendance clock-in.' });
+    }
+    const effectiveChurchId = churchId || subGroupId || req.tenant?.effectiveChurchId || auth?.churchId || null;
     const now = new Date();
     const id = (typeof req.body.id === 'string' && req.body.id.trim())
       ? req.body.id.trim()
@@ -170,14 +187,26 @@ const handleCheckIn = async (req: Request, res: Response) => {
     }
 
     // 2. Guard: Enforce geofence location verification if configured
-    const geofenceKeys = [`geofence_${orgId}`, 'geofence_hq', 'geofence'];
+    const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
+    const candidateKeys = [
+      effectiveChurchId ? `geofence_${effectiveChurchId}` : null,
+      orgId ? `geofence_${orgId}` : null,
+      isHQ ? 'geofence_hq' : null,
+      isHQ ? 'geofence' : null,
+    ].filter(Boolean) as string[];
+
     const geofenceSettings = await prisma.setting.findMany({
-      where: { key: { in: geofenceKeys } },
+      where: { key: { in: candidateKeys } },
     });
-    const activeGeofenceSetting =
-      geofenceSettings.find((s) => s.key === `geofence_${orgId}`) ||
-      geofenceSettings.find((s) => s.key === 'geofence_hq') ||
-      geofenceSettings[0];
+
+    let activeGeofenceSetting: (typeof geofenceSettings)[number] | null = null;
+    for (const k of candidateKeys) {
+      const match = geofenceSettings.find((s) => s.key === k);
+      if (match) {
+        activeGeofenceSetting = match;
+        break;
+      }
+    }
 
     const geoVal: any = activeGeofenceSetting?.value;
     if (geoVal && geoVal.isEnabled !== false && geoVal.latitude != null && geoVal.longitude != null) {
@@ -278,7 +307,17 @@ router.post('/manual', requireAuth, requireTenantAdmin, async (req: Request, res
     if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
 
     const id = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    if (!orgId) {
+      const userMem = await prisma.membership.findFirst({
+        where: { userId, status: 'ACTIVE' },
+        select: { organizationId: true },
+      });
+      orgId = userMem?.organizationId;
+    }
+    if (!orgId) {
+      return res.status(400).json({ success: false, error: 'Zone identification is required for attendance recording.' });
+    }
     const now = new Date();
 
     const inserted = await prisma.attendance.create({

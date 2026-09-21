@@ -58,8 +58,8 @@ export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean 
   const r = (profile.role || String(raw.role || '')).toLowerCase();
   if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
   if (r === 'president' || r === 'director' || r === 'oftp' || r === 'executive') return r;
-  if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator') return 'zone_admin';
-  if (r === 'church_coordinator') return 'church_coordinator';
+  if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator' || r === 'coordinator' || r === 'org_admin') return 'zone_admin';
+  if (r === 'church_coordinator' || r === 'church_admin' || r === 'group_admin' || r === 'group_coordinator') return 'church_coordinator';
   return 'member';
 }
 

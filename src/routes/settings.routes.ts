@@ -2,10 +2,18 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
-import { canManageAllTenants } from '../auth/permissions';
+import { canManageAllTenants, canManageTenant } from '../auth/permissions';
 
 const router = Router();
 const idSchema = z.string().min(1).max(200);
+
+function canUpdateSettingKey(key: string, role: unknown): boolean {
+  if (canManageAllTenants(role)) return true;
+  if (key.startsWith('geofence_') || key.startsWith('clockin_session_')) {
+    return canManageTenant(role);
+  }
+  return false;
+}
 
 /** GET /settings/:id */
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
@@ -31,11 +39,14 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 /** PUT /settings/:id */
 router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!canManageAllTenants(res.locals.auth?.role)) return res.status(403).json({ success: false, error: 'Forbidden' });
     const parsed = idSchema.safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid id' });
 
     const key = parsed.data;
+    if (!canUpdateSettingKey(key, res.locals.auth?.role)) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Insufficient permissions to update settings' });
+    }
+
     const bodyData = req.body || {};
 
     const updated = await prisma.setting.upsert({
@@ -54,12 +65,14 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 /** PATCH /settings/:id */
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const role = String(res.locals.auth?.role || '').toLowerCase();
-    if (role !== 'admin' && role !== 'hq_admin' && role !== 'super_admin') return res.status(403).json({ success: false, error: 'Forbidden' });
     const parsed = idSchema.safeParse(req.params.id);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid id' });
 
     const key = parsed.data;
+    if (!canUpdateSettingKey(key, res.locals.auth?.role)) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Insufficient permissions to update settings' });
+    }
+
     const bodyData = req.body || {};
 
     const existing = await prisma.setting.findUnique({ where: { key } });

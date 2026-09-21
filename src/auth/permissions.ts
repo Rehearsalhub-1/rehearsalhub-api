@@ -32,6 +32,7 @@ export function canAccessAdmin(role: unknown): boolean {
     normalized === 'zone_admin' || normalized === 'zone_coordinator' || normalized === 'zone_leader' ||
     normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'subgroup_leader' ||
     normalized === 'church_admin' || normalized === 'church_coordinator' || normalized === 'church_leader' ||
+    normalized === 'group_admin' || normalized === 'group_coordinator' || normalized === 'coordinator' ||
     normalized === 'choir_leader' || normalized === 'music_director' || normalized === 'leader'
 }
 
@@ -46,6 +47,7 @@ export function canManageTenant(role: unknown): boolean {
     normalized === 'zone_admin' || normalized === 'zone_coordinator' || normalized === 'zone_leader' ||
     normalized === 'subgroup_admin' || normalized === 'subgroup_coordinator' || normalized === 'subgroup_leader' ||
     normalized === 'church_admin' || normalized === 'church_coordinator' || normalized === 'church_leader' ||
+    normalized === 'group_admin' || normalized === 'group_coordinator' || normalized === 'coordinator' ||
     normalized === 'choir_leader' || normalized === 'music_director' || normalized === 'leader'
 }
 
