@@ -135,11 +135,22 @@ router.post('/session/toggle', requireAuth, requireTenantAdmin, async (req: Requ
   }
 });
 
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3;
+  const f1 = (lat1 * Math.PI) / 180;
+  const f2 = (lat2 * Math.PI) / 180;
+  const df = ((lat2 - lat1) * Math.PI) / 180;
+  const dl = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(df / 2) * Math.sin(df / 2) + Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 /** POST /attendance/check-in & POST /attendance */
 const handleCheckIn = async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { userId, programId, eventName, qrCode, zoneId } = req.body;
+    const { userId, programId, eventName, qrCode, zoneId, latitude, longitude } = req.body;
     const targetUserId = userId || auth.userId;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
     const now = new Date();
@@ -147,7 +158,7 @@ const handleCheckIn = async (req: Request, res: Response) => {
       ? req.body.id.trim()
       : `att_${crypto.randomUUID()}`;
 
-    // Guard: Check if clock-in session is open for this zone
+    // 1. Guard: Check if clock-in session is open for this zone
     const sessionKey = `clockin_session_${orgId}`;
     const sessionSetting = await prisma.setting.findUnique({ where: { key: sessionKey } });
     const sessionVal: any = sessionSetting?.value || {};
@@ -158,7 +169,65 @@ const handleCheckIn = async (req: Request, res: Response) => {
       });
     }
 
-    // Validate or resolve valid programId
+    // 2. Guard: Enforce geofence location verification if configured
+    const geofenceKeys = [`geofence_${orgId}`, 'geofence_hq', 'geofence'];
+    const geofenceSettings = await prisma.setting.findMany({
+      where: { key: { in: geofenceKeys } },
+    });
+    const activeGeofenceSetting =
+      geofenceSettings.find((s) => s.key === `geofence_${orgId}`) ||
+      geofenceSettings.find((s) => s.key === 'geofence_hq') ||
+      geofenceSettings[0];
+
+    const geoVal: any = activeGeofenceSetting?.value;
+    if (geoVal && geoVal.isEnabled !== false && geoVal.latitude != null && geoVal.longitude != null) {
+      const userLat = latitude != null ? parseFloat(latitude) : null;
+      const userLon = longitude != null ? parseFloat(longitude) : null;
+
+      if (userLat == null || userLon == null || isNaN(userLat) || isNaN(userLon)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Location coordinates are required to verify attendance at the rehearsal venue.',
+        });
+      }
+
+      const venueLat = parseFloat(geoVal.latitude);
+      const venueLon = parseFloat(geoVal.longitude);
+      const allowedRadius = parseFloat(geoVal.radius) || 250;
+      const distance = calculateDistance(userLat, userLon, venueLat, venueLon);
+
+      if (distance > allowedRadius) {
+        return res.status(403).json({
+          success: false,
+          error: `You are outside the rehearsal venue (${Math.round(distance)}m away from ${geoVal.venueName || 'venue'}). Maximum allowed distance is ${Math.round(allowedRadius)}m.`,
+        });
+      }
+    }
+
+    // 3. Guard: Enforce ONLY ONCE A DAY clock-in rule
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const existingToday = await prisma.attendance.findFirst({
+      where: {
+        userId: targetUserId,
+        checkInTime: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+      include: { user: true },
+    });
+
+    if (existingToday) {
+      return res.status(409).json({
+        success: false,
+        error: 'You have already clocked in for today.',
+        data: shapeAttendance(existingToday),
+      });
+    }
+
+    // 4. Resolve active program if any
     let resolvedProgramId: string | null = null;
     if (programId && typeof programId === 'string' && programId !== 'general_rehearsal') {
       const exists = await prisma.program.findUnique({ where: { id: programId } });
@@ -175,82 +244,21 @@ const handleCheckIn = async (req: Request, res: Response) => {
       resolvedProgramId = activeProgram?.id || null;
     }
 
-    let inserted;
-    if (resolvedProgramId) {
-      inserted = await prisma.attendance.upsert({
-        where: {
-          programId_userId: {
-            programId: resolvedProgramId,
-            userId: targetUserId,
-          },
-        },
-        update: {
-          status: 'present',
-          checkInTime: now,
-          scannedAt: qrCode ? now : undefined,
-          qrCode: qrCode || undefined,
-          recordedById: auth.userId,
-        },
-        create: {
-          id,
-          organizationId: orgId,
-          userId: targetUserId,
-          programId: resolvedProgramId,
-          eventName: eventName || 'Rehearsal',
-          status: 'present',
-          checkInTime: now,
-          scannedAt: qrCode ? now : null,
-          qrCode: qrCode || null,
-          recordedById: auth.userId,
-        },
-        include: { user: true },
-      });
-    } else {
-      // Deduplicate general rehearsals on the same calendar day for the same user
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-
-      const existingRecord = await prisma.attendance.findFirst({
-        where: {
-          userId: targetUserId,
-          organizationId: orgId,
-          checkInTime: {
-            gte: startOfDay,
-            lte: endOfDay,
-          },
-        },
-        include: { user: true },
-      });
-
-      if (existingRecord) {
-        inserted = await prisma.attendance.update({
-          where: { id: existingRecord.id },
-          data: {
-            checkInTime: now,
-            status: 'present',
-            scannedAt: qrCode ? now : undefined,
-            qrCode: qrCode || undefined,
-            recordedById: auth.userId,
-          },
-          include: { user: true },
-        });
-      } else {
-        inserted = await prisma.attendance.create({
-          data: {
-            id,
-            organizationId: orgId,
-            userId: targetUserId,
-            eventName: eventName || 'General Rehearsal',
-            status: 'present',
-            checkInTime: now,
-            scannedAt: qrCode ? now : null,
-            qrCode: qrCode || null,
-            recordedById: auth.userId,
-          },
-          include: { user: true },
-        });
-      }
-    }
+    const inserted = await prisma.attendance.create({
+      data: {
+        id,
+        organizationId: orgId,
+        userId: targetUserId,
+        programId: resolvedProgramId,
+        eventName: eventName || (resolvedProgramId ? 'Program Rehearsal' : 'General Rehearsal'),
+        status: 'present',
+        checkInTime: now,
+        scannedAt: qrCode ? now : null,
+        qrCode: qrCode || null,
+        recordedById: auth.userId,
+      },
+      include: { user: true },
+    });
 
     res.status(201).json({ success: true, message: 'Checked in successfully', data: shapeAttendance(inserted) });
   } catch (err: any) {

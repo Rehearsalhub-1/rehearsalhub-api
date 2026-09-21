@@ -659,28 +659,32 @@ router.get('/zone-songs', requireAuth, getSongsHandler);
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/active', requireAuth, async (req: Request, res: Response) => {
   try {
-    const zoneId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
+    const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
 
     const liveSongs = await prisma.song.findMany({
       where: {
         status: 'live',
         isActive: true,
         OR: [
-          { organizationId: zoneId },
           { isMaster: true },
+          { organizationId: targetOrgId },
+          { organizationId: null },
         ],
       },
       include: {
         roleAssignments: { include: { user: true } },
         programSongs: {
-          include: { program: { select: { id: true, name: true } } },
-          take: 1,
+          include: { program: true },
         },
       },
       orderBy: { updatedAt: 'desc' },
     });
 
     const formatted = liveSongs.map(formatSong);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     console.error('[songs:active]', err);
@@ -933,38 +937,6 @@ router.delete('/history/:id', requireAuth, async (req: Request, res: Response) =
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ACTIVE / LIVE SONGS
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/active', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
-    const activeSongs = await prisma.song.findMany({
-      where: {
-        status: 'live',
-        OR: [
-          { isMaster: true },
-          { organizationId: targetOrgId },
-          { organizationId: null },
-        ],
-      },
-      include: {
-        roleAssignments: { include: { user: true } },
-        programSongs: { include: { program: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-    const formatted = activeSongs.map(formatSong);
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('Surrogate-Control', 'no-store');
-    res.json({ success: true, count: formatted.length, data: formatted });
-  } catch (err) {
-    console.error('[songs:active]', err);
-    res.status(500).json({ success: false, error: 'Failed to load active songs' });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. SONG BY ID
@@ -1163,6 +1135,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const updated = await prisma.song.update({
       where: { id: songId },
       data,
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: { include: { program: true } },
+      },
     });
 
     // Auto-record history if rehearsal audio changed
@@ -1230,6 +1206,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     broadcast('song', songId, formatted);
     broadcast('songs', 'all', formatted);
     broadcast('song', 'all', formatted);
+    const isNowLive = updated.status === 'live' && updated.isActive;
+    broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: updated.status, isActive: false });
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
@@ -1242,33 +1220,17 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
   try {
     const songId = req.params.id;
     const { status } = req.body;
-
     const isGoingLive = status === 'live';
-
-    if (isGoingLive) {
-      // Deactivate any other currently live songs in the same program
-      const existingWithPrograms = await prisma.song.findUnique({
-        where: { id: songId },
-        include: { programSongs: true },
-      });
-      const programIds = existingWithPrograms?.programSongs?.map((ps) => ps.programId) || [];
-      if (programIds.length > 0) {
-        await prisma.song.updateMany({
-          where: {
-            id: { not: songId },
-            status: 'live',
-            programSongs: { some: { programId: { in: programIds } } },
-          },
-          data: { status: 'heard', isActive: false },
-        }).catch(() => {});
-      }
-    }
 
     const updated = await prisma.song.update({
       where: { id: songId },
       data: {
         status: status || 'active',
         isActive: isGoingLive,
+      },
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: { include: { program: true } },
       },
     });
 
@@ -1393,28 +1355,13 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.isActive = false;
     }
 
-    if (data.status === 'live' && data.isActive) {
-      // Deactivate any other live songs in the same program
-      const existingWithPrograms = await prisma.song.findUnique({
-        where: { id: songId },
-        include: { programSongs: true },
-      });
-      const programIds = existingWithPrograms?.programSongs?.map((ps) => ps.programId) || [];
-      if (programIds.length > 0) {
-        await prisma.song.updateMany({
-          where: {
-            id: { not: songId },
-            status: 'live',
-            programSongs: { some: { programId: { in: programIds } } },
-          },
-          data: { status: 'heard', isActive: false },
-        }).catch(() => {});
-      }
-    }
-
     const updated = await prisma.song.update({
       where: { id: songId },
       data,
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: { include: { program: true } },
+      },
     });
 
     const formatted = formatSong(updated);
