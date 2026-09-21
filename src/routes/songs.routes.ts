@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
+import { requireAuth, requireTenantAdmin, optionalAuth } from '../auth/auth.middleware';
 import { broadcast } from '../ws/wsServer';
 
 const router = Router();
@@ -340,9 +340,63 @@ const universalSearchHandler = async (req: Request, res: Response) => {
       });
     }
 
+    const auth = res.locals.auth || (req as any).user || {};
+    const role = (auth.role || '').toLowerCase();
+    const isHQOrPresident = Boolean(
+      req.tenant?.isHQAdmin ||
+      ['president', 'director', 'oftp', 'executive', 'hq_admin', 'admin', 'super_admin', 'boss'].includes(role) ||
+      auth.hasHqAccess ||
+      auth.has_hq_access
+    );
+
+    const requestedZoneId = String(req.query.zoneId || req.query.zone_id || '').trim();
+    const effectiveZoneId = (req.tenant?.effectiveZoneId || auth.zoneId || requestedZoneId || '').trim();
+
+    // ── 1. Assigned Zone & Master/Ministered isolation (NEVER search all zones!) ──
+    const andConditions: any[] = [{ OR: orConditions }];
+
+    if (effectiveZoneId) {
+      andConditions.push({
+        OR: [
+          { isMaster: true },
+          { isMinistered: true },
+          { organizationId: null },
+          { organizationId: effectiveZoneId },
+        ]
+      });
+    } else {
+      andConditions.push({
+        OR: [
+          { isMaster: true },
+          { isMinistered: true },
+          { organizationId: null },
+        ]
+      });
+    }
+
+    // ── 2. Role-based Archive Filtering ─────────────────────────────────────
+    // For regular users (non-HQ Admin, non-President): strictly exclude Archive songs and programs
+    if (!isHQOrPresident) {
+      andConditions.push({
+        status: { notIn: ['hq_only', 'archive', 'archived'] },
+        category: { notIn: ['archive', 'archived'] },
+        programSongs: {
+          none: {
+            program: {
+              OR: [
+                { isArchived: true },
+                { status: { in: ['archive', 'archived'] } },
+                { category: { in: ['archive', 'archived'] } },
+              ]
+            }
+          }
+        }
+      });
+    }
+
     const rows = await prisma.song.findMany({
       where: {
-        OR: orConditions,
+        AND: andConditions,
       },
       include: {
         roleAssignments: { include: { user: true } },
@@ -428,8 +482,8 @@ const universalSearchHandler = async (req: Request, res: Response) => {
   }
 };
 
-router.get('/universal-search', universalSearchHandler);
-router.get('/search', universalSearchHandler);
+router.get('/universal-search', optionalAuth, universalSearchHandler);
+router.get('/search', optionalAuth, universalSearchHandler);
 router.get('/master', requireAuth, getMinisteredSongsHandler);
 router.get('/ministered', requireAuth, getMinisteredSongsHandler);
 

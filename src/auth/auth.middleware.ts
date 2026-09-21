@@ -46,6 +46,30 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 }
 
+export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return next();
+  }
+  const token = header.slice(7);
+  try {
+    const payload = verifyAccessToken(token);
+    if (!revocationStore.isRevoked(payload.jti)) {
+      const authData = {
+        userId: payload.sub,
+        role: payload.role,
+        zoneId: payload.zoneId || null,
+        churchId: payload.churchId || null,
+        jti: payload.jti,
+        exp: payload.exp!,
+      };
+      res.locals.auth = authData;
+      req.tenant = resolveTenantScope(req, authData, res);
+    }
+  } catch {}
+  next();
+}
+
 export function requireTenantAdmin(req: Request, res: Response, next: NextFunction): void {
   if (!res.locals.auth) {
     return requireAuth(req, res, () => {
