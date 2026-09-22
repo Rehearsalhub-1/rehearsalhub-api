@@ -399,7 +399,6 @@ const universalSearchHandler = async (req: Request, res: Response) => {
         AND: andConditions,
       },
       include: {
-        roleAssignments: { include: { user: true } },
         programSongs: {
           include: {
             program: {
@@ -409,7 +408,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
           take: 1
         }
       },
-      take: limit * 2,
+      take: limit,
     });
 
     const scoredSongs = rows.map((s: any) => {

@@ -198,6 +198,8 @@ model Song {
   @@index([organizationId])
   @@index([isMaster])
   @@index([isMinistered])
+  @@index([title])
+  @@index([leadSinger])
   @@map("songs")
 }
 
@@ -256,6 +258,7 @@ model ProgramSong {
 
   @@unique([programId, songId])
   @@index([programId])
+  @@index([songId])
   @@map("program_songs")
 }
 
