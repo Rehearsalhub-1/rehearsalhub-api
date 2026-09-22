@@ -516,11 +516,75 @@ router.post('/mark-read', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+/** POST /notifications/mark-all-read & PATCH /notifications/read-all */
+const markAllRead = async (req: Request, res: Response) => {
+  try {
+    const auth = res.locals.auth || {};
+    const userId = auth.userId as string;
+    const effectiveOrgId = (req as any).tenant?.effectiveZoneId || auth.zoneId || 'zone-001';
+
+    // 1. Mark all existing deliveries as read
+    await prisma.notificationDelivery.updateMany({
+      where: { userId },
+      data: { isRead: true, readAt: new Date() },
+    });
+
+    // 2. Also ensure broadcasts without delivery records yet are marked read for this user
+    try {
+      const existingDeliveries = await prisma.notificationDelivery.findMany({
+        where: { userId },
+        select: { notificationId: true },
+      });
+      const deliveredIds = new Set(existingDeliveries.map(d => d.notificationId));
+
+      const unrecordedBroadcasts = await prisma.notification.findMany({
+        where: {
+          OR: [
+            { organizationId: effectiveOrgId },
+            { organizationId: 'zone-001' },
+            { organizationId: null },
+          ],
+          senderId: { not: userId },
+          id: { notIn: Array.from(deliveredIds) },
+        },
+        select: { id: true },
+        take: 100,
+      });
+
+      if (unrecordedBroadcasts.length > 0) {
+        await prisma.notificationDelivery.createMany({
+          data: unrecordedBroadcasts.map(b => ({
+            notificationId: b.id,
+            userId,
+            isRead: true,
+            readAt: new Date(),
+          })),
+          skipDuplicates: true,
+        }).catch(() => {});
+      }
+    } catch (broadcastErr) {
+      console.warn('[notifications/mark-all-read:broadcasts]', broadcastErr);
+    }
+
+    res.json({ success: true, message: 'All notifications marked as read' });
+  } catch (err) {
+    console.error('[notifications/mark-all-read]', err);
+    res.status(500).json({ success: false, error: 'Failed to mark all read' });
+  }
+};
+router.post('/mark-all-read', requireAuth, markAllRead);
+router.post('/read-all', requireAuth, markAllRead);
+router.patch('/read-all', requireAuth, markAllRead);
+
 /** PATCH /notifications/:id — Mark specific notification as read/unread */
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const userId = res.locals.auth.userId as string;
     const notifId = req.params.id;
+    if (notifId === 'read-all' || notifId === 'mark-all-read') {
+      return markAllRead(req, res);
+    }
+
+    const userId = res.locals.auth.userId as string;
     const isRead = req.body.is_read !== undefined ? Boolean(req.body.is_read) : true;
 
     await prisma.notificationDelivery.upsert({
@@ -535,24 +599,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Failed to update notification' });
   }
 });
-
-/** POST /notifications/mark-all-read & PATCH /notifications/read-all */
-const markAllRead = async (req: Request, res: Response) => {
-  try {
-    const userId = res.locals.auth.userId as string;
-    await prisma.notificationDelivery.updateMany({
-      where: { userId },
-      data: { isRead: true, readAt: new Date() },
-    });
-    res.json({ success: true, message: 'All notifications marked as read' });
-  } catch (err) {
-    console.error('[notifications/mark-all-read]', err);
-    res.status(500).json({ success: false, error: 'Failed to mark all read' });
-  }
-};
-router.post('/mark-all-read', requireAuth, markAllRead);
-router.post('/read-all', requireAuth, markAllRead);
-router.patch('/read-all', requireAuth, markAllRead);
 
 /** DELETE /notifications/:id */
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
