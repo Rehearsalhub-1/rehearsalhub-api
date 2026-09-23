@@ -132,6 +132,9 @@ function shapeSong(song: any) {
     imageUrl: song.imageUrl || (song as any).image_url || null,
     image: song.imageUrl || (song as any).image_url || null,
     category: song.category || null,
+    categories: Array.isArray((song.audioUrls as any)?._categories) && (song.audioUrls as any)._categories.length > 0
+      ? (song.audioUrls as any)._categories
+      : (Array.isArray(song.categories) && song.categories.length > 0 ? song.categories : (song.category ? [song.category] : [])),
     status: song.status || 'active',
     isHeard: Boolean(
       song.status === 'heard' ||
@@ -439,7 +442,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
       } else if (singerLower.includes(cleanQ) || writerLower.includes(cleanQ)) {
         score = 75;
         matchField = singerLower.includes(cleanQ) ? 'leadSinger' : 'writer';
-      } else if (lyricsLower.includes(cleanQ)) {
+      } else if (lyricsLower.includes(cleanQ)) {.
         score = 55;
         matchField = 'lyrics';
         snippet = extractChatSnippet(lyricsClean, cleanQ, queryWords);
@@ -994,6 +997,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       audioUrlsData = { ...audioUrlsData, _isHQOnly: true };
     }
 
+    const categoriesList = Array.isArray(body.categories) && body.categories.length > 0
+      ? body.categories
+      : (body.category ? [body.category] : []);
+    if (categoriesList.length > 0) {
+      if (!audioUrlsData || typeof audioUrlsData !== 'object') audioUrlsData = {};
+      audioUrlsData = { ...audioUrlsData, _categories: categoriesList };
+    }
+
     const newSong = await prisma.song.create({
       data: {
         id: songId,
@@ -1013,7 +1024,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         solfas: body.solfas || body.solfa || '',
         audioFile: body.audioFile || body.audio_file || body.audioUrl || null,
         audioUrls: audioUrlsData,
-        category: body.category || 'Praise Night',
+        category: categoriesList[0] || body.category || 'Praise Night',
         status: isHqOnly ? 'hq_only' : (body.status || 'active'),
         isMaster: Boolean(body.isMaster),
         isMinistered: Boolean(body.isMinistered),
@@ -1072,7 +1083,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       data.audioFile = body.audioFile || body.audio_file || body.audioUrl;
     }
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
-    if (body.category !== undefined) data.category = body.category;
+    if (body.categories !== undefined && Array.isArray(body.categories)) {
+      data.category = body.categories[0] || body.category || '';
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _categories: body.categories };
+    } else if (body.category !== undefined) {
+      data.category = body.category;
+    }
     if (body.status !== undefined) data.status = body.status;
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
     if (data.status === 'live') {
@@ -1295,7 +1312,13 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.audioFile = body.audioFile || body.audio_file || body.audioUrl;
     }
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
-    if (body.category !== undefined) data.category = body.category;
+    if (body.categories !== undefined && Array.isArray(body.categories)) {
+      data.category = body.categories[0] || body.category || '';
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _categories: body.categories };
+    } else if (body.category !== undefined) {
+      data.category = body.category;
+    }
     if (body.rehearsalCount !== undefined || body.rehearsal_count !== undefined) {
       data.rehearsalCount = Math.max(0, parseInt(body.rehearsalCount ?? body.rehearsal_count, 10) || 0);
     }
