@@ -70,7 +70,7 @@ const registerSchema = z.object({
 }).strict();
 
 const refreshSchema = z.object({
-  userId: z.string().min(1),
+  userId: z.string().min(1).optional(),
   refreshToken: z.string().min(1),
 });
 

@@ -551,13 +551,16 @@ export async function login(identifier: string, password: string): Promise<AuthT
   throw new AuthError('Invalid credentials');
 }
 
-export async function refresh(rawToken: string, profileId: string): Promise<{ accessToken: string; refreshToken: string }> {
-  // Purge any expired refresh tokens for this user
+export async function refresh(rawToken: string, profileId?: string): Promise<{ accessToken: string; refreshToken: string }> {
+  // Purge any expired refresh tokens
   prisma.refreshToken.deleteMany({
-    where: { userId: profileId, expiresAt: { lte: new Date() } }
+    where: { ...(profileId ? { userId: profileId } : {}), expiresAt: { lte: new Date() } }
   }).catch(() => {});
 
-  const rows = await prisma.refreshToken.findMany({ where: { userId: profileId } });
+  const rows = await prisma.refreshToken.findMany({
+    where: profileId ? { userId: profileId } : { expiresAt: { gt: new Date() } },
+    take: 100,
+  });
   let matchedRow: (typeof rows)[number] | undefined;
   for (const row of rows) {
     if (await verifyRefreshTokenMatch(rawToken, row.tokenHash)) { matchedRow = row; break; }
@@ -579,8 +582,9 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
     prisma.refreshToken.deleteMany({ where: { id: matchedRow.id } }).catch(() => {});
   });
 
+  const effectiveUserId = profileId || matchedRow.userId;
   const user = await prisma.user.findUnique({
-    where: { id: profileId },
+    where: { id: effectiveUserId },
     include: {
       memberships: {
         include: { organization: true },

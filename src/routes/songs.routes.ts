@@ -46,6 +46,23 @@ function resolveAudio(song: any): { audioUrl: string; audioUrls: Record<string, 
 function formatSong(song: any) {
   return shapeSong(song);
 }
+
+function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
+  broadcast('songs', songId, formatted);
+  broadcast('song', songId, formatted);
+  broadcast('songs', 'all', formatted);
+  broadcast('song', 'all', formatted);
+  if (formatted.programId) {
+    broadcast('song', String(formatted.programId), formatted);
+    broadcast('songs', String(formatted.programId), formatted);
+  }
+  if (formatted.praiseNightId && String(formatted.praiseNightId) !== String(formatted.programId)) {
+    broadcast('song', String(formatted.praiseNightId), formatted);
+    broadcast('songs', String(formatted.praiseNightId), formatted);
+  }
+  const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
+  broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false });
+}
 function isConductorGuideText(text: string | null | undefined): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -137,6 +154,11 @@ function shapeSong(song: any) {
       : (Array.isArray(song.categories) && song.categories.length > 0 ? song.categories : (song.category ? [song.category] : [])),
     status: song.status || 'active',
     isHeard: Boolean(
+      song.status === 'heard' ||
+      (song.audioUrls as any)?._isHeard === true ||
+      (song.status === 'live' && (song.audioUrls as any)?._preLiveStatus === 'heard')
+    ),
+    heard: Boolean(
       song.status === 'heard' ||
       (song.audioUrls as any)?._isHeard === true ||
       (song.status === 'live' && (song.audioUrls as any)?._preLiveStatus === 'heard')
@@ -1090,7 +1112,18 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     } else if (body.category !== undefined) {
       data.category = body.category;
     }
-    if (body.status !== undefined) data.status = body.status;
+    if (body.isHeard !== undefined) {
+      const isHeard = Boolean(body.isHeard);
+      data.status = isHeard ? 'heard' : 'unheard';
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+    } else if (body.status !== undefined && body.status !== 'live') {
+      data.status = body.status;
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+    } else if (body.status !== undefined) {
+      data.status = body.status;
+    }
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
     if (data.status === 'live') {
       data.isActive = true;
@@ -1223,12 +1256,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const formatted = formatSong(updated);
-    broadcast('songs', songId, formatted);
-    broadcast('song', songId, formatted);
-    broadcast('songs', 'all', formatted);
-    broadcast('song', 'all', formatted);
-    const isNowLive = updated.status === 'live' && updated.isActive;
-    broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: updated.status, isActive: false });
+    broadcastSongUpdate(songId, formatted);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
@@ -1271,13 +1299,8 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     });
 
     const formatted = formatSong(updated);
-    broadcast('songs', songId, formatted);
-    broadcast('song', songId, formatted);
-    broadcast('songs', 'all', formatted);
-    broadcast('song', 'all', formatted);
+    broadcastSongUpdate(songId, formatted, isGoingLive);
     broadcast('song_status', songId, { id: songId, status: updated.status });
-    // Dedicated live_song event — clients listen to this directly instead of scanning
-    broadcast('live_song', 'all', isGoingLive ? formatted : { id: songId, status: updated.status, isActive: false });
     res.json({ success: true, message: 'Song status updated', data: formatted });
   } catch (err) {
     console.error('[songs:status]', err);
@@ -1405,13 +1428,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     });
 
     const formatted = formatSong(updated);
-    broadcast('songs', songId, formatted);
-    broadcast('song', songId, formatted);
-    broadcast('songs', 'all', formatted);
-    broadcast('song', 'all', formatted);
-    // Dedicated live_song event — clients update widget instantly without scanning
-    const isNowLive = updated.status === 'live' && updated.isActive;
-    broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: updated.status, isActive: false });
+    broadcastSongUpdate(songId, formatted);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });
