@@ -571,7 +571,13 @@ export async function refresh(rawToken: string, profileId: string): Promise<{ ac
     throw new AuthError('Refresh token expired');
   }
 
-  await prisma.refreshToken.deleteMany({ where: { id: matchedRow.id } });
+  // Grace period: allow concurrent in-flight requests within 60s without failing
+  await prisma.refreshToken.update({
+    where: { id: matchedRow.id },
+    data: { expiresAt: new Date(Date.now() + 60_000) },
+  }).catch(() => {
+    prisma.refreshToken.deleteMany({ where: { id: matchedRow.id } }).catch(() => {});
+  });
 
   const user = await prisma.user.findUnique({
     where: { id: profileId },

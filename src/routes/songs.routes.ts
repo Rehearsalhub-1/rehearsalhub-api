@@ -133,6 +133,11 @@ function shapeSong(song: any) {
     image: song.imageUrl || (song as any).image_url || null,
     category: song.category || null,
     status: song.status || 'active',
+    isHeard: Boolean(
+      song.status === 'heard' ||
+      (song.audioUrls as any)?._isHeard === true ||
+      (song.status === 'live' && (song.audioUrls as any)?._preLiveStatus === 'heard')
+    ),
     isMaster: Boolean(song.isMaster),
     isMinistered: Boolean(song.isMinistered),
     isHQOnly: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
@@ -1221,11 +1226,26 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     const { status } = req.body;
     const isGoingLive = status === 'live';
 
+    const existing = await prisma.song.findUnique({ where: { id: songId } });
+    const currentAudioUrls = (existing?.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
+    let patchAudioUrls = currentAudioUrls;
+    let newStatus = status || 'active';
+
+    if (isGoingLive) {
+      const preLiveStatus = (existing?.status !== 'live') ? (existing?.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
+      patchAudioUrls = { ...currentAudioUrls, _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+    } else if (status === 'heard' || status === 'unheard') {
+      patchAudioUrls = { ...currentAudioUrls, _preLiveStatus: status, _isHeard: status === 'heard' };
+    } else if (existing?.status === 'live') {
+      newStatus = currentAudioUrls._preLiveStatus || 'unheard';
+    }
+
     const updated = await prisma.song.update({
       where: { id: songId },
       data: {
-        status: status || 'active',
+        status: newStatus,
         isActive: isGoingLive,
+        audioUrls: patchAudioUrls,
       },
       include: {
         roleAssignments: { include: { user: true } },
@@ -1324,34 +1344,32 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.notes = resolvedNotes;
     }
 
-    if (body.isActive !== undefined || body.isLive !== undefined) {
-      const nextLive = Boolean(body.isActive ?? body.isLive);
+    const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
+
+    // 1. Explicit Heard/Unheard toggle
+    if (body.isHeard !== undefined) {
+      const isHeard = Boolean(body.isHeard);
+      data.status = isHeard ? 'heard' : 'unheard';
+      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+    } else if (body.status !== undefined && body.status !== 'live') {
+      data.status = body.status;
+      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+    }
+
+    // 2. Live toggle (isActive / isLive) - NEVER force heard/unheard!
+    if (body.isActive !== undefined || body.isLive !== undefined || body.status === 'live') {
+      const nextLive = body.status === 'live' || Boolean(body.isActive ?? body.isLive);
       data.isActive = nextLive;
       if (nextLive) {
+        // Going LIVE: preserve current heard/unheard status in _preLiveStatus
+        const preLiveStatus = (existing.status !== 'live') ? existing.status : (currentAudioUrls._preLiveStatus || 'unheard');
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
         data.status = 'live';
       } else {
-        data.status = 'heard';
+        // Stopping LIVE: restore previous heard/unheard status. NEVER force 'heard'!
+        const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
+        data.status = restoredStatus;
       }
-    }
-
-    // Map isHeard boolean to status string; isHeard takes priority over status
-    if (body.isHeard !== undefined) {
-      data.status = body.isHeard ? 'heard' : 'unheard';
-      data.isActive = false;
-    } else if (body.status !== undefined) {
-      data.status = body.status;
-      if (body.status === 'live') {
-        data.isActive = true;
-      } else if (['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase())) {
-        data.isActive = false;
-      }
-    }
-
-    // Safety sync: status='live' MUST have isActive=true; non-live status MUST have isActive=false
-    if (data.status === 'live') {
-      data.isActive = true;
-    } else if (data.status && ['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(data.status).toLowerCase())) {
-      data.isActive = false;
     }
 
     const updated = await prisma.song.update({

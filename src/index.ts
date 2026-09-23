@@ -292,7 +292,7 @@ httpServer.listen(PORT, async () => {
   console.log(`   Docs:   http://localhost:${PORT}/`);
 
   if (!process.env.JWT_SECRET) console.warn('   WARNING: JWT_SECRET is not set');
-  if (!process.env.JWT_EXPIRES_IN) console.warn('   WARNING: JWT_EXPIRES_IN not set, defaulting to 15m');
+  if (!process.env.JWT_EXPIRES_IN) console.warn('   WARNING: JWT_EXPIRES_IN not set, defaulting to 90d');
   if (!process.env.REFRESH_TOKEN_EXPIRES_DAYS) console.warn('   WARNING: REFRESH_TOKEN_EXPIRES_DAYS not set, defaulting to 30');
 
   // Warm up the DB connection on startup via Prisma
