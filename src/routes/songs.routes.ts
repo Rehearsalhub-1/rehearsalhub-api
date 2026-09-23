@@ -442,7 +442,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
       } else if (singerLower.includes(cleanQ) || writerLower.includes(cleanQ)) {
         score = 75;
         matchField = singerLower.includes(cleanQ) ? 'leadSinger' : 'writer';
-      } else if (lyricsLower.includes(cleanQ)) {.
+      } else if (lyricsLower.includes(cleanQ)) {
         score = 55;
         matchField = 'lyrics';
         snippet = extractChatSnippet(lyricsClean, cleanQ, queryWords);
