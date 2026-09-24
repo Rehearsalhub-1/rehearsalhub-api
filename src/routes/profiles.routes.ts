@@ -69,8 +69,8 @@ function formatUserProfile(u: any, metaInput?: any) {
     zoneId: primaryMembership?.organizationId || null,
     zone_id: primaryMembership?.organizationId || null,
     zoneName: primaryMembership?.organization?.name || null,
-    canAnnotate: meta.canAnnotate ?? false,
-    can_annotate: meta.canAnnotate ?? false,
+    canAnnotate: meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false),
+    can_annotate: meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false),
     canAccessArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
     can_access_archive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
     canSeeArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
@@ -78,17 +78,33 @@ function formatUserProfile(u: any, metaInput?: any) {
     can_access_pre_rehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
     canAccessOngoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
     can_access_ongoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
-    hiddenFeatures: meta.hiddenFeatures || {
-      hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
-      hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
-      hideAnnotations: !(meta.canAnnotate ?? false),
-      hideOngoing: !(meta.can_access_ongoing ?? true),
+    hiddenFeatures: {
+      hideArchives: meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
+        ? !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive)
+        : (meta.hiddenFeatures?.hideArchives ?? true),
+      hidePreRehearsal: meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
+        ? !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal)
+        : (meta.hiddenFeatures?.hidePreRehearsal ?? true),
+      hideAnnotations: meta.canAnnotate !== undefined
+        ? !meta.canAnnotate
+        : (meta.hiddenFeatures?.hideAnnotations ?? true),
+      hideOngoing: meta.can_access_ongoing !== undefined || meta.canAccessOngoing !== undefined
+        ? !(meta.can_access_ongoing ?? meta.canAccessOngoing)
+        : (meta.hiddenFeatures?.hideOngoing ?? false),
     },
-    hidden_features: meta.hiddenFeatures || {
-      hideArchives: !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
-      hidePreRehearsal: !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
-      hideAnnotations: !(meta.canAnnotate ?? false),
-      hideOngoing: !(meta.can_access_ongoing ?? true),
+    hidden_features: {
+      hideArchives: meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
+        ? !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive)
+        : (meta.hiddenFeatures?.hideArchives ?? true),
+      hidePreRehearsal: meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
+        ? !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal)
+        : (meta.hiddenFeatures?.hidePreRehearsal ?? true),
+      hideAnnotations: meta.canAnnotate !== undefined
+        ? !meta.canAnnotate
+        : (meta.hiddenFeatures?.hideAnnotations ?? true),
+      hideOngoing: meta.can_access_ongoing !== undefined || meta.canAccessOngoing !== undefined
+        ? !(meta.can_access_ongoing ?? meta.canAccessOngoing)
+        : (meta.hiddenFeatures?.hideOngoing ?? false),
     },
     expoPushToken: meta.expoPushToken || meta.expo_push_token || null,
     expo_push_token: meta.expoPushToken || meta.expo_push_token || null,
@@ -462,7 +478,37 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   let updatedMeta: Record<string, any> = {};
   try {
     const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
-    const currentMeta = (existingMeta?.value as Record<string, any>) || {};
+    const currentHidden = (currentMeta.hiddenFeatures || {});
+    const incomingHidden = (body.hiddenFeatures || {});
+    const mergedHidden = { ...currentHidden, ...incomingHidden };
+
+    const effectiveCanAnnotate = body.canAnnotate !== undefined 
+      ? body.canAnnotate 
+      : (body.can_annotate !== undefined ? body.can_annotate : currentMeta.canAnnotate);
+    if (effectiveCanAnnotate !== undefined) {
+      mergedHidden.hideAnnotations = !effectiveCanAnnotate;
+    }
+
+    const effectiveCanPreRehearsal = body.can_access_pre_rehearsal !== undefined 
+      ? body.can_access_pre_rehearsal 
+      : (body.canAccessPreRehearsal !== undefined ? body.canAccessPreRehearsal : currentMeta.can_access_pre_rehearsal);
+    if (effectiveCanPreRehearsal !== undefined) {
+      mergedHidden.hidePreRehearsal = !effectiveCanPreRehearsal;
+    }
+
+    const effectiveCanArchive = body.canSeeArchive !== undefined
+      ? body.canSeeArchive
+      : (body.can_access_archive !== undefined ? body.can_access_archive : (body.canAccessArchive !== undefined ? body.canAccessArchive : currentMeta.canSeeArchive));
+    if (effectiveCanArchive !== undefined) {
+      mergedHidden.hideArchives = !effectiveCanArchive;
+    }
+
+    const effectiveCanOngoing = body.can_access_ongoing !== undefined 
+      ? body.can_access_ongoing 
+      : (body.canAccessOngoing !== undefined ? body.canAccessOngoing : currentMeta.can_access_ongoing);
+    if (effectiveCanOngoing !== undefined) {
+      mergedHidden.hideOngoing = !effectiveCanOngoing;
+    }
 
     updatedMeta = {
       ...currentMeta,
@@ -482,7 +528,8 @@ router.patch('/:userId', requireAuth, async (req, res) => {
       ...(body.can_access_ongoing !== undefined ? { can_access_ongoing: body.can_access_ongoing } : {}),
       ...(body.can_access_pre_rehearsal !== undefined ? { can_access_pre_rehearsal: body.can_access_pre_rehearsal } : {}),
       ...(body.canAnnotate !== undefined ? { canAnnotate: body.canAnnotate } : {}),
-      ...(body.hiddenFeatures !== undefined ? { hiddenFeatures: body.hiddenFeatures } : {}),
+      ...(body.can_annotate !== undefined ? { canAnnotate: body.can_annotate } : {}),
+      hiddenFeatures: mergedHidden,
       ...((body.expoPushToken || body.expo_push_token) !== undefined ? {
         expoPushToken: body.expoPushToken || body.expo_push_token,
         expo_push_token: body.expoPushToken || body.expo_push_token,
@@ -590,6 +637,53 @@ router.post('/:userId/password', requireAuth, async (req, res) => {
   }
 });
 
+// POST /profiles/:userId/remove-from-zone
+router.post('/:userId/remove-from-zone', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const auth = res.locals.auth;
+    const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin' || auth?.role === 'super_admin';
+    const isAdmin =
+      isHqAdmin ||
+      canManageTenant(auth?.role) ||
+      auth?.role === 'zone_admin' ||
+      auth?.role === 'zone_coordinator';
+
+    if (!isAdmin) {
+      res.status(403).json({ success: false, error: 'Forbidden: Insufficient permissions' });
+      return;
+    }
+
+    const targetZoneId = (
+      req.body?.zoneId ||
+      req.body?.organizationId ||
+      req.query?.zoneId ||
+      (req as any).tenant?.zoneId ||
+      auth?.zoneId
+    ) as string | undefined;
+
+    if (targetZoneId) {
+      await prisma.membership.deleteMany({
+        where: {
+          userId,
+          organizationId: targetZoneId,
+        },
+      });
+    } else {
+      await prisma.membership.deleteMany({
+        where: { userId },
+      });
+    }
+
+    broadcast('profiles', userId, { type: 'removed_from_zone', id: userId, zoneId: targetZoneId });
+
+    res.json({ success: true, message: 'Member removed from zone successfully' });
+  } catch (err: any) {
+    console.error('[profiles/:userId/remove-from-zone error]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to remove member from zone' });
+  }
+});
+
 // DELETE /profiles/:userId
 router.delete('/:userId', requireAuth, async (req, res) => {
   try {
@@ -613,6 +707,16 @@ router.delete('/:userId', requireAuth, async (req, res) => {
       res.status(404).json({ success: false, error: 'User not found' });
       return;
     }
+
+    // Clean up dependent records safely to prevent foreign key errors
+    await prisma.membership.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.authCredential.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.refreshToken.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.userSongNote.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.mediaDoodle.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.userStatus.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.chatParticipant.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.setting.deleteMany({ where: { key: `profile_meta_${userId}` } }).catch(() => {});
 
     await prisma.user.delete({ where: { id: userId } });
     broadcast('profiles', userId, { type: 'deleted', id: userId });
