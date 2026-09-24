@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth } from '../auth/auth.middleware';
+import { canAccessAdmin } from '../auth/permissions';
 
 const router = Router();
 
 function requireMasterEditor(req: Request, res: Response, next: any): void {
   const role = String(res.locals.auth?.role || '').toLowerCase();
-  if (role !== 'hq_admin' && role !== 'admin' && role !== 'super_admin' && role !== 'org_admin') {
+  if (!canAccessAdmin(role)) {
     res.status(403).json({ success: false, error: 'Forbidden' });
     return;
   }

@@ -9,7 +9,7 @@ const idSchema = z.string().min(1).max(200);
 
 function canUpdateSettingKey(key: string, role: unknown): boolean {
   if (canManageAllTenants(role)) return true;
-  if (key.startsWith('geofence_') || key.startsWith('clockin_session_')) {
+  if (key.startsWith('geofence_') || key.startsWith('clockin_session_') || key.startsWith('master_')) {
     return canManageTenant(role);
   }
   return false;

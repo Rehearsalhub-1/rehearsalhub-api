@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, optionalAuth } from '../auth/auth.middleware';
+import { canAccessAdmin } from '../auth/permissions';
 import { broadcast } from '../ws/wsServer';
 
 const router = Router();
@@ -748,7 +749,18 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const formatted: any[] = history.map((h) => {
+    const seenIds = new Set<string>();
+    const seenSignatures = new Set<string>();
+    const deduplicatedHistory = history.filter((h) => {
+      if (seenIds.has(h.id)) return false;
+      seenIds.add(h.id);
+      const signature = `${h.type}-${h.description}-${h.createdAt ? new Date(h.createdAt).getTime() : 0}`;
+      if (seenSignatures.has(signature)) return false;
+      seenSignatures.add(signature);
+      return true;
+    });
+
+    const formatted: any[] = deduplicatedHistory.map((h) => {
       // All columns are now properly populated by the backfill script.
       // Read directly from structured columns — no rawData fallback.
       const resolvedType        = (h.type        || 'details').toLowerCase().trim();
@@ -968,6 +980,111 @@ router.delete('/history/:id', requireAuth, async (req: Request, res: Response) =
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 3.5 IMPORT SONGS TO ALL MINISTERED (MASTER CATALOG)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/import-to-master', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const role = res.locals.auth?.role;
+    if (!canAccessAdmin(role)) {
+      res.status(403).json({ success: false, error: 'Admin access required to import songs to All Ministered' });
+      return;
+    }
+    const body = req.body || {};
+    const songIds: string[] = Array.isArray(body.songIds)
+      ? body.songIds
+      : (body.songId ? [body.songId] : []);
+
+    if (songIds.length === 0) {
+      res.status(400).json({ success: false, error: 'No song IDs provided for import' });
+      return;
+    }
+
+    const songsToImport = await prisma.song.findMany({
+      where: { id: { in: songIds } },
+      include: {
+        songHistory: true,
+        programSongs: {
+          include: { program: true },
+          take: 1,
+        },
+      },
+    });
+
+    const importedMasterSongs: any[] = [];
+
+    for (const song of songsToImport) {
+      const masterSongId = `master_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const safeAudioUrls = song.audioUrls && typeof song.audioUrls === 'object'
+        ? (song.audioUrls as any)
+        : (song.audioFile ? { full: song.audioFile } : undefined);
+
+      const newMaster = await prisma.song.create({
+        data: {
+          id: masterSongId,
+          title: song.title || 'Untitled Master Song',
+          key: song.key || null,
+          tempo: song.tempo || null,
+          lyrics: song.lyrics || null,
+          writer: song.writer || null,
+          category: song.category || 'Master Library',
+          audioFile: song.audioFile || null,
+          audioUrls: safeAudioUrls,
+          conductor: song.conductor || null,
+          leadSinger: song.leadSinger || null,
+          drummer: song.drummer || null,
+          bassGuitarist: song.bassGuitarist || null,
+          leadKeyboardist: song.leadKeyboardist || null,
+          leadGuitarist: song.leadGuitarist || null,
+          solfas: song.solfas || null,
+          isMaster: true,
+          isMinistered: true,
+          status: 'active',
+          rehearsalCount: song.rehearsalCount || 0,
+        },
+      });
+
+      // Link program song if original had a program so it records where it was ministered
+      if (song.programSongs?.[0]?.programId) {
+        await prisma.programSong.create({
+          data: {
+            programId: song.programSongs[0].programId,
+            songId: masterSongId,
+            order: 0,
+          },
+        }).catch(() => {});
+      }
+
+      // Copy past history entries over to the master song
+      if (Array.isArray(song.songHistory) && song.songHistory.length > 0) {
+        for (const h of song.songHistory) {
+          await prisma.songHistory.create({
+            data: {
+              songId: masterSongId,
+              userId: res.locals.auth?.userId || null,
+              type: h.type || 'details',
+              description: h.description || '',
+              oldValue: h.oldValue || '',
+              newValue: h.newValue || '',
+            },
+          }).catch(() => {});
+        }
+      }
+
+      importedMasterSongs.push(formatSong(newMaster));
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Successfully imported ${importedMasterSongs.length} song(s) into All Ministered`,
+      data: importedMasterSongs,
+    });
+  } catch (err: any) {
+    console.error('[songs/import-to-master]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to import songs into All Ministered' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4. SONG BY ID
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
@@ -1112,23 +1229,47 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     } else if (body.category !== undefined) {
       data.category = body.category;
     }
+    const wasLive = existing.status === 'live' || existing.isActive === true;
+    const explicitTurnOff = body.status && ['inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase());
+    const explicitLiveFalse = (body.isActive === false || body.isLive === false);
+
     if (body.isHeard !== undefined) {
       const isHeard = Boolean(body.isHeard);
-      data.status = isHeard ? 'heard' : 'unheard';
-      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
-      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+        data.status = 'live';
+        data.isActive = true;
+        const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
+      } else {
+        data.status = isHeard ? 'heard' : 'unheard';
+        const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+      }
     } else if (body.status !== undefined && body.status !== 'live') {
-      data.status = body.status;
-      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
-      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+        data.status = 'live';
+        data.isActive = true;
+        const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      } else {
+        data.status = body.status;
+        const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      }
     } else if (body.status !== undefined) {
       data.status = body.status;
     }
-    if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
-    if (data.status === 'live') {
+
+    if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+      data.status = 'live';
       data.isActive = true;
-    } else if (data.status && ['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(data.status).toLowerCase())) {
-      data.isActive = false;
+    } else {
+      if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+      if (data.status === 'live') {
+        data.isActive = true;
+      } else if (data.status && ['heard', 'unheard', 'inactive', 'off', 'ended', 'stopped'].includes(String(data.status).toLowerCase())) {
+        data.isActive = false;
+      }
     }
 
     if (body.rehearsalCount !== undefined || body.rehearsal_count !== undefined) {
@@ -1194,38 +1335,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         programSongs: { include: { program: true } },
       },
     });
-
-    // Auto-record history if rehearsal audio changed
-    if (data.audioFile && data.audioFile !== existing.audioFile) {
-      try {
-        const titleDesc = `MOST UPDATED REHEARSAL (${updated.title})`;
-        const notesDesc = `Recorded Rehearsal - ${updated.leadSinger || 'Loveworld Singers'}`;
-        const autoEntry = await prisma.songHistory.create({
-          data: {
-            songId,
-            userId: res.locals.auth?.userId || null,
-            type: 'audio',
-            description: JSON.stringify({ title: titleDesc, notes: notesDesc }),
-            oldValue: existing.audioFile || '',
-            newValue: data.audioFile,
-          },
-        });
-        broadcast('song_history', songId, {
-          id: autoEntry.id,
-          songId,
-          type: 'audio',
-          title: titleDesc,
-          description: notesDesc,
-          notes: notesDesc,
-          audioUrl: data.audioFile,
-          new_value: data.audioFile,
-          old_value: existing.audioFile || '',
-          created_at: autoEntry.createdAt,
-        });
-      } catch (e) {
-        console.warn('[songs:PATCH] Auto-record audio history failed:', e);
-      }
-    }
 
     let resolvedProgramId = body.praiseNightId || body.programId || null;
     const isMasterOrMinistered = Boolean(body.isMaster !== undefined ? body.isMaster : (existing.isMaster || existing.isMinistered));
@@ -1392,18 +1501,37 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 
     const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
 
+    const wasLive = existing.status === 'live' || existing.isActive === true;
+    const explicitTurnOff = body.status && ['inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase());
+    const explicitLiveFalse = (body.isActive === false || body.isLive === false);
+
     // 1. Explicit Heard/Unheard toggle
     if (body.isHeard !== undefined) {
       const isHeard = Boolean(body.isHeard);
-      data.status = isHeard ? 'heard' : 'unheard';
-      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+        data.status = 'live';
+        data.isActive = true;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
+      } else {
+        data.status = isHeard ? 'heard' : 'unheard';
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+      }
     } else if (body.status !== undefined && body.status !== 'live') {
-      data.status = body.status;
-      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+        data.status = 'live';
+        data.isActive = true;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      } else {
+        data.status = body.status;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+      }
     }
 
     // 2. Live toggle (isActive / isLive) - NEVER force heard/unheard!
-    if (body.isActive !== undefined || body.isLive !== undefined || body.status === 'live') {
+    if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+      data.isActive = true;
+      data.status = 'live';
+    } else if (body.isActive !== undefined || body.isLive !== undefined || body.status === 'live') {
       const nextLive = body.status === 'live' || Boolean(body.isActive ?? body.isLive);
       data.isActive = nextLive;
       if (nextLive) {
