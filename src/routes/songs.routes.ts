@@ -1229,13 +1229,16 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     } else if (body.category !== undefined) {
       data.category = body.category;
     }
-    const wasLive = existing.status === 'live' || existing.isActive === true;
+    const wasLive = existing.status === 'live' || (existing.isActive === true && existing.status !== 'heard' && existing.status !== 'unheard' && existing.status !== 'inactive');
     const explicitTurnOff = body.status && ['inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase());
     const explicitLiveFalse = (body.isActive === false || body.isLive === false);
+    const explicitlyGoingLive = (body.status === 'live' || body.isLive === true || body.isActive === true);
+
+    const isSongLive = explicitlyGoingLive || (wasLive && !explicitTurnOff && !explicitLiveFalse);
 
     if (body.isHeard !== undefined) {
       const isHeard = Boolean(body.isHeard);
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+      if (isSongLive && !explicitTurnOff && !explicitLiveFalse) {
         data.status = 'live';
         data.isActive = true;
         const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
@@ -1244,9 +1247,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         data.status = isHeard ? 'heard' : 'unheard';
         const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
         data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+        data.isActive = false;
       }
     } else if (body.status !== undefined && body.status !== 'live') {
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+      if (isSongLive && !explicitTurnOff && !explicitLiveFalse) {
         data.status = 'live';
         data.isActive = true;
         const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
@@ -1255,14 +1259,23 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         data.status = body.status;
         const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
         data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+        if (explicitTurnOff || explicitLiveFalse) {
+          data.isActive = false;
+        }
       }
     } else if (body.status !== undefined) {
       data.status = body.status;
     }
 
-    if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+    if (isSongLive && !explicitTurnOff && !explicitLiveFalse) {
       data.status = 'live';
       data.isActive = true;
+    } else if (explicitTurnOff || explicitLiveFalse) {
+      data.isActive = false;
+      if (data.status === 'live') {
+        const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+        data.status = currentAudioUrls._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
+      }
     } else {
       if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
       if (data.status === 'live') {
@@ -1365,7 +1378,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const formatted = formatSong(updated);
-    broadcastSongUpdate(songId, formatted);
+    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
@@ -1556,7 +1569,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     });
 
     const formatted = formatSong(updated);
-    broadcastSongUpdate(songId, formatted);
+    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });

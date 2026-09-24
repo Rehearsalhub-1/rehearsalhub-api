@@ -149,6 +149,8 @@ function shapeProgram(p: any) {
             audioUrls: audioUrls,
             category: s.category || 'Previously ministered praise songs',
             status: s.status || 'unheard',
+            isActive: Boolean(s.status === 'live' && s.isActive !== false),
+            isLive: Boolean(s.status === 'live' && s.isActive !== false),
             isMaster: Boolean(s.isMaster || s.is_master),
             isMinistered: Boolean(s.isMinistered || s.is_ministered),
             rehearsalCount: resolvedRehearsalCount,
