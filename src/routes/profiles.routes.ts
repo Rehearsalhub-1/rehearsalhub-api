@@ -478,6 +478,7 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   let updatedMeta: Record<string, any> = {};
   try {
     const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+    const currentMeta = (existingMeta?.value as Record<string, any>) || {};
     const currentHidden = (currentMeta.hiddenFeatures || {});
     const incomingHidden = (body.hiddenFeatures || {});
     const mergedHidden = { ...currentHidden, ...incomingHidden };
