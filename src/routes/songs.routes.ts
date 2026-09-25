@@ -342,8 +342,8 @@ const universalSearchHandler = async (req: Request, res: Response) => {
       return res.json({ success: true, count: 0, data: [] });
     }
 
-    const limitParam = req.query.limit ? parseInt(req.query.limit as string) : 60;
-    const limit = Math.min(100, Math.max(1, isNaN(limitParam) ? 60 : limitParam));
+    const limitParam = req.query.limit ? parseInt(req.query.limit as string) : 100;
+    const limit = Math.min(300, Math.max(1, isNaN(limitParam) ? 100 : limitParam));
     const cleanQ = rawQ.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
     const queryWords = cleanQ.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').split(/\s+/).filter(w => w.length > 0);
 
@@ -393,6 +393,15 @@ const universalSearchHandler = async (req: Request, res: Response) => {
           { isMinistered: true },
           { organizationId: null },
           { organizationId: effectiveZoneId },
+          // ← KEY FIX: songs linked to programs in this zone (praise night songs,
+          //   service songs, etc.) that don't have organizationId set directly
+          {
+            programSongs: {
+              some: {
+                program: { organizationId: effectiveZoneId }
+              }
+            }
+          },
         ]
       });
     } else {
@@ -401,6 +410,8 @@ const universalSearchHandler = async (req: Request, res: Response) => {
           { isMaster: true },
           { isMinistered: true },
           { organizationId: null },
+          // Without a zone, include any song that belongs to at least one program
+          { programSongs: { some: {} } },
         ]
       });
     }
