@@ -467,7 +467,7 @@ model Attendance {
   recordedBy     User?         @relation("attendance_recorder", fields: [recordedById], references: [id], onDelete: SetNull)
   program        Program?      @relation(fields: [programId], references: [id], onDelete: SetNull)
 
-  @@unique([programId, userId])
+  @@index([programId, userId])
   @@index([organizationId, programId])
   @@map("attendance")
 }

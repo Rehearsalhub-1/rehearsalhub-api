@@ -154,10 +154,10 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 /** POST /attendance/check-in & POST /attendance */
 const handleCheckIn = async (req: Request, res: Response) => {
+  const targetUserId = req.body?.userId || res.locals.auth?.userId;
   try {
     const auth = res.locals.auth;
     const { userId, programId, eventName, qrCode, zoneId, churchId, subGroupId, latitude, longitude } = req.body;
-    const targetUserId = userId || auth.userId;
     let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
     if (!orgId) {
       const userMem = await prisma.membership.findFirst({
@@ -234,16 +234,16 @@ const handleCheckIn = async (req: Request, res: Response) => {
     }
 
     // 3. Guard: Enforce ONLY ONCE A DAY clock-in rule
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
     const existingToday = await prisma.attendance.findFirst({
       where: {
         userId: targetUserId,
-        checkInTime: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
+        OR: [
+          { checkInTime: { gte: startOfDay, lte: endOfDay } },
+          { createdAt: { gte: startOfDay, lte: endOfDay } },
+        ],
       },
       include: { user: true },
     });
@@ -291,6 +291,22 @@ const handleCheckIn = async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, message: 'Checked in successfully', data: shapeAttendance(inserted) });
   } catch (err: any) {
+    if (err?.code === 'P2002') {
+      try {
+        const fallback = await prisma.attendance.findFirst({
+          where: { userId: targetUserId },
+          orderBy: { createdAt: 'desc' },
+          include: { user: true },
+        });
+        if (fallback) {
+          return res.status(200).json({
+            success: true,
+            message: 'Checked in successfully',
+            data: shapeAttendance(fallback),
+          });
+        }
+      } catch {}
+    }
     console.error('[attendance:check-in]', err);
     res.status(500).json({ success: false, error: err?.message || 'Check-in failed' });
   }
