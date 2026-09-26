@@ -157,7 +157,13 @@ const handleCheckIn = async (req: Request, res: Response) => {
   const targetUserId = req.body?.userId || res.locals.auth?.userId;
   try {
     const auth = res.locals.auth;
-    const { userId, programId, eventName, qrCode, zoneId, churchId, subGroupId, latitude, longitude } = req.body;
+    const { userId, programId, eventName, qrCode, zoneId, churchId, subGroupId, latitude, longitude, isMocked } = req.body;
+    if (isMocked === true || req.body?.mocked === true) {
+      return res.status(403).json({
+        success: false,
+        error: 'Simulated location or mock GPS detected. Clock-in rejected.',
+      });
+    }
     let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
     if (!orgId) {
       const userMem = await prisma.membership.findFirst({
