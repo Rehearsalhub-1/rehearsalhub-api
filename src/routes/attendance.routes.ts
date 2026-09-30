@@ -18,7 +18,7 @@ function shapeAttendance(row: any) {
     status: row.status || 'present',
     organizationId: row.organizationId,
     zoneId: row.organizationId,
-    checkInTime: row.checkInTime || row.createdAt,
+    checkInTime: row.checkInTime || row.scannedAt || row.createdAt,
     scannedAt: row.scannedAt || null,
     qrCode: row.qrCode || null,
     recordedById: row.recordedById || null,
@@ -46,7 +46,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       include: {
         user: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { checkInTime: 'desc' },
       take: 200,
     });
 
@@ -64,8 +64,8 @@ const handleGetMyAttendance = async (req: Request, res: Response) => {
     const rows = await prisma.attendance.findMany({
       where: { userId },
       include: { user: true },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+      orderBy: { checkInTime: 'desc' },
+      take: 200,
     });
     res.json({ success: true, count: rows.length, data: rows.map(shapeAttendance) });
   } catch (err) {

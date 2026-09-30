@@ -17,12 +17,77 @@ async function getProfileMetas(userIds: string[]) {
   return map;
 }
 
+function resolveMemberName(user: any, meta: any = {}) {
+  const rawFirst = (user.firstName || user.first_name || '').trim();
+  const rawLast = (user.lastName || user.last_name || '').trim();
+  const email = (user.email || user.userEmail || '').trim();
+  const isPlaceholderEmail = email.includes('placeholder.rehearsalhub.com') || email.includes('kingschat.temp');
+
+  // 1. Both first and last name present
+  if (rawFirst && rawLast) {
+    return { firstName: rawFirst, lastName: rawLast, fullName: `${rawFirst} ${rawLast}` };
+  }
+
+  // 2. Metadata alias or username
+  const alias = (meta?.alias || meta?.username || user.username || '').trim();
+
+  // 3. Only first name present
+  if (rawFirst && !rawLast) {
+    if (rawFirst.toLowerCase() === 'member' && isPlaceholderEmail) {
+      const shortId = (user.id || '').slice(-4).toUpperCase();
+      return {
+        firstName: 'Choir',
+        lastName: `Member (${shortId})`,
+        fullName: `Choir Member (${shortId})`,
+      };
+    }
+    return { firstName: rawFirst, lastName: '', fullName: rawFirst };
+  }
+
+  // 4. Only last name present
+  if (!rawFirst && rawLast) {
+    return { firstName: rawLast, lastName: '', fullName: rawLast };
+  }
+
+  // 5. Use alias if available
+  if (alias) {
+    return { firstName: alias, lastName: '', fullName: alias };
+  }
+
+  // 6. Real email address (clean prefix)
+  if (email && !isPlaceholderEmail) {
+    const handle = email.split('@')[0];
+    const cleaned = handle.replace(/[._-]+/g, ' ').replace(/\d+$/, '').trim();
+    const formatted = cleaned
+      ? cleaned.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      : handle;
+    const parts = formatted.split(' ');
+    return {
+      firstName: parts[0] || formatted,
+      lastName: parts.slice(1).join(' '),
+      fullName: formatted,
+    };
+  }
+
+  // 7. Phone number
+  if (user.phone) {
+    return { firstName: user.phone, lastName: '', fullName: user.phone };
+  }
+
+  // 8. Fallback identifier
+  const shortId = (user.id || '').slice(-4).toUpperCase();
+  return {
+    firstName: 'Choir',
+    lastName: `Member (${shortId})`,
+    fullName: `Choir Member (${shortId})`,
+  };
+}
+
 function shapeMember(m: any, meta: any = {}) {
   const user = m.user || m.profile || {};
-  const firstName = user.firstName || user.first_name || '';
-  const lastName = user.lastName || user.last_name || '';
-  const fullName = [firstName, lastName].filter(Boolean).join(' ') || user.name || user.email || 'Singer';
-  const email = user.email || user.userEmail || '';
+  const { firstName, lastName, fullName } = resolveMemberName(user, meta);
+  const rawEmail = user.email || user.userEmail || '';
+  const email = rawEmail.includes('placeholder.rehearsalhub.com') ? '' : rawEmail;
   const avatar = user.avatarUrl || user.avatar || user.profile_image_url || null;
   const churchName = m.group?.name || m.churchName || m.church || null;
   const churchId = m.groupId || m.churchId || null;
@@ -51,10 +116,10 @@ function shapeMember(m: any, meta: any = {}) {
     name: fullName,
     userName: fullName,
     displayName: fullName,
-    firstName: firstName || fullName.split(' ')[0] || 'Singer',
-    lastName: lastName || fullName.split(' ').slice(1).join(' ') || '',
-    first_name: firstName || fullName.split(' ')[0] || 'Singer',
-    last_name: lastName || fullName.split(' ').slice(1).join(' ') || '',
+    firstName: firstName || 'Singer',
+    lastName: lastName || '',
+    first_name: firstName || 'Singer',
+    last_name: lastName || '',
     email,
     userEmail: email,
     phone: user.phone || null,
