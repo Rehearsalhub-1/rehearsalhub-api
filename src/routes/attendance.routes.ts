@@ -285,7 +285,10 @@ const handleCheckIn = async (req: Request, res: Response) => {
         organizationId: orgId,
         userId: targetUserId,
         programId: resolvedProgramId,
-        eventName: eventName || (resolvedProgramId ? 'Program Rehearsal' : 'General Rehearsal'),
+        eventName:
+          (typeof eventName === 'string' && eventName.trim()) ||
+          (typeof geoVal?.activeEventName === 'string' && geoVal.activeEventName.trim()) ||
+          (resolvedProgramId ? 'Program Rehearsal' : 'General Rehearsal'),
         status: 'present',
         checkInTime: now,
         scannedAt: qrCode ? now : null,
