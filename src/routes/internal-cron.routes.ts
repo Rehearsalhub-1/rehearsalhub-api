@@ -306,4 +306,242 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Export Cloudinary songs as CSV for manual R2 migration ───────────────────
+// GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>
+// Downloads a CSV file. Team fills in the "new_audio_url" column with R2 URLs,
+// then uploads the completed file to the import endpoint below.
+router.get('/export-songs-csv', async (req: Request, res: Response) => {
+  const apiSecret = process.env.API_SECRET_KEY;
+  if (!apiSecret || req.query.secret !== apiSecret) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  function csvCell(val: string | null | undefined): string {
+    const s = (val ?? '').toString();
+    // Wrap in quotes and escape any internal quotes
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
+  try {
+    const CLOUDINARY = 'res.cloudinary.com';
+
+    // Fetch all songs that have at least one Cloudinary URL
+    const songs = await prisma.song.findMany({
+      select: {
+        id: true,
+        title: true,
+        organizationId: true,
+        audioFile: true,
+        audioUrls: true,
+        isMaster: true,
+      },
+      orderBy: { title: 'asc' },
+    });
+
+    // Build CSV rows — one row per song that has a Cloudinary audio_file OR Cloudinary stems
+    const rows: string[] = [];
+
+    // Header
+    rows.push([
+      'song_id',
+      'title',
+      'organization_id',
+      'is_master',
+      'current_audio_url',
+      'NEW_AUDIO_URL',         // ← team fills this in
+      'current_stem_full',
+      'NEW_STEM_FULL',         // ← team fills this in (optional)
+      'current_stem_band',
+      'NEW_STEM_BAND',
+      'current_stem_lead_vocals',
+      'NEW_STEM_LEAD_VOCALS',
+      'current_stem_backup_vocals',
+      'NEW_STEM_BACKUP_VOCALS',
+      'notes',
+    ].map(csvCell).join(','));
+
+    for (const song of songs) {
+      const audio = song.audioFile ?? '';
+      const stems = (song.audioUrls && typeof song.audioUrls === 'object')
+        ? song.audioUrls as Record<string, any>
+        : {};
+
+      const stemFull    = String(stems['full']           ?? stems['FULL']           ?? '');
+      const stemBand    = String(stems['BAND']           ?? stems['band']           ?? '');
+      const stemLead    = String(stems['LEAD VOCALS']    ?? stems['lead_vocals']    ?? stems['LEAD_VOCALS']    ?? '');
+      const stemBackup  = String(stems['BACKUP VOCALS']  ?? stems['backup_vocals']  ?? stems['BACKUP_VOCALS']  ?? '');
+
+      const hasCloudinary =
+        audio.includes(CLOUDINARY) ||
+        stemFull.includes(CLOUDINARY) ||
+        stemBand.includes(CLOUDINARY) ||
+        stemLead.includes(CLOUDINARY) ||
+        stemBackup.includes(CLOUDINARY);
+
+      if (!hasCloudinary) continue;
+
+      rows.push([
+        song.id,
+        song.title,
+        song.organizationId ?? '',
+        song.isMaster ? 'YES' : 'NO',
+        audio.includes(CLOUDINARY) ? audio : '',
+        '',   // NEW_AUDIO_URL — to be filled
+        stemFull.includes(CLOUDINARY)   ? stemFull   : '',
+        '',   // NEW_STEM_FULL
+        stemBand.includes(CLOUDINARY)   ? stemBand   : '',
+        '',   // NEW_STEM_BAND
+        stemLead.includes(CLOUDINARY)   ? stemLead   : '',
+        '',   // NEW_STEM_LEAD_VOCALS
+        stemBackup.includes(CLOUDINARY) ? stemBackup : '',
+        '',   // NEW_STEM_BACKUP_VOCALS
+        '',   // notes — team can use this for their own comments
+      ].map(csvCell).join(','));
+    }
+
+    const csv = rows.join('\r\n');
+    const filename = `songs_cloudinary_migration_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv); // BOM for Excel UTF-8 compatibility
+  } catch (err: any) {
+    console.error('[internal:export-songs-csv]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Import completed CSV to update Cloudinary → R2 URLs ─────────────────────
+// POST /internal/cron/import-songs-csv?secret=<API_SECRET_KEY>
+// Body: raw CSV text (Content-Type: text/plain or text/csv)
+// Only rows where NEW_AUDIO_URL or NEW_STEM_* columns are filled will be updated.
+// Rows with empty new URL columns are skipped safely.
+router.post('/import-songs-csv', async (req: Request, res: Response) => {
+  const apiSecret = process.env.API_SECRET_KEY;
+  if (!apiSecret || req.query.secret !== apiSecret) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const body: string = typeof req.body === 'string'
+      ? req.body
+      : JSON.stringify(req.body);
+
+    if (!body || body.trim().length === 0) {
+      res.status(400).json({ success: false, error: 'No CSV body provided. Send raw CSV as request body.' });
+      return;
+    }
+
+    // Simple CSV parser — handles quoted fields with commas and escaped quotes
+    function parseCSV(text: string): string[][] {
+      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+      return lines.map(line => {
+        const fields: string[] = [];
+        let i = 0;
+        while (i < line.length) {
+          if (line[i] === '"') {
+            let val = '';
+            i++; // skip opening quote
+            while (i < line.length) {
+              if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2; }
+              else if (line[i] === '"') { i++; break; }
+              else { val += line[i++]; }
+            }
+            fields.push(val);
+            if (line[i] === ',') i++;
+          } else {
+            const end = line.indexOf(',', i);
+            if (end === -1) { fields.push(line.slice(i)); break; }
+            fields.push(line.slice(i, end));
+            i = end + 1;
+          }
+        }
+        return fields;
+      }).filter(r => r.some(c => c.trim()));
+    }
+
+    const rows = parseCSV(body);
+    if (rows.length < 2) {
+      res.status(400).json({ success: false, error: 'CSV has no data rows.' });
+      return;
+    }
+
+    // Map header names to column indexes
+    const headers = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+    const col = (name: string) => headers.indexOf(name);
+
+    const IDX = {
+      id:           col('song_id'),
+      newAudio:     col('new_audio_url'),
+      newFull:      col('new_stem_full'),
+      newBand:      col('new_stem_band'),
+      newLead:      col('new_stem_lead_vocals'),
+      newBackup:    col('new_stem_backup_vocals'),
+    };
+
+    if (IDX.id === -1 || IDX.newAudio === -1) {
+      res.status(400).json({ success: false, error: 'CSV missing required columns: song_id, NEW_AUDIO_URL' });
+      return;
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const songId    = row[IDX.id]?.trim();
+      const newAudio  = row[IDX.newAudio]?.trim();
+      const newFull   = IDX.newFull   !== -1 ? row[IDX.newFull]?.trim()   : '';
+      const newBand   = IDX.newBand   !== -1 ? row[IDX.newBand]?.trim()   : '';
+      const newLead   = IDX.newLead   !== -1 ? row[IDX.newLead]?.trim()   : '';
+      const newBackup = IDX.newBackup !== -1 ? row[IDX.newBackup]?.trim() : '';
+
+      if (!songId) { skipped++; continue; }
+
+      const hasAny = newAudio || newFull || newBand || newLead || newBackup;
+      if (!hasAny) { skipped++; continue; }
+
+      try {
+        const existing = await prisma.song.findUnique({
+          where: { id: songId },
+          select: { id: true, audioUrls: true },
+        });
+        if (!existing) { errors.push(`Row ${i + 1}: song_id "${songId}" not found`); continue; }
+
+        const updateData: Record<string, any> = {};
+
+        if (newAudio) updateData.audioFile = newAudio;
+
+        if (newFull || newBand || newLead || newBackup) {
+          const stems = (existing.audioUrls && typeof existing.audioUrls === 'object')
+            ? { ...(existing.audioUrls as Record<string, any>) }
+            : {};
+          if (newFull)   { stems['full']           = newFull;   stems['FULL']           = newFull; }
+          if (newBand)   { stems['BAND']            = newBand; }
+          if (newLead)   { stems['LEAD VOCALS']     = newLead;  stems['lead_vocals']    = newLead; }
+          if (newBackup) { stems['BACKUP VOCALS']   = newBackup; stems['backup_vocals'] = newBackup; }
+          updateData.audioUrls = stems;
+        }
+
+        await prisma.song.update({ where: { id: songId }, data: updateData });
+        updated++;
+      } catch (rowErr: any) {
+        errors.push(`Row ${i + 1} (${songId}): ${rowErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      summary: { updated, skipped, errors: errors.length },
+      errors: errors.slice(0, 20), // show first 20 errors max
+    });
+  } catch (err: any) {
+    console.error('[internal:import-songs-csv]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
