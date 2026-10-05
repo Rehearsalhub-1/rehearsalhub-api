@@ -242,7 +242,7 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
     // ── 3. users.avatar_url ──────────────────────────────────────────────────
     if (!dryRun) {
       const r = await prisma.$executeRaw`
-        UPDATE users
+        UPDATE profiles
         SET avatar_url = REPLACE(avatar_url, ${RAILWAY_PREFIX}, ${R2_PREFIX})
         WHERE avatar_url LIKE ${'%' + RAILWAY_PREFIX + '%'}
       `;
