@@ -308,7 +308,7 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
 
 // ─── Export zone-001 Cloudinary songs as CSV ─────────────────────────────────
 // GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>
-// Shows: song title | cloudinary filename (readable) | full URL to listen | empty column to paste R2 URL
+// Shows song title, singer, conductor so team can match against readable R2 filenames.
 // Sorted A-Z by title. One row per unique song record.
 router.get('/export-songs-csv', async (req: Request, res: Response) => {
   const apiSecret = process.env.API_SECRET_KEY;
@@ -322,61 +322,51 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
     return `"${s.replace(/"/g, '""')}"`;
   }
 
-  // Extract just the filename from a URL (last path segment, no query string)
-  function extractFilename(url: string): string {
-    try {
-      const u = new URL(url);
-      const parts = u.pathname.split('/');
-      return decodeURIComponent(parts[parts.length - 1] || '');
-    } catch {
-      return url.split('/').pop()?.split('?')[0] ?? '';
-    }
-  }
-
   try {
     const CLOUDINARY = 'res.cloudinary.com';
 
-    // Get the zone-001 organization
-    const zone001Org = await prisma.organization.findFirst({
-      where: { code: 'zone-001' },
-      select: { id: true, name: true },
-    });
-
-    // Fetch songs — filter to zone-001 if found, else all
+    // organizationId is stored directly as 'zone-001' in the DB
     const songs = await prisma.song.findMany({
-      where: zone001Org ? { organizationId: zone001Org.id } : {},
-      select: { id: true, title: true, audioFile: true, audioUrls: true },
+      where: { organizationId: 'zone-001' },
+      select: {
+        id: true,
+        title: true,
+        leadSinger: true,
+        conductor: true,
+        category: true,
+        audioFile: true,
+        audioUrls: true,
+      },
       orderBy: { title: 'asc' },
     });
 
     const rows: string[] = [];
 
-    // Simple header — team reads "CLOUDINARY_FILENAME" to find the matching R2 file
+    // Header — team reads SONG_TITLE + LEAD_SINGER + CONDUCTOR to find matching R2 file
     rows.push([
       'song_id',
       'SONG_TITLE',
-      'CLOUDINARY_FILENAME',   // ← read this to find the file in R2
-      'PASTE_R2_URL_HERE',     // ← paste the R2 URL here
-      'cloudinary_full_url',   // full URL if you want to listen
+      'LEAD_SINGER',       // ← these 3 columns match the R2 filename pattern
+      'CONDUCTOR',         //   e.g. "faithful_and_just_-_maya_-_gdop...mp3"
+      'CATEGORY',
+      'PASTE_R2_URL_HERE', // ← paste the full R2 URL here
+      'current_cloudinary_url',  // click to listen if needed
       // stems
-      'stem_band_FILENAME',
       'stem_band_PASTE_R2_URL',
-      'stem_lead_FILENAME',
       'stem_lead_PASTE_R2_URL',
-      'stem_backup_FILENAME',
       'stem_backup_PASTE_R2_URL',
     ].map(csvCell).join(','));
 
-    let songCount = 0;
     for (const song of songs) {
       const audio = song.audioFile ?? '';
       const stems = (song.audioUrls && typeof song.audioUrls === 'object')
         ? song.audioUrls as Record<string, any>
         : {};
 
-      const stemBand   = String(stems['BAND'] ?? stems['band'] ?? '');
-      const stemLead   = String(stems['LEAD VOCALS'] ?? stems['lead_vocals'] ?? stems['LEAD_VOCALS'] ?? '');
-      const stemBackup = String(stems['BACKUP VOCALS'] ?? stems['backup_vocals'] ?? stems['BACKUP_VOCALS'] ?? '');
+      // Only include URL-type stems (skip metadata keys starting with _)
+      const stemBand   = String(stems['BAND']         ?? stems['band']         ?? '');
+      const stemLead   = String(stems['LEAD VOCALS']  ?? stems['lead_vocals']  ?? stems['LEAD_VOCALS']  ?? '');
+      const stemBackup = String(stems['BACKUP VOCALS']?? stems['backup_vocals']?? stems['BACKUP_VOCALS']?? '');
 
       const hasCloudinary =
         audio.includes(CLOUDINARY) ||
@@ -389,19 +379,16 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
       rows.push([
         song.id,
         song.title,
-        // CLOUDINARY_FILENAME — readable name so team can find the matching R2 file
-        audio.includes(CLOUDINARY) ? extractFilename(audio) : '(already R2)',
-        '',    // PASTE_R2_URL_HERE
-        audio.includes(CLOUDINARY) ? audio : '',  // full URL to listen if needed
-        // stems
-        stemBand.includes(CLOUDINARY)   ? extractFilename(stemBand)   : '(R2 or empty)',
-        '',    // stem_band_PASTE_R2_URL
-        stemLead.includes(CLOUDINARY)   ? extractFilename(stemLead)   : '(R2 or empty)',
-        '',    // stem_lead_PASTE_R2_URL
-        stemBackup.includes(CLOUDINARY) ? extractFilename(stemBackup) : '(R2 or empty)',
-        '',    // stem_backup_PASTE_R2_URL
+        song.leadSinger ?? '',
+        song.conductor  ?? '',
+        song.category   ?? '',
+        '',   // PASTE_R2_URL_HERE
+        audio.includes(CLOUDINARY) ? audio : '(already R2)',
+        // stems — empty paste columns, only show if Cloudinary
+        stemBand.includes(CLOUDINARY)   ? '' : '(already R2 or empty)',
+        stemLead.includes(CLOUDINARY)   ? '' : '(already R2 or empty)',
+        stemBackup.includes(CLOUDINARY) ? '' : '(already R2 or empty)',
       ].map(csvCell).join(','));
-      songCount++;
     }
 
     const csv = rows.join('\r\n');
@@ -409,13 +396,13 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    // BOM for Excel UTF-8 compatibility
     res.send('\uFEFF' + csv);
   } catch (err: any) {
     console.error('[internal:export-songs-csv]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // ─── List all R2 files in zones/zone-001/ as CSV reference ───────────────────
 // GET /internal/cron/export-r2-files?secret=<API_SECRET_KEY>
