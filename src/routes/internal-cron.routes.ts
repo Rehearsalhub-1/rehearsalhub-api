@@ -2,6 +2,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
+import { checkR2ObjectExists } from '../services/r2Service';
 
 const router = Router();
 
@@ -153,6 +154,154 @@ router.get('/audit-urls', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('[internal:audit-urls]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Migrate Railway proxy URLs → R2 direct URLs ──────────────────────────────
+// POST /internal/cron/migrate-railway-urls?secret=<API_SECRET_KEY>
+// Add ?dryRun=true to preview without touching the DB.
+// Skips all Cloudinary URLs — those are manual only.
+router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
+  const apiSecret = process.env.API_SECRET_KEY;
+  const suppliedSecret = req.query.secret;
+  if (!apiSecret || suppliedSecret !== apiSecret) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  const dryRun = req.query.dryRun === 'true';
+  const RAILWAY_PREFIX = 'https://rehearsalhub-api-production-6a17.up.railway.app/upload/file/';
+  const R2_PREFIX = 'https://pub-cb7697578fcc48d3b3aeb70a47eb2f65.r2.dev/';
+
+  function toR2(url: string): string {
+    return url.replace(RAILWAY_PREFIX, R2_PREFIX);
+  }
+
+  const results: Record<string, any> = {};
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+
+  try {
+    // ── 1. songs.audio_file ──────────────────────────────────────────────────
+    if (!dryRun) {
+      const r = await prisma.$executeRaw`
+        UPDATE songs
+        SET audio_file = REPLACE(audio_file, ${RAILWAY_PREFIX}, ${R2_PREFIX})
+        WHERE audio_file LIKE ${'%' + RAILWAY_PREFIX + '%'}
+      `;
+      results['songs.audio_file'] = { updated: r };
+      totalUpdated += r;
+    } else {
+      const count = await prisma.song.count({
+        where: { audioFile: { contains: RAILWAY_PREFIX } },
+      });
+      results['songs.audio_file'] = { wouldUpdate: count };
+      totalUpdated += count;
+    }
+
+    // ── 2. songs.audio_urls (JSON stems) ─────────────────────────────────────
+    const songsWithRailway = await prisma.song.findMany({
+      where: {},
+      select: { id: true, audioUrls: true },
+    });
+
+    let stemUpdated = 0;
+    let stemSkipped = 0;
+    for (const song of songsWithRailway) {
+      if (!song.audioUrls || typeof song.audioUrls !== 'object') continue;
+      const stems = song.audioUrls as Record<string, any>;
+      let changed = false;
+      const newStems: Record<string, any> = {};
+      for (const [k, v] of Object.entries(stems)) {
+        if (typeof v === 'string' && v.includes(RAILWAY_PREFIX)) {
+          newStems[k] = toR2(v);
+          changed = true;
+        } else {
+          newStems[k] = v;
+        }
+      }
+      if (changed) {
+        if (!dryRun) {
+          await prisma.song.update({
+            where: { id: song.id },
+            data: { audioUrls: newStems },
+          });
+        }
+        stemUpdated++;
+      } else {
+        stemSkipped++;
+      }
+    }
+    results['songs.audio_urls(stems)'] = dryRun
+      ? { wouldUpdate: stemUpdated, skipped: stemSkipped }
+      : { updated: stemUpdated, skipped: stemSkipped };
+    totalUpdated += stemUpdated;
+    totalSkipped += stemSkipped;
+
+    // ── 3. users.avatar_url ──────────────────────────────────────────────────
+    if (!dryRun) {
+      const r = await prisma.$executeRaw`
+        UPDATE users
+        SET avatar_url = REPLACE(avatar_url, ${RAILWAY_PREFIX}, ${R2_PREFIX})
+        WHERE avatar_url LIKE ${'%' + RAILWAY_PREFIX + '%'}
+      `;
+      results['users.avatar_url'] = { updated: r };
+      totalUpdated += r;
+    } else {
+      const count = await prisma.user.count({
+        where: { avatarUrl: { contains: RAILWAY_PREFIX } },
+      });
+      results['users.avatar_url'] = { wouldUpdate: count };
+      totalUpdated += count;
+    }
+
+    // ── 4. programs.banner_image ─────────────────────────────────────────────
+    if (!dryRun) {
+      const r = await prisma.$executeRaw`
+        UPDATE programs
+        SET banner_image = REPLACE(banner_image, ${RAILWAY_PREFIX}, ${R2_PREFIX})
+        WHERE banner_image LIKE ${'%' + RAILWAY_PREFIX + '%'}
+      `;
+      results['programs.banner_image'] = { updated: r };
+      totalUpdated += r;
+    } else {
+      const count = await prisma.program.count({
+        where: { bannerImage: { contains: RAILWAY_PREFIX } },
+      });
+      results['programs.banner_image'] = { wouldUpdate: count };
+      totalUpdated += count;
+    }
+
+    // ── 5. media_assets.url ──────────────────────────────────────────────────
+    if (!dryRun) {
+      const r = await prisma.$executeRaw`
+        UPDATE media_assets
+        SET url = REPLACE(url, ${RAILWAY_PREFIX}, ${R2_PREFIX})
+        WHERE url LIKE ${'%' + RAILWAY_PREFIX + '%'}
+      `;
+      results['media_assets.url'] = { updated: r };
+      totalUpdated += r;
+    } else {
+      const count = await prisma.mediaAsset.count({
+        where: { url: { contains: RAILWAY_PREFIX } },
+      });
+      results['media_assets.url'] = { wouldUpdate: count };
+      totalUpdated += count;
+    }
+
+    res.json({
+      success: true,
+      dryRun,
+      summary: {
+        totalUpdated,
+        totalSkipped,
+        r2Prefix: R2_PREFIX,
+      },
+      breakdown: results,
+    });
+  } catch (err: any) {
+    console.error('[internal:migrate-railway-urls]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

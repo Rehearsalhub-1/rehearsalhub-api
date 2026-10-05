@@ -14,11 +14,9 @@ const apiBase = (
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '') ||
   'https://rehearsalhub-api-production-6a17.up.railway.app'
 ).replace(/\/+$/, '');
-const envPublicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
-// If R2_PUBLIC_URL is empty or points to the private/disabled r2.dev domain, serve through the API proxy
-export const publicUrlBase = (envPublicUrl && !envPublicUrl.includes('r2.dev'))
-  ? envPublicUrl
-  : `${apiBase}/upload/file`;
+// R2 public URL — falls back to the public bucket URL if env var not set
+const envPublicUrl = (process.env.R2_PUBLIC_URL || 'https://pub-cb7697578fcc48d3b3aeb70a47eb2f65.r2.dev').replace(/\/+$/, '');
+export const publicUrlBase = envPublicUrl || `${apiBase}/upload/file`;
 
 export const r2Client = new S3Client({
   region: 'auto',
