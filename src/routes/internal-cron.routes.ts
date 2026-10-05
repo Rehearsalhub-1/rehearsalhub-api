@@ -307,9 +307,10 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
 });
 
 // ─── Export zone-001 Cloudinary songs as CSV ─────────────────────────────────
-// GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>
-// Shows song title, singer, conductor so team can match against readable R2 filenames.
-// Sorted A-Z by title. One row per unique song record.
+// GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>&program_name=<NAME>&program_id=<ID>
+// Only exports songs in Loveworld Singers HQ (zone-001) Programs that have Cloudinary URLs to replace.
+// Grouped and sorted by Program Name, Program Date, then song order.
+// Side-by-side columns: Current Cloudinary URL next to Paste R2 URL.
 router.get('/export-songs-csv', async (req: Request, res: Response) => {
   const apiSecret = process.env.API_SECRET_KEY;
   if (!apiSecret || req.query.secret !== apiSecret) {
@@ -325,74 +326,144 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
   try {
     const CLOUDINARY = 'res.cloudinary.com';
 
-    // organizationId is stored directly as 'zone-001' in the DB
-    const songs = await prisma.song.findMany({
-      where: { organizationId: 'zone-001' },
-      select: {
-        id: true,
-        title: true,
-        leadSinger: true,
-        conductor: true,
-        category: true,
-        audioFile: true,
-        audioUrls: true,
+    const programWhere: Record<string, any> = {
+      organizationId: 'zone-001',
+    };
+
+    if (req.query.program_id) {
+      programWhere.id = String(req.query.program_id);
+    } else if (req.query.program_name) {
+      programWhere.name = { contains: String(req.query.program_name), mode: 'insensitive' };
+    }
+
+    const programSongs = await prisma.programSong.findMany({
+      where: {
+        program: programWhere,
       },
-      orderBy: { title: 'asc' },
+      include: {
+        program: {
+          select: {
+            id: true,
+            name: true,
+            date: true,
+            category: true,
+          },
+        },
+        song: {
+          select: {
+            id: true,
+            title: true,
+            leadSinger: true,
+            conductor: true,
+            category: true,
+            audioFile: true,
+            audioUrls: true,
+          },
+        },
+      },
+      orderBy: [
+        { program: { name: 'asc' } },
+        { order: 'asc' },
+        { song: { title: 'asc' } },
+      ],
     });
 
     const rows: string[] = [];
 
-    // Header — team reads SONG_TITLE + LEAD_SINGER + CONDUCTOR to find matching R2 file
+    // Header with side-by-side traceability
     rows.push([
-      'song_id',
+      'PROGRAM_NAME',
+      'PROGRAM_DATE',
       'SONG_TITLE',
-      'LEAD_SINGER',       // ← these 3 columns match the R2 filename pattern
-      'CONDUCTOR',         //   e.g. "faithful_and_just_-_maya_-_gdop...mp3"
-      'CATEGORY',
-      'PASTE_R2_URL_HERE', // ← paste the full R2 URL here
-      'current_cloudinary_url',  // click to listen if needed
-      // stems
-      'stem_band_PASTE_R2_URL',
-      'stem_lead_PASTE_R2_URL',
-      'stem_backup_PASTE_R2_URL',
+      'LEAD_SINGER',
+      'CONDUCTOR',
+      'song_id',
+      // Main Audio
+      'PASTE_R2_MAIN_AUDIO',
+      'current_cloudinary_main_audio',
+      // Full mix stem
+      'PASTE_R2_STEM_FULL',
+      'current_cloudinary_stem_full',
+      // Band stem
+      'PASTE_R2_STEM_BAND',
+      'current_cloudinary_stem_band',
+      // Lead vocals stem
+      'PASTE_R2_STEM_LEAD_VOCALS',
+      'current_cloudinary_stem_lead_vocals',
+      // Backup vocals stem
+      'PASTE_R2_STEM_BACKUP_VOCALS',
+      'current_cloudinary_stem_backup_vocals',
+      // Tenor stem
+      'PASTE_R2_STEM_TENOR',
+      'current_cloudinary_stem_tenor',
+      // Alto stem
+      'PASTE_R2_STEM_ALTO',
+      'current_cloudinary_stem_alto',
+      // Soprano stem
+      'PASTE_R2_STEM_SOPRANO',
+      'current_cloudinary_stem_soprano',
     ].map(csvCell).join(','));
 
-    for (const song of songs) {
+    for (const ps of programSongs) {
+      const song = ps.song;
+      if (!song) continue;
+
       const audio = song.audioFile ?? '';
       const stems = (song.audioUrls && typeof song.audioUrls === 'object')
         ? song.audioUrls as Record<string, any>
         : {};
 
-      // Only include URL-type stems (skip metadata keys starting with _)
-      const stemBand   = String(stems['BAND']         ?? stems['band']         ?? '');
-      const stemLead   = String(stems['LEAD VOCALS']  ?? stems['lead_vocals']  ?? stems['LEAD_VOCALS']  ?? '');
-      const stemBackup = String(stems['BACKUP VOCALS']?? stems['backup_vocals']?? stems['BACKUP_VOCALS']?? '');
+      const stemFull   = String(stems['full'] ?? stems['FULL'] ?? '');
+      const stemBand   = String(stems['BAND'] ?? stems['band'] ?? stems['Band'] ?? '');
+      const stemLead   = String(stems['LEAD VOCALS'] ?? stems['lead_vocals'] ?? stems['LEAD_VOCALS'] ?? stems['Lead'] ?? stems['BAND & LEAD VOCALS'] ?? '');
+      const stemBackup = String(stems['BACKUP VOCALS'] ?? stems['backup_vocals'] ?? stems['BACKUP_VOCALS'] ?? stems['Backup Vocals'] ?? stems['BAND & BACKUP VOCALS'] ?? '');
+      const stemTenor  = String(stems['tenor'] ?? stems['Tenor'] ?? '');
+      const stemAlto   = String(stems['alto'] ?? stems['Alto'] ?? '');
+      const stemSoprano= String(stems['soprano'] ?? stems['Soprano'] ?? '');
 
       const hasCloudinary =
         audio.includes(CLOUDINARY) ||
+        stemFull.includes(CLOUDINARY) ||
         stemBand.includes(CLOUDINARY) ||
         stemLead.includes(CLOUDINARY) ||
-        stemBackup.includes(CLOUDINARY);
+        stemBackup.includes(CLOUDINARY) ||
+        stemTenor.includes(CLOUDINARY) ||
+        stemAlto.includes(CLOUDINARY) ||
+        stemSoprano.includes(CLOUDINARY);
 
       if (!hasCloudinary) continue;
 
+      const formatUrl = (url: string) => {
+        if (!url) return '';
+        if (url.includes(CLOUDINARY)) return url;
+        return '(already R2)';
+      };
+
       rows.push([
-        song.id,
+        ps.program.name,
+        ps.program.date ?? '',
         song.title,
         song.leadSinger ?? '',
-        song.conductor  ?? '',
-        song.category   ?? '',
-        '',   // PASTE_R2_URL_HERE
-        audio.includes(CLOUDINARY) ? audio : '(already R2)',
-        // stems — empty paste columns, only show if Cloudinary
-        stemBand.includes(CLOUDINARY)   ? '' : '(already R2 or empty)',
-        stemLead.includes(CLOUDINARY)   ? '' : '(already R2 or empty)',
-        stemBackup.includes(CLOUDINARY) ? '' : '(already R2 or empty)',
+        song.conductor ?? '',
+        song.id,
+        // Main Audio
+        '', formatUrl(audio),
+        // Stems
+        '', formatUrl(stemFull),
+        '', formatUrl(stemBand),
+        '', formatUrl(stemLead),
+        '', formatUrl(stemBackup),
+        '', formatUrl(stemTenor),
+        '', formatUrl(stemAlto),
+        '', formatUrl(stemSoprano),
       ].map(csvCell).join(','));
     }
 
     const csv = rows.join('\r\n');
-    const filename = `zone001_songs_to_update_${new Date().toISOString().slice(0, 10)}.csv`;
+    const safeProgName = req.query.program_name
+      ? `_${String(req.query.program_name).replace(/[^a-zA-Z0-9]/g, '_')}`
+      : '';
+    const filename = `lws_hq_programs${safeProgName}_${new Date().toISOString().slice(0, 10)}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -526,21 +597,30 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
       return;
     }
 
-    // Map header names to column indexes
+    // Map header names to column indexes (supports multiple aliases)
     const headers = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'));
-    const col = (name: string) => headers.indexOf(name);
-
-    const IDX = {
-      id:           col('song_id'),
-      newAudio:     col('new_audio_url'),
-      newFull:      col('new_stem_full'),
-      newBand:      col('new_stem_band'),
-      newLead:      col('new_stem_lead_vocals'),
-      newBackup:    col('new_stem_backup_vocals'),
+    const col = (...names: string[]) => {
+      for (const n of names) {
+        const idx = headers.indexOf(n);
+        if (idx !== -1) return idx;
+      }
+      return -1;
     };
 
-    if (IDX.id === -1 || IDX.newAudio === -1) {
-      res.status(400).json({ success: false, error: 'CSV missing required columns: song_id, NEW_AUDIO_URL' });
+    const IDX = {
+      id:           col('song_id', 'id'),
+      newAudio:     col('paste_r2_main_audio', 'new_audio_url', 'paste_r2_url_here', 'new_audio'),
+      newFull:      col('paste_r2_stem_full', 'new_stem_full', 'stem_full_paste_r2_url'),
+      newBand:      col('paste_r2_stem_band', 'new_stem_band', 'stem_band_paste_r2_url'),
+      newLead:      col('paste_r2_stem_lead_vocals', 'new_stem_lead_vocals', 'stem_lead_paste_r2_url', 'paste_r2_stem_lead'),
+      newBackup:    col('paste_r2_stem_backup_vocals', 'new_stem_backup_vocals', 'stem_backup_paste_r2_url', 'paste_r2_stem_backup'),
+      newTenor:     col('paste_r2_stem_tenor', 'new_stem_tenor'),
+      newAlto:      col('paste_r2_stem_alto', 'new_stem_alto'),
+      newSoprano:   col('paste_r2_stem_soprano', 'new_stem_soprano'),
+    };
+
+    if (IDX.id === -1) {
+      res.status(400).json({ success: false, error: 'CSV missing required column: song_id' });
       return;
     }
 
@@ -551,15 +631,30 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const songId    = row[IDX.id]?.trim();
-      const newAudio  = row[IDX.newAudio]?.trim();
-      const newFull   = IDX.newFull   !== -1 ? row[IDX.newFull]?.trim()   : '';
-      const newBand   = IDX.newBand   !== -1 ? row[IDX.newBand]?.trim()   : '';
-      const newLead   = IDX.newLead   !== -1 ? row[IDX.newLead]?.trim()   : '';
-      const newBackup = IDX.newBackup !== -1 ? row[IDX.newBackup]?.trim() : '';
+      const newAudio  = IDX.newAudio   !== -1 ? row[IDX.newAudio]?.trim()   : '';
+      const newFull   = IDX.newFull    !== -1 ? row[IDX.newFull]?.trim()    : '';
+      const newBand   = IDX.newBand    !== -1 ? row[IDX.newBand]?.trim()    : '';
+      const newLead   = IDX.newLead    !== -1 ? row[IDX.newLead]?.trim()    : '';
+      const newBackup = IDX.newBackup  !== -1 ? row[IDX.newBackup]?.trim()  : '';
+      const newTenor  = IDX.newTenor   !== -1 ? row[IDX.newTenor]?.trim()   : '';
+      const newAlto   = IDX.newAlto    !== -1 ? row[IDX.newAlto]?.trim()    : '';
+      const newSoprano= IDX.newSoprano !== -1 ? row[IDX.newSoprano]?.trim() : '';
 
       if (!songId) { skipped++; continue; }
 
-      const hasAny = newAudio || newFull || newBand || newLead || newBackup;
+      // Skip rows where nothing new was entered or if someone pasted placeholders
+      const isValidUrl = (url: string) => url.startsWith('http://') || url.startsWith('https://');
+
+      const validAudio   = isValidUrl(newAudio)   ? newAudio   : '';
+      const validFull    = isValidUrl(newFull)    ? newFull    : '';
+      const validBand    = isValidUrl(newBand)    ? newBand    : '';
+      const validLead    = isValidUrl(newLead)    ? newLead    : '';
+      const validBackup  = isValidUrl(newBackup)  ? newBackup  : '';
+      const validTenor   = isValidUrl(newTenor)   ? newTenor   : '';
+      const validAlto    = isValidUrl(newAlto)    ? newAlto    : '';
+      const validSoprano = isValidUrl(newSoprano) ? newSoprano : '';
+
+      const hasAny = validAudio || validFull || validBand || validLead || validBackup || validTenor || validAlto || validSoprano;
       if (!hasAny) { skipped++; continue; }
 
       try {
@@ -571,16 +666,19 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
 
         const updateData: Record<string, any> = {};
 
-        if (newAudio) updateData.audioFile = newAudio;
+        if (validAudio) updateData.audioFile = validAudio;
 
-        if (newFull || newBand || newLead || newBackup) {
+        if (validFull || validBand || validLead || validBackup || validTenor || validAlto || validSoprano) {
           const stems = (existing.audioUrls && typeof existing.audioUrls === 'object')
             ? { ...(existing.audioUrls as Record<string, any>) }
             : {};
-          if (newFull)   { stems['full']           = newFull;   stems['FULL']           = newFull; }
-          if (newBand)   { stems['BAND']            = newBand; }
-          if (newLead)   { stems['LEAD VOCALS']     = newLead;  stems['lead_vocals']    = newLead; }
-          if (newBackup) { stems['BACKUP VOCALS']   = newBackup; stems['backup_vocals'] = newBackup; }
+          if (validFull)    { stems['full'] = validFull; stems['FULL'] = validFull; }
+          if (validBand)    { stems['BAND'] = validBand; stems['band'] = validBand; stems['Band'] = validBand; }
+          if (validLead)    { stems['LEAD VOCALS'] = validLead; stems['lead_vocals'] = validLead; stems['Lead'] = validLead; }
+          if (validBackup)  { stems['BACKUP VOCALS'] = validBackup; stems['backup_vocals'] = validBackup; stems['Backup Vocals'] = validBackup; }
+          if (validTenor)   { stems['tenor'] = validTenor; stems['Tenor'] = validTenor; }
+          if (validAlto)    { stems['alto'] = validAlto; stems['Alto'] = validAlto; }
+          if (validSoprano) { stems['soprano'] = validSoprano; stems['Soprano'] = validSoprano; }
           updateData.audioUrls = stems;
         }
 
