@@ -306,10 +306,10 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
   }
 });
 
-// ─── Export Cloudinary songs as CSV for manual R2 migration ───────────────────
+// ─── Export zone-001 Cloudinary songs as CSV ─────────────────────────────────
 // GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>
-// Downloads a CSV file. Team fills in the "new_audio_url" column with R2 URLs,
-// then uploads the completed file to the import endpoint below.
+// Sheet 1 of 2: List of songs with Cloudinary URLs.
+// Team fills in the "PASTE_R2_URL_HERE" column, then sends to import endpoint.
 router.get('/export-songs-csv', async (req: Request, res: Response) => {
   const apiSecret = process.env.API_SECRET_KEY;
   if (!apiSecret || req.query.secret !== apiSecret) {
@@ -319,19 +319,24 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
 
   function csvCell(val: string | null | undefined): string {
     const s = (val ?? '').toString();
-    // Wrap in quotes and escape any internal quotes
     return `"${s.replace(/"/g, '""')}"`;
   }
 
   try {
     const CLOUDINARY = 'res.cloudinary.com';
 
-    // Fetch all songs that have at least one Cloudinary URL
+    // Get the zone-001 organization
+    const zone001Org = await prisma.organization.findFirst({
+      where: { code: 'zone-001' },
+      select: { id: true, name: true },
+    });
+
+    // Fetch songs — if zone-001 org found, filter to it; otherwise get all
     const songs = await prisma.song.findMany({
+      where: zone001Org ? { organizationId: zone001Org.id } : {},
       select: {
         id: true,
         title: true,
-        organizationId: true,
         audioFile: true,
         audioUrls: true,
         isMaster: true,
@@ -339,42 +344,35 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
       orderBy: { title: 'asc' },
     });
 
-    // Build CSV rows — one row per song that has a Cloudinary audio_file OR Cloudinary stems
     const rows: string[] = [];
 
-    // Header
+    // Header — keep it dead simple for the team
     rows.push([
       'song_id',
-      'title',
-      'organization_id',
-      'is_master',
-      'current_audio_url',
-      'NEW_AUDIO_URL',         // ← team fills this in
-      'current_stem_full',
-      'NEW_STEM_FULL',         // ← team fills this in (optional)
-      'current_stem_band',
-      'NEW_STEM_BAND',
-      'current_stem_lead_vocals',
-      'NEW_STEM_LEAD_VOCALS',
-      'current_stem_backup_vocals',
-      'NEW_STEM_BACKUP_VOCALS',
-      'notes',
+      'song_title',
+      'LISTEN_HERE',           // click this to hear the song
+      'PASTE_R2_URL_HERE',     // ← team pastes the matching R2 URL here
+      'stem_band_LISTEN',
+      'stem_band_NEW_URL',
+      'stem_lead_LISTEN',
+      'stem_lead_NEW_URL',
+      'stem_backup_LISTEN',
+      'stem_backup_NEW_URL',
     ].map(csvCell).join(','));
 
+    let songCount = 0;
     for (const song of songs) {
       const audio = song.audioFile ?? '';
       const stems = (song.audioUrls && typeof song.audioUrls === 'object')
         ? song.audioUrls as Record<string, any>
         : {};
 
-      const stemFull    = String(stems['full']           ?? stems['FULL']           ?? '');
-      const stemBand    = String(stems['BAND']           ?? stems['band']           ?? '');
-      const stemLead    = String(stems['LEAD VOCALS']    ?? stems['lead_vocals']    ?? stems['LEAD_VOCALS']    ?? '');
-      const stemBackup  = String(stems['BACKUP VOCALS']  ?? stems['backup_vocals']  ?? stems['BACKUP_VOCALS']  ?? '');
+      const stemBand   = String(stems['BAND'] ?? stems['band'] ?? '');
+      const stemLead   = String(stems['LEAD VOCALS'] ?? stems['lead_vocals'] ?? stems['LEAD_VOCALS'] ?? '');
+      const stemBackup = String(stems['BACKUP VOCALS'] ?? stems['backup_vocals'] ?? stems['BACKUP_VOCALS'] ?? '');
 
       const hasCloudinary =
         audio.includes(CLOUDINARY) ||
-        stemFull.includes(CLOUDINARY) ||
         stemBand.includes(CLOUDINARY) ||
         stemLead.includes(CLOUDINARY) ||
         stemBackup.includes(CLOUDINARY);
@@ -384,33 +382,96 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
       rows.push([
         song.id,
         song.title,
-        song.organizationId ?? '',
-        song.isMaster ? 'YES' : 'NO',
-        audio.includes(CLOUDINARY) ? audio : '',
-        '',   // NEW_AUDIO_URL — to be filled
-        stemFull.includes(CLOUDINARY)   ? stemFull   : '',
-        '',   // NEW_STEM_FULL
-        stemBand.includes(CLOUDINARY)   ? stemBand   : '',
-        '',   // NEW_STEM_BAND
-        stemLead.includes(CLOUDINARY)   ? stemLead   : '',
-        '',   // NEW_STEM_LEAD_VOCALS
-        stemBackup.includes(CLOUDINARY) ? stemBackup : '',
-        '',   // NEW_STEM_BACKUP_VOCALS
-        '',   // notes — team can use this for their own comments
+        audio.includes(CLOUDINARY) ? audio : '(already R2)',
+        '',    // PASTE_R2_URL_HERE
+        stemBand.includes(CLOUDINARY)   ? stemBand   : '(already R2 or empty)',
+        '',    // stem_band_NEW_URL
+        stemLead.includes(CLOUDINARY)   ? stemLead   : '(already R2 or empty)',
+        '',    // stem_lead_NEW_URL
+        stemBackup.includes(CLOUDINARY) ? stemBackup : '(already R2 or empty)',
+        '',    // stem_backup_NEW_URL
       ].map(csvCell).join(','));
+      songCount++;
     }
 
     const csv = rows.join('\r\n');
-    const filename = `songs_cloudinary_migration_${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `zone001_songs_to_update_${new Date().toISOString().slice(0, 10)}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send('\uFEFF' + csv); // BOM for Excel UTF-8 compatibility
+    // BOM for Excel UTF-8 compatibility
+    res.send('\uFEFF' + csv);
   } catch (err: any) {
     console.error('[internal:export-songs-csv]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ─── List all R2 files in zones/zone-001/ as CSV reference ───────────────────
+// GET /internal/cron/export-r2-files?secret=<API_SECRET_KEY>
+// Sheet 2 of 2: All files already uploaded to R2 for zone-001.
+// Team copies R2 URLs from here and pastes into the songs CSV above.
+router.get('/export-r2-files', async (req: Request, res: Response) => {
+  const apiSecret = process.env.API_SECRET_KEY;
+  if (!apiSecret || req.query.secret !== apiSecret) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  function csvCell(val: string | null | undefined): string {
+    const s = (val ?? '').toString();
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
+  try {
+    const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+    const { r2Client, publicUrlBase } = await import('../services/r2Service');
+    const bucketName = process.env.R2_BUCKET_NAME || 'rehearsalhub-media';
+    const R2_PREFIX = 'zones/zone-001/';
+
+    const rows: string[] = [];
+    rows.push(['filename', 'folder', 'r2_url', 'size_kb'].map(csvCell).join(','));
+
+    let continuationToken: string | undefined;
+    let totalFiles = 0;
+
+    do {
+      const command = new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: R2_PREFIX,
+        MaxKeys: 1000,
+        ContinuationToken: continuationToken,
+      });
+
+      const resp = await r2Client.send(command);
+
+      for (const obj of resp.Contents ?? []) {
+        if (!obj.Key) continue;
+        const parts = obj.Key.split('/');
+        const filename = parts[parts.length - 1];
+        const folder   = parts.slice(0, -1).join('/');
+        const url      = `${publicUrlBase}/${obj.Key}`;
+        const sizeKb   = obj.Size ? Math.round(obj.Size / 1024) : 0;
+
+        rows.push([filename, folder, url, sizeKb.toString()].map(csvCell).join(','));
+        totalFiles++;
+      }
+
+      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    const csv = rows.join('\r\n');
+    const filename = `zone001_r2_files_reference_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv);
+  } catch (err: any) {
+    console.error('[internal:export-r2-files]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 // ─── Import completed CSV to update Cloudinary → R2 URLs ─────────────────────
 // POST /internal/cron/import-songs-csv?secret=<API_SECRET_KEY>
