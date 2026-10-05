@@ -308,8 +308,8 @@ router.post('/migrate-railway-urls', async (req: Request, res: Response) => {
 
 // ─── Export zone-001 Cloudinary songs as CSV ─────────────────────────────────
 // GET /internal/cron/export-songs-csv?secret=<API_SECRET_KEY>
-// Sheet 1 of 2: List of songs with Cloudinary URLs.
-// Team fills in the "PASTE_R2_URL_HERE" column, then sends to import endpoint.
+// Shows: song title | cloudinary filename (readable) | full URL to listen | empty column to paste R2 URL
+// Sorted A-Z by title. One row per unique song record.
 router.get('/export-songs-csv', async (req: Request, res: Response) => {
   const apiSecret = process.env.API_SECRET_KEY;
   if (!apiSecret || req.query.secret !== apiSecret) {
@@ -322,6 +322,17 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
     return `"${s.replace(/"/g, '""')}"`;
   }
 
+  // Extract just the filename from a URL (last path segment, no query string)
+  function extractFilename(url: string): string {
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split('/');
+      return decodeURIComponent(parts[parts.length - 1] || '');
+    } catch {
+      return url.split('/').pop()?.split('?')[0] ?? '';
+    }
+  }
+
   try {
     const CLOUDINARY = 'res.cloudinary.com';
 
@@ -331,33 +342,29 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
       select: { id: true, name: true },
     });
 
-    // Fetch songs — if zone-001 org found, filter to it; otherwise get all
+    // Fetch songs — filter to zone-001 if found, else all
     const songs = await prisma.song.findMany({
       where: zone001Org ? { organizationId: zone001Org.id } : {},
-      select: {
-        id: true,
-        title: true,
-        audioFile: true,
-        audioUrls: true,
-        isMaster: true,
-      },
+      select: { id: true, title: true, audioFile: true, audioUrls: true },
       orderBy: { title: 'asc' },
     });
 
     const rows: string[] = [];
 
-    // Header — keep it dead simple for the team
+    // Simple header — team reads "CLOUDINARY_FILENAME" to find the matching R2 file
     rows.push([
       'song_id',
-      'song_title',
-      'LISTEN_HERE',           // click this to hear the song
-      'PASTE_R2_URL_HERE',     // ← team pastes the matching R2 URL here
-      'stem_band_LISTEN',
-      'stem_band_NEW_URL',
-      'stem_lead_LISTEN',
-      'stem_lead_NEW_URL',
-      'stem_backup_LISTEN',
-      'stem_backup_NEW_URL',
+      'SONG_TITLE',
+      'CLOUDINARY_FILENAME',   // ← read this to find the file in R2
+      'PASTE_R2_URL_HERE',     // ← paste the R2 URL here
+      'cloudinary_full_url',   // full URL if you want to listen
+      // stems
+      'stem_band_FILENAME',
+      'stem_band_PASTE_R2_URL',
+      'stem_lead_FILENAME',
+      'stem_lead_PASTE_R2_URL',
+      'stem_backup_FILENAME',
+      'stem_backup_PASTE_R2_URL',
     ].map(csvCell).join(','));
 
     let songCount = 0;
@@ -382,14 +389,17 @@ router.get('/export-songs-csv', async (req: Request, res: Response) => {
       rows.push([
         song.id,
         song.title,
-        audio.includes(CLOUDINARY) ? audio : '(already R2)',
+        // CLOUDINARY_FILENAME — readable name so team can find the matching R2 file
+        audio.includes(CLOUDINARY) ? extractFilename(audio) : '(already R2)',
         '',    // PASTE_R2_URL_HERE
-        stemBand.includes(CLOUDINARY)   ? stemBand   : '(already R2 or empty)',
-        '',    // stem_band_NEW_URL
-        stemLead.includes(CLOUDINARY)   ? stemLead   : '(already R2 or empty)',
-        '',    // stem_lead_NEW_URL
-        stemBackup.includes(CLOUDINARY) ? stemBackup : '(already R2 or empty)',
-        '',    // stem_backup_NEW_URL
+        audio.includes(CLOUDINARY) ? audio : '',  // full URL to listen if needed
+        // stems
+        stemBand.includes(CLOUDINARY)   ? extractFilename(stemBand)   : '(R2 or empty)',
+        '',    // stem_band_PASTE_R2_URL
+        stemLead.includes(CLOUDINARY)   ? extractFilename(stemLead)   : '(R2 or empty)',
+        '',    // stem_lead_PASTE_R2_URL
+        stemBackup.includes(CLOUDINARY) ? extractFilename(stemBackup) : '(R2 or empty)',
+        '',    // stem_backup_PASTE_R2_URL
       ].map(csvCell).join(','));
       songCount++;
     }
