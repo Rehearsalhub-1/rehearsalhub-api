@@ -86,6 +86,16 @@ router.get('/', async (req: Request, res: Response) => {
         image: s.imageUrl || (s as any).image_url || null,
         audioFile: s.audioFile || null,
         audioUrls: s.audioUrls || (s.audioFile ? { full: s.audioFile } : null),
+        customParts: (() => {
+          const fromAudioUrls = (s.audioUrls as any)?._customParts;
+          if (Array.isArray(fromAudioUrls) && fromAudioUrls.length > 0) return fromAudioUrls;
+          if (Array.isArray(s.customParts) && s.customParts.length > 0) return s.customParts;
+          if (s.customParts && typeof s.customParts === 'object') return Object.keys(s.customParts);
+          const standardStems = new Set(['full', 'soprano', 'alto', 'tenor', 'bass', 'lead', 'instrumental', 'main', 'master']);
+          const rawObj = (s.audioUrls && typeof s.audioUrls === 'object') ? s.audioUrls : {};
+          const customKeys = Object.keys(rawObj).filter(k => !k.startsWith('_') && !standardStems.has(k.toLowerCase()));
+          return customKeys.length > 0 ? customKeys : [];
+        })(),
         conductor: s.conductor || null,
         leadSinger: resolvedLeadSinger,
         drummer: s.drummer || null,
@@ -158,7 +168,17 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
         writer: body.writer || null,
         category: body.category || 'Master Library',
         audioFile: body.audioFile || body.audio_file || null,
-        audioUrls: body.audioUrls || body.audio_urls || null,
+        audioUrls: (() => {
+          let urls = body.audioUrls || body.audio_urls || null;
+          const customList = Array.isArray(body.customParts)
+            ? body.customParts
+            : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : null);
+          if (customList && customList.length > 0) {
+            if (!urls || typeof urls !== 'object') urls = {};
+            urls = { ...urls, _customParts: customList };
+          }
+          return urls;
+        })(),
         conductor: body.conductor || null,
         leadSinger: body.leadSinger || body.lead_singer || null,
         drummer: body.drummer || null,
@@ -197,6 +217,13 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     if (body.category !== undefined) data.category = body.category;
     if (body.audioFile !== undefined || body.audio_file !== undefined) data.audioFile = body.audioFile || body.audio_file;
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
+    if (body.customParts !== undefined) {
+      const customList = Array.isArray(body.customParts)
+        ? body.customParts
+        : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
+      const currentUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentUrls, _customParts: customList };
+    }
     if (body.conductor !== undefined) data.conductor = body.conductor;
     if (body.leadSinger !== undefined || body.lead_singer !== undefined) data.leadSinger = body.leadSinger || body.lead_singer;
     if (body.drummer !== undefined) data.drummer = body.drummer;

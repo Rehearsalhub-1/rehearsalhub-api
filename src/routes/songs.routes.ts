@@ -147,6 +147,16 @@ function shapeSong(song: any) {
     audioFile: audioUrl,
     audioUrl: audioUrl,
     audioUrls: Object.keys(audioUrls).length > 0 ? audioUrls : (audioUrl ? { full: audioUrl } : null),
+    customParts: (() => {
+      const fromAudioUrls = (song.audioUrls as any)?._customParts;
+      if (Array.isArray(fromAudioUrls) && fromAudioUrls.length > 0) return fromAudioUrls;
+      if (Array.isArray(song.customParts) && song.customParts.length > 0) return song.customParts;
+      if (song.customParts && typeof song.customParts === 'object') return Object.keys(song.customParts);
+      const standardStems = new Set(['full', 'soprano', 'alto', 'tenor', 'bass', 'lead', 'instrumental', 'main', 'master']);
+      const rawObj = (song.audioUrls && typeof song.audioUrls === 'object') ? song.audioUrls : {};
+      const customKeys = Object.keys(rawObj).filter(k => !k.startsWith('_') && !standardStems.has(k.toLowerCase()));
+      return customKeys.length > 0 ? customKeys : [];
+    })(),
     imageUrl: song.imageUrl || (song as any).image_url || null,
     image: song.imageUrl || (song as any).image_url || null,
     category: song.category || null,
@@ -1155,6 +1165,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       audioUrlsData = { ...audioUrlsData, _categories: categoriesList };
     }
 
+    const customPartsList = Array.isArray(body.customParts)
+      ? body.customParts
+      : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : null);
+    if (customPartsList && customPartsList.length > 0) {
+      if (!audioUrlsData || typeof audioUrlsData !== 'object') audioUrlsData = {};
+      audioUrlsData = { ...audioUrlsData, _customParts: customPartsList };
+    }
+
     const newSong = await prisma.song.create({
       data: {
         id: songId,
@@ -1233,6 +1251,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       data.audioFile = body.audioFile || body.audio_file || body.audioUrl;
     }
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
+    if (body.customParts !== undefined) {
+      const customPartsList = Array.isArray(body.customParts)
+        ? body.customParts
+        : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
+    }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
       data.category = body.categories[0] || body.category || '';
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
@@ -1468,6 +1493,13 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.audioFile = body.audioFile || body.audio_file || body.audioUrl;
     }
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
+    if (body.customParts !== undefined) {
+      const customPartsList = Array.isArray(body.customParts)
+        ? body.customParts
+        : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
+    }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
       data.category = body.categories[0] || body.category || '';
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
