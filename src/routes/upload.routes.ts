@@ -26,33 +26,16 @@ const publicAvatarUpload = multer({
   },
 });
 
-// Stream media from R2 with full HTTP Range support
-router.get('/file/:key(*)', async (req, res) => {
-  try {
-    const key = req.params.key;
-    const range = req.headers.range;
-    const result = await getR2Object(key, range);
-
-    res.setHeader('Content-Type', result.ContentType || 'application/octet-stream');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-
-    if (result.ContentRange) {
-      res.status(206);
-      res.setHeader('Content-Range', result.ContentRange);
-    }
-    if (result.ContentLength !== undefined) {
-      res.setHeader('Content-Length', result.ContentLength);
-    }
-
-    (result.Body as any).pipe(res);
-  } catch (err: any) {
-    if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
-      return res.status(404).send('File not found');
-    }
-    console.error('[UploadRoute] Stream error:', err);
-    res.status(500).send('Error streaming media');
-  }
+// Redirect /upload/file/:key → direct Cloudflare R2 public URL.
+// Previously this streamed files through Railway (causing egress costs).
+// Now it returns a 301 permanent redirect to the R2 public URL.
+// All app versions (old and new) automatically follow 301 redirects — zero breaking changes.
+router.get('/file/:key(*)', (req, res) => {
+  const key = req.params.key;
+  const r2PublicBase = (process.env.R2_PUBLIC_URL || 'https://pub-cb7697578fcc48d3b3aeb70a47eb2f65.r2.dev').replace(/\/+$/, '');
+  const directUrl = `${r2PublicBase}/${key}`;
+  // 301 = permanent redirect — browsers and React Native cache this, further reducing requests to Railway
+  res.redirect(301, directUrl);
 });
 
 // Upload media directly to Cloudflare R2
