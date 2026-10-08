@@ -8,9 +8,18 @@ import prisma from '../lib/prisma';
 
 type SubscriptionKey = `${string}:${string}`;
 
+export interface BroadcastScopeFilter {
+  targetZoneId?: string | null;
+  targetChurchId?: string | null;
+}
+
 interface AuthenticatedSocket extends WebSocket {
   connectionId: string;
   userId: string;
+  zoneId?: string;
+  churchIds?: Set<string>;
+  role?: string;
+  isHQ?: boolean;
 }
 
 export interface UserPresence {
@@ -25,12 +34,17 @@ const userSocketCounts = new Map<string, number>();
 const userPresenceMap = new Map<string, UserPresence>();
 const eventHistory: Array<{ sequence: number; resource: string; id: string; data: unknown }> = [];
 let nextEventSequence = 1;
-const MAX_EVENT_HISTORY = 5000;
+const MAX_EVENT_HISTORY = 500;
 
 let wss: WebSocketServer | null = null;
 
-// ── Broadcast an event to all subscribers of a resource ──────────────────────
-export function broadcast(resource: string, id: string, data: unknown): void {
+// ── Broadcast an event to subscribers with optional zonal/church isolation ──
+export function broadcast(
+  resource: string,
+  id: string,
+  data: unknown,
+  filter?: BroadcastScopeFilter
+): void {
   const event = { sequence: nextEventSequence++, resource, id, data };
   eventHistory.push(event);
   if (eventHistory.length > MAX_EVENT_HISTORY) eventHistory.shift();
@@ -54,6 +68,22 @@ export function broadcast(resource: string, id: string, data: unknown): void {
     if (!matches) continue;
     const socket = connections.get(connId);
     if (!socket || socket.readyState !== WebSocket.OPEN) continue;
+
+    // Apply Zonal & Church Scoping if filter is provided
+    if (filter) {
+      if (filter.targetChurchId) {
+        const belongsToChurch = socket.churchIds?.has(filter.targetChurchId);
+        if (!belongsToChurch && !socket.isHQ) {
+          continue;
+        }
+      } else if (filter.targetZoneId && filter.targetZoneId !== 'all' && filter.targetZoneId !== 'global') {
+        const normTargetZone = String(filter.targetZoneId).trim().toLowerCase();
+        const normSocketZone = String(socket.zoneId || 'zone-001').trim().toLowerCase();
+        if (normTargetZone !== normSocketZone && !socket.isHQ) {
+          continue;
+        }
+      }
+    }
 
     socket.send(JSON.stringify({ type: 'event', ...event }));
   }
@@ -88,7 +118,6 @@ function handleUserConnected(userId: string): void {
   userPresenceMap.set(userId, presence);
 
   broadcast('presence', userId, presence);
-  broadcast('presence', 'all', presence);
 }
 
 function handleUserDisconnected(userId: string): void {
@@ -105,7 +134,6 @@ function handleUserDisconnected(userId: string): void {
     userPresenceMap.set(userId, presence);
 
     broadcast('presence', userId, presence);
-    broadcast('presence', 'all', presence);
   }
 }
 
@@ -138,6 +166,24 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
     const socket = rawSocket as AuthenticatedSocket;
     socket.connectionId = crypto.randomUUID();
     socket.userId = payload.sub;
+    socket.role = payload.role;
+    socket.zoneId = payload.zoneId || 'zone-001';
+    socket.isHQ = ['hq_admin', 'super_admin'].includes((payload.role || '').toLowerCase().trim());
+    socket.churchIds = new Set<string>();
+    if (payload.churchId) {
+      socket.churchIds.add(payload.churchId);
+    }
+
+    // Populate user church/subgroup memberships asynchronously to enable scoped events
+    prisma.membership.findMany({
+      where: { userId: socket.userId },
+      select: { organizationId: true, groupId: true },
+    }).then((memberships) => {
+      for (const m of memberships) {
+        if (m.groupId) socket.churchIds?.add(m.groupId);
+        if (m.organizationId && !socket.zoneId) socket.zoneId = m.organizationId;
+      }
+    }).catch(() => {});
 
     connections.set(socket.connectionId, socket);
     subscriptions.set(socket.connectionId, new Set());
@@ -205,6 +251,17 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
 
       if (msg.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
+
+      if (msg.type === 'set_context') {
+        if (msg.zoneId && typeof msg.zoneId === 'string') {
+          socket.zoneId = msg.zoneId;
+        }
+        if (msg.churchId && typeof msg.churchId === 'string') {
+          if (!socket.churchIds) socket.churchIds = new Set();
+          socket.churchIds.add(msg.churchId);
+        }
         return;
       }
 

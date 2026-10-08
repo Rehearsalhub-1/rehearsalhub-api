@@ -49,20 +49,27 @@ function formatSong(song: any) {
 }
 
 function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
+  const targetZoneId = formatted.organizationId || formatted.zoneId || null;
+  const targetChurchId = formatted.groupId || formatted.subGroupId || null;
+  const filter = (targetZoneId || targetChurchId) ? { targetZoneId, targetChurchId } : undefined;
+
+  // Single-song targeted subscriptions
   broadcast('songs', songId, formatted);
   broadcast('song', songId, formatted);
-  broadcast('songs', 'all', formatted);
-  broadcast('song', 'all', formatted);
+
+  // Broadcast scoped to the song's zone and church
+  broadcast('songs', 'all', formatted, filter);
+  broadcast('song', 'all', formatted, filter);
   if (formatted.programId) {
-    broadcast('song', String(formatted.programId), formatted);
-    broadcast('songs', String(formatted.programId), formatted);
+    broadcast('song', String(formatted.programId), formatted, filter);
+    broadcast('songs', String(formatted.programId), formatted, filter);
   }
   if (formatted.praiseNightId && String(formatted.praiseNightId) !== String(formatted.programId)) {
-    broadcast('song', String(formatted.praiseNightId), formatted);
-    broadcast('songs', String(formatted.praiseNightId), formatted);
+    broadcast('song', String(formatted.praiseNightId), formatted, filter);
+    broadcast('songs', String(formatted.praiseNightId), formatted, filter);
   }
   const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
-  broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false });
+  broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false }, filter);
 }
 function isConductorGuideText(text: string | null | undefined): boolean {
   if (!text) return false;

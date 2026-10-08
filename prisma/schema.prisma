@@ -196,6 +196,9 @@ model Song {
   userSongNotes   UserSongNote[]
 
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([groupId, status])
+  @@index([status])
   @@index([isMaster])
   @@index([isMinistered])
   @@index([title])
@@ -244,6 +247,7 @@ model Program {
 
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([groupId, status])
   @@map("programs")
 }
 
