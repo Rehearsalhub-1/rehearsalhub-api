@@ -1721,11 +1721,21 @@ router.patch('/notes/:songId', requireAuth, async (req: Request, res: Response) 
 router.get('/annotations/:songId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { songId } = req.params;
-    const key = `song_anno_${songId}`;
+    const auth = (res as any).locals?.auth || {};
+    const effectiveChurchId = (req as any).tenant?.effectiveChurchId || (req.headers['x-church-id'] as string) || (auth.churchId as string) || null;
+    const effectiveZoneId = (req as any).tenant?.effectiveZoneId || (req.headers['x-zone-id'] as string) || (auth.zoneId as string) || 'zone-001';
 
-    const setting = await prisma.setting.findUnique({ where: { key } });
+    const scopedKey = effectiveChurchId
+      ? `song_anno_${songId}_church_${effectiveChurchId}`
+      : `song_anno_${songId}_zone_${effectiveZoneId}`;
+
+    let setting = await prisma.setting.findUnique({ where: { key: scopedKey } });
+    // Backward-compatibility fallback to global key if scoped setting does not exist yet
+    if (!setting) {
+      setting = await prisma.setting.findUnique({ where: { key: `song_anno_${songId}` } });
+    }
+
     const strokes = setting?.value && typeof setting.value === 'object' ? (setting.value as any).strokes || [] : [];
-
     res.json({ success: true, data: { strokes } });
   } catch (err) {
     console.error('[songs/annotations:GET]', err);
@@ -1736,16 +1746,28 @@ router.get('/annotations/:songId', requireAuth, async (req: Request, res: Respon
 router.patch('/annotations/:songId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { songId } = req.params;
-    const key = `song_anno_${songId}`;
+    const auth = (res as any).locals?.auth || {};
+    const effectiveChurchId = (req as any).tenant?.effectiveChurchId || (req.headers['x-church-id'] as string) || (auth.churchId as string) || null;
+    const effectiveZoneId = (req as any).tenant?.effectiveZoneId || (req.headers['x-zone-id'] as string) || (auth.zoneId as string) || 'zone-001';
+
+    const scopedKey = effectiveChurchId
+      ? `song_anno_${songId}_church_${effectiveChurchId}`
+      : `song_anno_${songId}_zone_${effectiveZoneId}`;
+
     const strokes = req.body.data?.strokes || req.body.strokes || [];
 
     await prisma.setting.upsert({
-      where: { key },
+      where: { key: scopedKey },
       update: { value: { strokes, updatedAt: new Date().toISOString() } },
-      create: { key, value: { strokes, updatedAt: new Date().toISOString() } },
+      create: { key: scopedKey, value: { strokes, updatedAt: new Date().toISOString() } },
     });
 
-    broadcast('annotation', songId, { songId, strokes });
+    // Enforce Zonal / Church Isolation: broadcast only to clients within this specific scope
+    broadcast('annotation', songId, { songId, strokes }, {
+      targetZoneId: effectiveZoneId,
+      targetChurchId: effectiveChurchId || undefined,
+    });
+
     res.json({ success: true, message: 'Annotations saved', data: { strokes } });
   } catch (err) {
     console.error('[songs/annotations:PATCH]', err);
