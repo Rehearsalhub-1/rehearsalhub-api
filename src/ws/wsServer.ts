@@ -249,6 +249,21 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
         return;
       }
 
+      if (msg.type === 'broadcast' && typeof msg.resource === 'string' && typeof msg.id === 'string') {
+        const payload = msg.data || {};
+        // Enforce Zonal and Church Isolation: live events stay strictly within sender's zone/church
+        const senderZoneId = socket.zoneId || 'zone-001';
+        const senderChurchId = socket.churchIds && socket.churchIds.size > 0
+          ? Array.from(socket.churchIds)[0]
+          : undefined;
+
+        broadcast(msg.resource, msg.id, payload, {
+          targetZoneId: senderZoneId,
+          targetChurchId: senderChurchId,
+        });
+        return;
+      }
+
       if (msg.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
         return;
