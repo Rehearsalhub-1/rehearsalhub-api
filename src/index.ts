@@ -2,6 +2,7 @@
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import cron from 'node-cron';
 import { apiKeyAuth } from './middleware/auth';
@@ -67,6 +68,8 @@ prisma.$executeRawUnsafe(`
 
 const app = express();
 app.set('trust proxy', 1);
+// Gzip compress all JSON responses — reduces egress by ~70-80% at no cost to functionality
+app.use(compression());
 const PORT = process.env.PORT || 3000;
 const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')

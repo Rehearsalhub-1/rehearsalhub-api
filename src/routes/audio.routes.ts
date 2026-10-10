@@ -5,9 +5,24 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { requireAuth } from '../auth/auth.middleware';
+import { r2Client, publicUrlBase } from '../services/r2Service';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 
 const router = Router();
 const upload = multer({ dest: os.tmpdir() });
+
+// Upload processed audio to R2 and return the public URL — avoids Railway egress costs.
+async function uploadProcessedAudio(filePath: string, filename: string): Promise<string> {
+  const key = `general/processed/${Date.now()}_${filename}`;
+  const fileBuffer = fs.readFileSync(filePath);
+  await r2Client.send(new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME || 'rehearsalhub-media',
+    Key: key,
+    Body: fileBuffer,
+    ContentType: 'audio/mp4',
+  }));
+  return `${publicUrlBase}/${key}`;
+}
 
 router.post('/mix-karaoke', requireAuth, upload.single('vocals'), async (req, res) => {
   try {
@@ -76,10 +91,11 @@ router.post('/mix-karaoke', requireAuth, upload.single('vocals'), async (req, re
         .run();
     });
 
-    res.download(outputPath, 'mixed_take.m4a', (err) => {
-      if (fs.existsSync(vocalsFile.path)) fs.unlinkSync(vocalsFile.path);
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    });
+    // Upload to R2 and return URL — avoids streaming through Railway (saves egress cost)
+    const mixUrl = await uploadProcessedAudio(outputPath, 'mixed_take.m4a');
+    if (fs.existsSync(vocalsFile.path)) fs.unlinkSync(vocalsFile.path);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    res.json({ success: true, url: mixUrl });
 
   } catch (err) {
     console.error('[audio/mix-karaoke]', err);
@@ -149,10 +165,11 @@ router.post('/bounce', requireAuth, upload.any(), async (req, res) => {
       });
     }
 
-    res.download(outputPath, 'bounced.m4a', (err) => {
-      files.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    });
+    // Upload to R2 and return URL — avoids streaming through Railway (saves egress cost)
+    const bounceUrl = await uploadProcessedAudio(outputPath, 'bounced.m4a');
+    files.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    res.json({ success: true, url: bounceUrl });
 
   } catch (err) {
     console.error('[audio/bounce]', err);
@@ -190,10 +207,11 @@ router.post('/trim', requireAuth, upload.single('track'), async (req, res) => {
         .run();
     });
 
-    res.download(outputPath, 'trimmed.m4a', (err) => {
-      if (fs.existsSync(trackFile.path)) fs.unlinkSync(trackFile.path);
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    });
+    // Upload to R2 and return URL — avoids streaming through Railway (saves egress cost)
+    const trimUrl = await uploadProcessedAudio(outputPath, 'trimmed.m4a');
+    if (fs.existsSync(trackFile.path)) fs.unlinkSync(trackFile.path);
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    res.json({ success: true, url: trimUrl });
 
   } catch (err) {
     console.error('[audio/trim]', err);
