@@ -311,7 +311,7 @@ httpServer.listen(PORT, async () => {
   // Runs every day at 10:00 AM server time. Silently clocks in the owner if a
   // rehearsal session is open. Everyone else clocks in manually as normal.
   const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
-  cron.schedule('17 13 * * *', async () => {
+  cron.schedule('0 10 * * *', async () => {
     try {
       const membership = await prisma.membership.findFirst({
         where: { userId: AUTO_CLOCKIN_USER_ID, status: 'ACTIVE' },
@@ -385,6 +385,7 @@ httpServer.listen(PORT, async () => {
     }, PING_INTERVAL_MS);
   }
 });
+
 
 
 
