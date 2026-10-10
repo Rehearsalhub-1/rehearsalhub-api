@@ -514,8 +514,12 @@ const universalSearchHandler = async (req: Request, res: Response) => {
         matchField = 'title';
       }
 
+      // Strip heavy fields from search results to reduce egress.
+      // Full lyrics/solfas are only needed when a song is opened individually.
+      const { lyrics, karaokeLrcText, lrcText, syncedLyricsText, solfas, solfa, conductorGuide, ...lightFormatted } = formatted;
+
       return {
-        ...formatted,
+        ...lightFormatted,
         searchResult: {
           isMatch: true,
           score,

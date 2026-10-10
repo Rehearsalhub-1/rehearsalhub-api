@@ -29,12 +29,12 @@ router.get('/', async (req: Request, res: Response) => {
       rows = await prisma.song.findMany({
         where: { organizationId: zoneId as string },
         orderBy: { title: 'asc' },
-        take: 250,
+        take: 100,
       });
     } else {
       rows = await prisma.song.findMany({
         orderBy: { title: 'asc' },
-        take: 500,
+        take: 100,
       });
     }
 

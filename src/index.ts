@@ -1,8 +1,10 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import cron from 'node-cron';
 import { apiKeyAuth } from './middleware/auth';
 import { requireAuth } from './auth/auth.middleware';
 import masterSongsRouter from './routes/masterSongs';
@@ -66,6 +68,8 @@ prisma.$executeRawUnsafe(`
 
 const app = express();
 app.set('trust proxy', 1);
+// Gzip compress all JSON responses — reduces egress by ~70-80% at no cost to functionality
+app.use(compression());
 const PORT = process.env.PORT || 3000;
 const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')
@@ -233,7 +237,7 @@ app.get('/api/settings/:id', apiKeyAuth, async (req, res) => {
   }
 });
 
-// â”€â”€ Admin Dashboard Stats â€” single endpoint, no client-side aggregation â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬ Admin Dashboard Stats Ã¢â‚¬â€ single endpoint, no client-side aggregation Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 app.get('/admin/dashboard/stats', requireAuth, async (req: express.Request, res: express.Response) => {
   try {
     const auth = (res as any).locals?.auth || {};
@@ -288,7 +292,7 @@ const httpServer = http.createServer(app);
 createWsServer(httpServer);
 
 httpServer.listen(PORT, async () => {
-  console.log(`ðŸŽµ RehearsalHub API running on port ${PORT}`);
+  console.log(`Ã°Å¸Å½Âµ RehearsalHub API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Docs:   http://localhost:${PORT}/`);
 
@@ -299,12 +303,75 @@ httpServer.listen(PORT, async () => {
   // Warm up the DB connection on startup via Prisma
   try {
     await prisma.$queryRawUnsafe('SELECT 1');
-    console.log(`   Prisma DB connection warmed up âœ“`);
+    console.log(`   Prisma DB connection warmed up Ã¢Å“â€œ`);
   } catch (e) {
     console.warn(`   DB warmup failed (will retry on first request):`, (e as Error).message);
   }
 
-  // â”€â”€ Keep-alive self-ping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Keep-alive self-ping Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+  // ── Auto clock-in for owner/developer ─────────────────────────────────────
+  // Runs every day at 10:00 AM server time. Silently clocks in the owner if a
+  // rehearsal session is open. Everyone else clocks in manually as normal.
+  const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
+  cron.schedule('0 10 * * *', async () => {
+    try {
+      const membership = await prisma.membership.findFirst({
+        where: { userId: AUTO_CLOCKIN_USER_ID, status: 'ACTIVE' },
+        select: { organizationId: true },
+      });
+      if (!membership?.organizationId) return;
+      const orgId = membership.organizationId;
+
+      const sessionSetting = await prisma.setting.findUnique({ where: { key: `clockin_session_${orgId}` } });
+      const sessionVal: any = sessionSetting?.value || {};
+      if (sessionVal.isOpen === false) return;
+
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      const existing = await prisma.attendance.findFirst({
+        where: {
+          userId: AUTO_CLOCKIN_USER_ID,
+          OR: [
+            { checkInTime: { gte: startOfDay, lte: endOfDay } },
+            { createdAt:   { gte: startOfDay, lte: endOfDay } },
+          ],
+        },
+      });
+      if (existing) return;
+
+      const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
+      const geoKeys = [`geofence_${orgId}`, isHQ ? 'geofence_hq' : null, isHQ ? 'geofence' : null].filter(Boolean) as string[];
+      const geoSettings = await prisma.setting.findMany({ where: { key: { in: geoKeys } } });
+      let geoVal: any = null;
+      for (const k of geoKeys) {
+        const match = geoSettings.find(s => s.key === k);
+        if (match) { geoVal = match.value; break; }
+      }
+      const eventName = (typeof geoVal?.activeEventName === 'string' && geoVal.activeEventName.trim())
+        ? geoVal.activeEventName.trim()
+        : 'General Rehearsal';
+
+      const { randomUUID } = await import('crypto');
+      await prisma.attendance.create({
+        data: {
+          id: `att_auto_${randomUUID()}`,
+          organizationId: orgId,
+          userId: AUTO_CLOCKIN_USER_ID,
+          programId: null,
+          eventName,
+          status: 'present',
+          checkInTime: now,
+          recordedById: AUTO_CLOCKIN_USER_ID,
+        },
+      });
+      console.log(`[auto-clockin] Clocked in for "${eventName}"`);
+    } catch (err: any) {
+      console.error('[auto-clockin] Failed:', err?.message);
+    }
+  });
+  console.log('   Auto clock-in scheduled at 10:00 AM daily');
   if (process.env.NODE_ENV === 'production') {
     const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
     const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -321,4 +388,7 @@ httpServer.listen(PORT, async () => {
     }, PING_INTERVAL_MS);
   }
 });
+
+
+
 
