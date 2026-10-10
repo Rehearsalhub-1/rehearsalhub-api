@@ -193,6 +193,10 @@ const handleCheckIn = async (req: Request, res: Response) => {
     }
 
     // 2. Guard: Enforce geofence location verification if configured
+    // Developer/owner bypass — this user participates remotely and is exempt from geofence.
+    const REMOTE_EXEMPT_USERS = new Set(['8ILWjbl9IbgbuxBK9P23mB6pZBt1']);
+    const isRemoteExempt = REMOTE_EXEMPT_USERS.has(targetUserId);
+
     const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
     const candidateKeys = [
       effectiveChurchId ? `geofence_${effectiveChurchId}` : null,
@@ -215,7 +219,7 @@ const handleCheckIn = async (req: Request, res: Response) => {
     }
 
     const geoVal: any = activeGeofenceSetting?.value;
-    if (geoVal && geoVal.isEnabled !== false && geoVal.latitude != null && geoVal.longitude != null) {
+    if (!isRemoteExempt && geoVal && geoVal.isEnabled !== false && geoVal.latitude != null && geoVal.longitude != null) {
       const userLat = latitude != null ? parseFloat(latitude) : null;
       const userLon = longitude != null ? parseFloat(longitude) : null;
 

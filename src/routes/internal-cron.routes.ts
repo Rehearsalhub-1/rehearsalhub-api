@@ -700,4 +700,96 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Auto clock-in for developer/owner ───────────────────────────────────────
+// POST /internal/cron/auto-clockin
+// Called by a scheduled job once daily at 10 AM.
+// Clocks in the owner if a clock-in session is open for their zone today.
+const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
+
+router.post('/auto-clockin', async (req: Request, res: Response) => {
+  const configuredSecret = process.env.CRON_SECRET;
+  const suppliedSecret = req.headers['x-cron-secret'];
+  if (!configuredSecret || suppliedSecret !== configuredSecret) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    // Find the user's active zone
+    const membership = await prisma.membership.findFirst({
+      where: { userId: AUTO_CLOCKIN_USER_ID, status: 'ACTIVE' },
+      select: { organizationId: true },
+    });
+
+    if (!membership?.organizationId) {
+      return res.json({ success: false, reason: 'No active zone membership found' });
+    }
+
+    const orgId = membership.organizationId;
+
+    // Check if clock-in session is open for this zone
+    const sessionKey = `clockin_session_${orgId}`;
+    const sessionSetting = await prisma.setting.findUnique({ where: { key: sessionKey } });
+    const sessionVal: any = sessionSetting?.value || {};
+
+    if (sessionVal.isOpen === false) {
+      return res.json({ success: false, reason: 'Clock-in session is closed — no rehearsal today' });
+    }
+
+    // Check if already clocked in today
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const existingToday = await prisma.attendance.findFirst({
+      where: {
+        userId: AUTO_CLOCKIN_USER_ID,
+        OR: [
+          { checkInTime: { gte: startOfDay, lte: endOfDay } },
+          { createdAt:   { gte: startOfDay, lte: endOfDay } },
+        ],
+      },
+    });
+
+    if (existingToday) {
+      return res.json({ success: false, reason: 'Already clocked in today', recordId: existingToday.id });
+    }
+
+    // Get event name from geofence activeEventName if set by coordinator
+    const candidateGeoKeys = [`geofence_${orgId}`, 'geofence'];
+    const geoSettings = await prisma.setting.findMany({ where: { key: { in: candidateGeoKeys } } });
+    const geoVal: any = geoSettings.find(s => s.key === `geofence_${orgId}`)?.value
+      || geoSettings.find(s => s.key === 'geofence')?.value
+      || {};
+
+    const eventName = (typeof geoVal?.activeEventName === 'string' && geoVal.activeEventName.trim())
+      || 'General Rehearsal';
+
+    // Find active program for this zone (optional — attach if exists)
+    const activeProgram = await prisma.program.findFirst({
+      where: { organizationId: orgId, isActive: true },
+      select: { id: true },
+    });
+
+    // Clock in
+    const id = `att_auto_${crypto.randomUUID()}`;
+    const inserted = await prisma.attendance.create({
+      data: {
+        id,
+        organizationId: orgId,
+        userId: AUTO_CLOCKIN_USER_ID,
+        programId: activeProgram?.id || null,
+        eventName,
+        status: 'present',
+        checkInTime: now,
+        recordedById: AUTO_CLOCKIN_USER_ID,
+      },
+    });
+
+    return res.json({ success: true, message: 'Auto clock-in successful', recordId: inserted.id, eventName, orgId });
+  } catch (err: any) {
+    console.error('[internal:auto-clockin]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
