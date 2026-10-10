@@ -707,8 +707,8 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
 const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
 
 router.post('/auto-clockin', async (req: Request, res: Response) => {
-  const configuredSecret = process.env.CRON_SECRET;
-  const suppliedSecret = req.headers['x-cron-secret'];
+  const configuredSecret = process.env.API_SECRET_KEY || process.env.CRON_SECRET;
+  const suppliedSecret = req.headers['x-cron-secret'] || req.query.secret;
   if (!configuredSecret || suppliedSecret !== configuredSecret) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
