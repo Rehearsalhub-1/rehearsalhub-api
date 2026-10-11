@@ -124,10 +124,10 @@ const corsOptions: cors.CorsOptions = {
   maxAge: 86400,
 };
 
-// Rate limiter: 5000 requests per 15 minutes per IP
+// Rate limiter: 20000 requests per 15 minutes per IP — allows up to 1000+ concurrent users
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5000,
+  max: 20000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.path === '/health' || req.path === '/' || req.method === 'OPTIONS',
