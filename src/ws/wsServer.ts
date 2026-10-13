@@ -36,6 +36,28 @@ const eventHistory: Array<{ sequence: number; resource: string; id: string; data
 let nextEventSequence = 1;
 const MAX_EVENT_HISTORY = 500;
 
+// Simple in-memory cache for user memberships — avoids DB hit on every WS connection
+const membershipCache = new Map<string, { zoneId?: string; churchIds: string[]; ts: number }>();
+const MEMBERSHIP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedMemberships(userId: string): Promise<{ zoneId?: string; churchIds: string[] }> {
+  const cached = membershipCache.get(userId);
+  if (cached && Date.now() - cached.ts < MEMBERSHIP_CACHE_TTL_MS) {
+    return cached;
+  }
+  const memberships = await prisma.membership.findMany({
+    where: { userId },
+    select: { organizationId: true, groupId: true },
+  });
+  const result = {
+    zoneId: memberships.find(m => m.organizationId)?.organizationId || undefined,
+    churchIds: memberships.map(m => m.groupId).filter(Boolean) as string[],
+    ts: Date.now(),
+  };
+  membershipCache.set(userId, result);
+  return result;
+}
+
 let wss: WebSocketServer | null = null;
 
 // ── Broadcast an event to subscribers with optional zonal/church isolation ──
@@ -174,15 +196,12 @@ export function createWsServer(httpServer: http.Server): WebSocketServer {
       socket.churchIds.add(payload.churchId);
     }
 
-    // Populate user church/subgroup memberships asynchronously to enable scoped events
-    prisma.membership.findMany({
-      where: { userId: socket.userId },
-      select: { organizationId: true, groupId: true },
-    }).then((memberships) => {
-      for (const m of memberships) {
-        if (m.groupId) socket.churchIds?.add(m.groupId);
-        if (m.organizationId && !socket.zoneId) socket.zoneId = m.organizationId;
+    // Populate user church/subgroup memberships asynchronously — uses cache to avoid DB storm on peak load
+    getCachedMemberships(socket.userId).then(({ zoneId, churchIds }) => {
+      for (const churchId of churchIds) {
+        socket.churchIds?.add(churchId);
       }
+      if (zoneId && !socket.zoneId) socket.zoneId = zoneId;
     }).catch(() => {});
 
     connections.set(socket.connectionId, socket);

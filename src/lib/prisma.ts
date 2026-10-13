@@ -17,9 +17,9 @@ function createPrismaClient(): ExtendedPrismaClient {
   const pool = new pg.Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
-    max: 20,
-    idleTimeoutMillis: 60000,
-    connectionTimeoutMillis: 25000,
+    max: 50,                          // increased from 20 — handles 1000+ concurrent users
+    idleTimeoutMillis: 30000,         // release idle connections faster
+    connectionTimeoutMillis: 10000,   // fail fast instead of queuing for 25s
     keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
     allowExitOnIdle: false,

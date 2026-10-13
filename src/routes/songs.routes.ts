@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, optionalAuth } from '../auth/auth.middleware';
 import { canAccessAdmin } from '../auth/permissions';
@@ -53,21 +53,35 @@ function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
   const targetChurchId = formatted.groupId || formatted.subGroupId || null;
   const filter = (targetZoneId || targetChurchId) ? { targetZoneId, targetChurchId } : undefined;
 
-  // Single-song targeted subscriptions
-  broadcast('songs', songId, formatted);
-  broadcast('song', songId, formatted);
+  // â”€â”€ Lightweight "songs_changed" notification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Clients receive a small signal and re-fetch from their own cache/API.
+  // Full song payloads are NOT sent here â€” that was the main source of WS egress.
+  // Only the minimum fields needed for the client to decide whether to refetch.
+  const changeEvent = {
+    id: songId,
+    status: formatted.status,
+    isActive: formatted.isActive,
+    updatedAt: formatted.updatedAt || new Date().toISOString(),
+    zoneId: targetZoneId,
+    programId: formatted.programId || null,
+  };
 
-  // Broadcast scoped to the song's zone and church
-  broadcast('songs', 'all', formatted, filter);
-  broadcast('song', 'all', formatted, filter);
+  // Notify zone/church subscribers that the song list has changed
+  broadcast('songs_changed', 'all', changeEvent, filter);
+
+  // Keep single-song subscriptions for the PlayerScreen (it subscribes to a specific songId)
+  // but send only the change event, not the full payload
+  broadcast('song', songId, changeEvent);
+
+  // Program-scoped change notification
   if (formatted.programId) {
-    broadcast('song', String(formatted.programId), formatted, filter);
-    broadcast('songs', String(formatted.programId), formatted, filter);
+    broadcast('songs_changed', String(formatted.programId), changeEvent, filter);
   }
   if (formatted.praiseNightId && String(formatted.praiseNightId) !== String(formatted.programId)) {
-    broadcast('song', String(formatted.praiseNightId), formatted, filter);
-    broadcast('songs', String(formatted.praiseNightId), formatted, filter);
+    broadcast('songs_changed', String(formatted.praiseNightId), changeEvent, filter);
   }
+
+  // live_song stays FULL payload â€” drives the real-time song display (do not change)
   const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
   broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false }, filter);
 }
@@ -123,8 +137,8 @@ function shapeSong(song: any) {
   if (!resolvedLeadSinger) resolvedLeadSinger = 'Loveworld Singers';
 
   const historySummary = programName
-    ? `**Ministered at ${programName}**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Conductor:** ${resolvedConductorPerson || '—'}\n- **Key:** ${song.key || '—'} · **Tempo:** ${song.tempo || '—'}\n- **Rehearsal Count:** x${song.rehearsalCount || 0}`
-    : (song.createdAt ? `**Catalog Entry**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Key:** ${song.key || '—'}` : '');
+    ? `**Ministered at ${programName}**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Conductor:** ${resolvedConductorPerson || 'â€”'}\n- **Key:** ${song.key || 'â€”'} Â· **Tempo:** ${song.tempo || 'â€”'}\n- **Rehearsal Count:** x${song.rehearsalCount || 0}`
+    : (song.createdAt ? `**Catalog Entry**\n\n- **Lead Singer:** ${resolvedLeadSinger}\n- **Key:** ${song.key || 'â€”'}` : '');
 
   return {
     id: song.id,
@@ -231,9 +245,9 @@ function shapeSong(song: any) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 1. MASTER SONGS ENDPOINTS
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getMinisteredSongsHandler = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -322,8 +336,8 @@ function extractChatSnippet(fullText: string, targetQuery: string, targetWords: 
 
   idx = lower.indexOf(targetQuery.toLowerCase());
   if (idx === -1) {
-    const noPunctFull = fullText.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').replace(/\s+/g, ' ');
-    const qClean = targetQuery.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').replace(/\s+/g, ' ');
+    const noPunctFull = fullText.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'â€™]/g, ' ').replace(/\s+/g, ' ');
+    const qClean = targetQuery.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'â€™]/g, ' ').replace(/\s+/g, ' ');
     const pIdx = noPunctFull.indexOf(qClean);
     if (pIdx !== -1) {
       idx = Math.min(pIdx, fullText.length - 1);
@@ -362,7 +376,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
     const limitParam = req.query.limit ? parseInt(req.query.limit as string) : 100;
     const limit = Math.min(300, Math.max(1, isNaN(limitParam) ? 100 : limitParam));
     const cleanQ = rawQ.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
-    const queryWords = cleanQ.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, ' ').split(/\s+/).filter(w => w.length > 0);
+    const queryWords = cleanQ.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'â€™]/g, ' ').split(/\s+/).filter(w => w.length > 0);
 
     const orConditions: any[] = [
       { title: { contains: cleanQ, mode: 'insensitive' } },
@@ -400,7 +414,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
     const requestedZoneId = String(req.query.zoneId || req.query.zone_id || '').trim();
     const effectiveZoneId = (req.tenant?.effectiveZoneId || auth.zoneId || requestedZoneId || '').trim();
 
-    // ── 1. Assigned Zone & Master/Ministered isolation (NEVER search all zones!) ──
+    // â”€â”€ 1. Assigned Zone & Master/Ministered isolation (NEVER search all zones!) â”€â”€
     const andConditions: any[] = [{ OR: orConditions }];
 
     if (effectiveZoneId) {
@@ -410,7 +424,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
           { isMinistered: true },
           { organizationId: null },
           { organizationId: effectiveZoneId },
-          // ← KEY FIX: songs linked to programs in this zone (praise night songs,
+          // â† KEY FIX: songs linked to programs in this zone (praise night songs,
           //   service songs, etc.) that don't have organizationId set directly
           {
             programSongs: {
@@ -433,7 +447,7 @@ const universalSearchHandler = async (req: Request, res: Response) => {
       });
     }
 
-    // ── 2. Role-based Archive Filtering ─────────────────────────────────────
+    // â”€â”€ 2. Role-based Archive Filtering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // For regular users (non-HQ Admin, non-President): strictly exclude Archive songs and programs
     if (!isHQOrPresident) {
       andConditions.push({
@@ -602,9 +616,9 @@ router.post('/import-from-ministered', requireAuth, async (req: Request, res: Re
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 2. MAIN REPERTOIRE & PROGRAM SONGS
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getSongsHandler = async (req: Request, res: Response) => {
   try {
     const { praiseNightId, programId, zoneId, subGroupId, churchId, status } = req.query as Record<string, string>;
@@ -614,7 +628,7 @@ const getSongsHandler = async (req: Request, res: Response) => {
     let songs: any[] = [];
 
     if (targetProgramId) {
-      // ── Path A: songs linked via programSongs junction table (canonical) ──────
+      // â”€â”€ Path A: songs linked via programSongs junction table (canonical) â”€â”€â”€â”€â”€â”€
       const program = await prisma.program.findUnique({
         where: { id: targetProgramId },
         include: {
@@ -642,7 +656,7 @@ const getSongsHandler = async (req: Request, res: Response) => {
           }));
       }
 
-      // ── Path B: legacy songs that store programId as a direct column ──────────
+      // â”€â”€ Path B: legacy songs that store programId as a direct column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Some songs were added before the junction table existed; include them too.
       if (songs.length === 0) {
         const legacySongs = await prisma.song.findMany({
@@ -694,14 +708,37 @@ const getSongsHandler = async (req: Request, res: Response) => {
 
       songs = await prisma.song.findMany({
         where,
-        include: {
+        select: {
+          id: true, title: true, key: true, tempo: true,
+          writer: true, leadSinger: true, conductor: true,
+          drummer: true, leadKeyboardist: true, leadGuitarist: true, bassGuitarist: true,
+          audioFile: true, audioUrls: true,
+          category: true, status: true, isMaster: true, isMinistered: true,
+          isActive: true, rehearsalCount: true,
+          organizationId: true, groupId: true,
+          createdAt: true, updatedAt: true,
           roleAssignments: { include: { user: true } },
         },
         orderBy: { title: 'asc' },
+        // No take limit — zone-001 has 2976 songs, app does not paginate
       });
     }
 
     const formatted = songs.map(formatSong);
+
+    // ETag: hash of (zoneId + max updatedAt) so we only send data when something changed.
+    // Refetching clients that hit 304 get 0 bytes instead of the full list.
+    const maxUpdatedAt = songs.reduce((max: any, s: any) => {
+      const t = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
+      return t > max ? t : max;
+    }, 0);
+    const etag = `"${targetOrgId || 'all'}-${songs.length}-${maxUpdatedAt}"`;
+    const clientEtag = req.headers['if-none-match'];
+    if (clientEtag && clientEtag === etag) {
+      return res.status(304).end();
+    }
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, max-age=300'); // 5 min client cache
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     console.error('[songs:GET]', err);
@@ -714,11 +751,11 @@ router.get('/praise-night', requireAuth, getSongsHandler);
 router.get('/zone', requireAuth, getSongsHandler);
 router.get('/zone-songs', requireAuth, getSongsHandler);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LIVE SONGS — precise single-query endpoint, no scanning
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// LIVE SONGS â€” precise single-query endpoint, no scanning
 // GET /songs/active?zoneId=xxx
 // Returns ONLY songs with status='live' scoped to the caller's zone.
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/active', requireAuth, async (req: Request, res: Response) => {
   try {
     const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
@@ -733,7 +770,15 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
           { organizationId: null },
         ],
       },
-      include: {
+      select: {
+        id: true, title: true, key: true, tempo: true,
+        writer: true, leadSinger: true, conductor: true,
+        drummer: true, leadKeyboardist: true, leadGuitarist: true, bassGuitarist: true,
+        audioFile: true, audioUrls: true,
+        category: true, status: true, isMaster: true, isMinistered: true,
+        isActive: true, rehearsalCount: true,
+        organizationId: true, groupId: true,
+        createdAt: true, updatedAt: true,
         roleAssignments: { include: { user: true } },
         programSongs: {
           include: { program: true },
@@ -754,9 +799,9 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 3. SONG HISTORY (Must be BEFORE /:id so Express does not capture /history as an ID!)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const getSongHistoryHandler = async (req: Request, res: Response) => {
   try {
     const songId = (req.params.id || req.query.songId || '') as string;
@@ -794,7 +839,7 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
 
     const formatted: any[] = deduplicatedHistory.map((h) => {
       // All columns are now properly populated by the backfill script.
-      // Read directly from structured columns — no rawData fallback.
+      // Read directly from structured columns â€” no rawData fallback.
       const resolvedType        = (h.type        || 'details').toLowerCase().trim();
       const resolvedNewValue    = h.newValue    || '';
       const resolvedOldValue    = h.oldValue    || '';
@@ -810,10 +855,10 @@ const getSongHistoryHandler = async (req: Request, res: Response) => {
             resolvedNotes = (parsed.notes || '').trim();
           }
         } catch {}
-      } else if (h.description && h.description.includes(' — ')) {
-        const parts = h.description.split(' — ');
+      } else if (h.description && h.description.includes(' â€” ')) {
+        const parts = h.description.split(' â€” ');
         resolvedTitle = parts[0].trim();
-        resolvedNotes = parts.slice(1).join(' — ').trim();
+        resolvedNotes = parts.slice(1).join(' â€” ').trim();
       }
 
       // Audio URL: newValue is the URL for audio-type entries
@@ -941,10 +986,10 @@ router.patch('/history/:id', requireAuth, async (req: Request, res: Response) =>
           currentNotes = parsed.notes || '';
         }
       } catch {}
-    } else if (existing.description && existing.description.includes(' — ')) {
-      const parts = existing.description.split(' — ');
+    } else if (existing.description && existing.description.includes(' â€” ')) {
+      const parts = existing.description.split(' â€” ');
       currentTitle = parts[0].trim();
-      currentNotes = parts.slice(1).join(' — ').trim();
+      currentNotes = parts.slice(1).join(' â€” ').trim();
     }
 
     const nextTitle = title !== undefined ? String(title).trim() : currentTitle;
@@ -1011,9 +1056,9 @@ router.delete('/history/:id', requireAuth, async (req: Request, res: Response) =
 });
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 3.5 IMPORT SONGS TO ALL MINISTERED (MASTER CATALOG)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.post('/import-to-master', requireAuth, async (req: Request, res: Response) => {
   try {
     const role = res.locals.auth?.role;
@@ -1116,9 +1161,9 @@ router.post('/import-to-master', requireAuth, async (req: Request, res: Response
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 4. SONG BY ID
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const song = await prisma.song.findUnique({
@@ -1142,9 +1187,9 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 4. CREATE SONG
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
@@ -1231,9 +1276,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 5. UPDATE SONG
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const songId = req.params.id;
@@ -1630,9 +1675,9 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 6. DELETE SONG
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const songId = req.params.id;
@@ -1649,9 +1694,9 @@ router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res:
 
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // 8. PERSONAL NOTES & DOODLE ANNOTATIONS
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/notes/:songId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { songId } = req.params;
@@ -1780,3 +1825,6 @@ router.patch('/annotations/:songId', requireAuth, async (req: Request, res: Resp
 });
 
 export default router;
+
+
+
