@@ -635,7 +635,18 @@ const getSongsHandler = async (req: Request, res: Response) => {
           programSongs: {
             include: {
               song: {
-                include: {
+                select: {
+                  id: true, title: true, key: true, tempo: true,
+                  writer: true, leadSinger: true, conductor: true,
+                  drummer: true, leadKeyboardist: true, leadGuitarist: true, bassGuitarist: true,
+                  audioFile: true, audioUrls: true,
+                  category: true, status: true, isMaster: true, isMinistered: true,
+                  isActive: true, rehearsalCount: true,
+                  organizationId: true, groupId: true,
+                  notes: true, comments: true,
+                  createdAt: true, updatedAt: true,
+                  // lyrics/solfas/conductorGuide intentionally excluded from list —
+                  // fetched individually when user opens a song in PlayerScreen
                   roleAssignments: { include: { user: true } },
                 },
               },
@@ -661,7 +672,18 @@ const getSongsHandler = async (req: Request, res: Response) => {
       if (songs.length === 0) {
         const legacySongs = await prisma.song.findMany({
           where: { programId: targetProgramId } as any,
-          include: { roleAssignments: { include: { user: true } } },
+          select: {
+            id: true, title: true, key: true, tempo: true,
+            writer: true, leadSinger: true, conductor: true,
+            drummer: true, leadKeyboardist: true, leadGuitarist: true, bassGuitarist: true,
+            audioFile: true, audioUrls: true,
+            category: true, status: true, isMaster: true, isMinistered: true,
+            isActive: true, rehearsalCount: true,
+            organizationId: true, groupId: true,
+            notes: true, comments: true,
+            createdAt: true, updatedAt: true,
+            roleAssignments: { include: { user: true } },
+          },
           orderBy: { createdAt: 'asc' },
         }).catch(() => [] as any[]);
 
@@ -678,7 +700,18 @@ const getSongsHandler = async (req: Request, res: Response) => {
         const junctionIds = new Set(songs.map((s: any) => s.id));
         const legacySongs = await prisma.song.findMany({
           where: { programId: targetProgramId } as any,
-          include: { roleAssignments: { include: { user: true } } },
+          select: {
+            id: true, title: true, key: true, tempo: true,
+            writer: true, leadSinger: true, conductor: true,
+            drummer: true, leadKeyboardist: true, leadGuitarist: true, bassGuitarist: true,
+            audioFile: true, audioUrls: true,
+            category: true, status: true, isMaster: true, isMinistered: true,
+            isActive: true, rehearsalCount: true,
+            organizationId: true, groupId: true,
+            notes: true, comments: true,
+            createdAt: true, updatedAt: true,
+            roleAssignments: { include: { user: true } },
+          },
           orderBy: { createdAt: 'asc' },
         }).catch(() => [] as any[]);
 
