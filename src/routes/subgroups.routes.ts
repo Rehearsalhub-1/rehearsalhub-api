@@ -790,11 +790,11 @@ router.patch('/praise-nights/:id', requireAuth, requireTenantAdmin, async (req: 
   }
 });
 
-/** GET /subgroups/songs — List subgroup songs */
-router.get('/songs', requireAuth, async (req: Request, res: Response) => {
+/** GET /subgroups/songs & /subgroups/:subgroupId/songs — List subgroup songs */
+router.get(['/songs', '/:subgroupId/songs'], requireAuth, async (req: Request, res: Response) => {
   try {
     const { subGroupId, groupId } = req.query as Record<string, string>;
-    const targetGroupId = subGroupId || groupId;
+    const targetGroupId = (req.params as any).subgroupId || subGroupId || groupId;
 
     const where: any = {};
     if (targetGroupId) {
