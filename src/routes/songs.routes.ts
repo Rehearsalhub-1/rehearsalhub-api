@@ -1,4 +1,4 @@
-﻿import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, optionalAuth } from '../auth/auth.middleware';
 import { canAccessAdmin } from '../auth/permissions';
@@ -53,35 +53,54 @@ function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
   const targetChurchId = formatted.groupId || formatted.subGroupId || null;
   const filter = (targetZoneId || targetChurchId) ? { targetZoneId, targetChurchId } : undefined;
 
-  // â”€â”€ Lightweight "songs_changed" notification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Clients receive a small signal and re-fetch from their own cache/API.
-  // Full song payloads are NOT sent here â€” that was the main source of WS egress.
-  // Only the minimum fields needed for the client to decide whether to refetch.
+  // Lightweight change event — contains metadata needed to update song rows in place quietly,
+  // while omitting heavy fields (lyrics, notation, stems) to keep WS egress minimal.
   const changeEvent = {
     id: songId,
+    _id: songId,
     status: formatted.status,
     isActive: formatted.isActive,
     updatedAt: formatted.updatedAt || new Date().toISOString(),
     zoneId: targetZoneId,
     programId: formatted.programId || null,
+    praiseNightId: formatted.praiseNightId || null,
+    title: formatted.title,
+    leadSinger: formatted.leadSinger,
+    writer: formatted.writer,
+    conductor: formatted.conductor,
+    key: formatted.key,
+    tempo: formatted.tempo,
+    category: formatted.category,
+    categories: formatted.categories,
+    comments: formatted.comments,
+    notes: formatted.notes,
+    coordinatorComment: formatted.coordinatorComment,
+    history: formatted.history,
+    leadKeyboardist: formatted.leadKeyboardist,
+    drummer: formatted.drummer,
+    leadGuitarist: formatted.leadGuitarist,
+    rehearsalCount: formatted.rehearsalCount,
   };
+
+  // Broadcast lightweight update to song subscribers so apps can update in place quietly
+  broadcast('song', 'all', changeEvent, filter);
+  broadcast('songs', 'all', changeEvent, filter);
+  broadcast('song', songId, changeEvent);
 
   // Notify zone/church subscribers that the song list has changed
   broadcast('songs_changed', 'all', changeEvent, filter);
 
-  // Keep single-song subscriptions for the PlayerScreen (it subscribes to a specific songId)
-  // but send only the change event, not the full payload
-  broadcast('song', songId, changeEvent);
-
   // Program-scoped change notification
   if (formatted.programId) {
+    broadcast('song', String(formatted.programId), changeEvent, filter);
     broadcast('songs_changed', String(formatted.programId), changeEvent, filter);
   }
   if (formatted.praiseNightId && String(formatted.praiseNightId) !== String(formatted.programId)) {
+    broadcast('song', String(formatted.praiseNightId), changeEvent, filter);
     broadcast('songs_changed', String(formatted.praiseNightId), changeEvent, filter);
   }
 
-  // live_song stays FULL payload â€” drives the real-time song display (do not change)
+  // live_song stays FULL payload — drives the real-time song display (do not change)
   const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
   broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false }, filter);
 }
@@ -1646,49 +1665,58 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 
     const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
 
-    const wasLive = existing.status === 'live' || existing.isActive === true;
-    const explicitTurnOff = body.status && ['inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase());
+    const wasLive = existing.status === 'live' && existing.isActive !== false;
     const explicitLiveFalse = (body.isActive === false || body.isLive === false);
+    const explicitlyGoingLive = (body.status === 'live' || body.isLive === true || body.isActive === true);
 
-    // 1. Explicit Heard/Unheard toggle
-    if (body.isHeard !== undefined) {
-      const isHeard = Boolean(body.isHeard);
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
-        data.status = 'live';
-        data.isActive = true;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
-      } else {
-        data.status = isHeard ? 'heard' : 'unheard';
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+    // 1. Live toggle (explicit turning on or off from the LIVE button)
+    if (explicitLiveFalse) {
+      data.isActive = false;
+      const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
+      data.status = restoredStatus;
+      if (body.isHeard !== undefined) {
+        data.status = body.isHeard ? 'heard' : 'unheard';
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: data.status, _isHeard: Boolean(body.isHeard) };
       }
-    } else if (body.status !== undefined && body.status !== 'live') {
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
-        data.status = 'live';
-        data.isActive = true;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+    } else if (explicitlyGoingLive) {
+      data.isActive = true;
+      data.status = 'live';
+      const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
+      data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+    } else if (body.isHeard !== undefined) {
+      const isHeard = Boolean(body.isHeard);
+      data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
+      if (!wasLive) {
+        data.status = isHeard ? 'heard' : 'unheard';
+        data.isActive = false;
+      }
+    } else if (body.status !== undefined) {
+      const s = String(body.status).toLowerCase().trim();
+      if (['inactive', 'off', 'ended', 'stopped'].includes(s)) {
+        data.isActive = false;
+        data.status = (data.audioUrls || currentAudioUrls)._preLiveStatus || 'unheard';
+      } else if (!wasLive) {
+        data.status = s;
+        data.isActive = false;
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: s, _isHeard: s === 'heard' };
       } else {
-        data.status = body.status;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: s, _isHeard: s === 'heard' };
       }
     }
 
-    // 2. Live toggle (isActive / isLive) - NEVER force heard/unheard!
-    if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
-      data.isActive = true;
-      data.status = 'live';
-    } else if (body.isActive !== undefined || body.isLive !== undefined || body.status === 'live') {
-      const nextLive = body.status === 'live' || Boolean(body.isActive ?? body.isLive);
-      data.isActive = nextLive;
-      if (nextLive) {
-        // Going LIVE: preserve current heard/unheard status in _preLiveStatus
-        const preLiveStatus = (existing.status !== 'live') ? existing.status : (currentAudioUrls._preLiveStatus || 'unheard');
-        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
-        data.status = 'live';
-      } else {
-        // Stopping LIVE: restore previous heard/unheard status. NEVER force 'heard'!
-        const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
-        data.status = restoredStatus;
-      }
+    // If this song is going live, turn off any other live songs in the same organization
+    if (data.status === 'live' && data.isActive === true && existing.organizationId) {
+      await prisma.song.updateMany({
+        where: {
+          id: { not: songId },
+          status: 'live',
+          organizationId: existing.organizationId,
+        },
+        data: {
+          status: 'heard',
+          isActive: false,
+        },
+      });
     }
 
     const updated = await prisma.song.update({
