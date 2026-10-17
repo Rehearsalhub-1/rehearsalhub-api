@@ -1632,34 +1632,42 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 
     const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
 
-    // 1. Explicit Heard/Unheard status change
-    if (body.isHeard !== undefined) {
-      const isHeard = Boolean(body.isHeard);
-      data.status = isHeard ? 'heard' : 'unheard';
+    const wasLive = existing.status === 'live' && existing.isActive !== false;
+    const explicitLiveFalse = (body.isActive === false || body.isLive === false);
+    const explicitlyGoingLive = (body.status === 'live' || body.isLive === true || body.isActive === true);
+
+    // 1. Live toggle (explicit turning on or off from the LIVE button)
+    if (explicitLiveFalse) {
       data.isActive = false;
-      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+      const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
+      data.status = restoredStatus;
+      if (body.isHeard !== undefined) {
+        data.status = body.isHeard ? 'heard' : 'unheard';
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: data.status, _isHeard: Boolean(body.isHeard) };
+      }
+    } else if (explicitlyGoingLive) {
+      data.isActive = true;
+      data.status = 'live';
+      const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
+      data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+    } else if (body.isHeard !== undefined) {
+      const isHeard = Boolean(body.isHeard);
+      data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
+      if (!wasLive) {
+        data.status = isHeard ? 'heard' : 'unheard';
+        data.isActive = false;
+      }
     } else if (body.status !== undefined) {
       const s = String(body.status).toLowerCase().trim();
-      if (s === 'live') {
-        data.status = 'live';
-        data.isActive = true;
-        const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
-      } else {
+      if (['inactive', 'off', 'ended', 'stopped'].includes(s)) {
+        data.isActive = false;
+        data.status = (data.audioUrls || currentAudioUrls)._preLiveStatus || 'unheard';
+      } else if (!wasLive) {
         data.status = s;
         data.isActive = false;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: s, _isHeard: s === 'heard' };
-      }
-    } else if (body.isActive !== undefined || body.isLive !== undefined) {
-      const nextLive = Boolean(body.isActive ?? body.isLive);
-      data.isActive = nextLive;
-      if (nextLive) {
-        data.status = 'live';
-        const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
-        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: s, _isHeard: s === 'heard' };
       } else {
-        const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
-        data.status = restoredStatus;
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: s, _isHeard: s === 'heard' };
       }
     }
 
