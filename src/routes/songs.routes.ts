@@ -1,4 +1,4 @@
-﻿import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, optionalAuth } from '../auth/auth.middleware';
 import { canAccessAdmin } from '../auth/permissions';
@@ -53,35 +53,54 @@ function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
   const targetChurchId = formatted.groupId || formatted.subGroupId || null;
   const filter = (targetZoneId || targetChurchId) ? { targetZoneId, targetChurchId } : undefined;
 
-  // â”€â”€ Lightweight "songs_changed" notification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Clients receive a small signal and re-fetch from their own cache/API.
-  // Full song payloads are NOT sent here â€” that was the main source of WS egress.
-  // Only the minimum fields needed for the client to decide whether to refetch.
+  // Lightweight change event — contains metadata needed to update song rows in place quietly,
+  // while omitting heavy fields (lyrics, notation, stems) to keep WS egress minimal.
   const changeEvent = {
     id: songId,
+    _id: songId,
     status: formatted.status,
     isActive: formatted.isActive,
     updatedAt: formatted.updatedAt || new Date().toISOString(),
     zoneId: targetZoneId,
     programId: formatted.programId || null,
+    praiseNightId: formatted.praiseNightId || null,
+    title: formatted.title,
+    leadSinger: formatted.leadSinger,
+    writer: formatted.writer,
+    conductor: formatted.conductor,
+    key: formatted.key,
+    tempo: formatted.tempo,
+    category: formatted.category,
+    categories: formatted.categories,
+    comments: formatted.comments,
+    notes: formatted.notes,
+    coordinatorComment: formatted.coordinatorComment,
+    history: formatted.history,
+    leadKeyboardist: formatted.leadKeyboardist,
+    drummer: formatted.drummer,
+    leadGuitarist: formatted.leadGuitarist,
+    rehearsalCount: formatted.rehearsalCount,
   };
+
+  // Broadcast lightweight update to song subscribers so apps can update in place quietly
+  broadcast('song', 'all', changeEvent, filter);
+  broadcast('songs', 'all', changeEvent, filter);
+  broadcast('song', songId, changeEvent);
 
   // Notify zone/church subscribers that the song list has changed
   broadcast('songs_changed', 'all', changeEvent, filter);
 
-  // Keep single-song subscriptions for the PlayerScreen (it subscribes to a specific songId)
-  // but send only the change event, not the full payload
-  broadcast('song', songId, changeEvent);
-
   // Program-scoped change notification
   if (formatted.programId) {
+    broadcast('song', String(formatted.programId), changeEvent, filter);
     broadcast('songs_changed', String(formatted.programId), changeEvent, filter);
   }
   if (formatted.praiseNightId && String(formatted.praiseNightId) !== String(formatted.programId)) {
+    broadcast('song', String(formatted.praiseNightId), changeEvent, filter);
     broadcast('songs_changed', String(formatted.praiseNightId), changeEvent, filter);
   }
 
-  // live_song stays FULL payload â€” drives the real-time song display (do not change)
+  // live_song stays FULL payload — drives the real-time song display (do not change)
   const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
   broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false }, filter);
 }
