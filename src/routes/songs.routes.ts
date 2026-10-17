@@ -1632,49 +1632,50 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 
     const currentAudioUrls = (existing.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
 
-    const wasLive = existing.status === 'live' || existing.isActive === true;
-    const explicitTurnOff = body.status && ['inactive', 'off', 'ended', 'stopped'].includes(String(body.status).toLowerCase());
-    const explicitLiveFalse = (body.isActive === false || body.isLive === false);
-
-    // 1. Explicit Heard/Unheard toggle
+    // 1. Explicit Heard/Unheard status change
     if (body.isHeard !== undefined) {
       const isHeard = Boolean(body.isHeard);
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
+      data.status = isHeard ? 'heard' : 'unheard';
+      data.isActive = false;
+      data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+    } else if (body.status !== undefined) {
+      const s = String(body.status).toLowerCase().trim();
+      if (s === 'live') {
         data.status = 'live';
         data.isActive = true;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
+        const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
       } else {
-        data.status = isHeard ? 'heard' : 'unheard';
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: data.status, _isHeard: isHeard };
+        data.status = s;
+        data.isActive = false;
+        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: s, _isHeard: s === 'heard' };
       }
-    } else if (body.status !== undefined && body.status !== 'live') {
-      if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
-        data.status = 'live';
-        data.isActive = true;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
-      } else {
-        data.status = body.status;
-        data.audioUrls = { ...currentAudioUrls, _preLiveStatus: body.status, _isHeard: body.status === 'heard' };
-      }
-    }
-
-    // 2. Live toggle (isActive / isLive) - NEVER force heard/unheard!
-    if (wasLive && !explicitTurnOff && !explicitLiveFalse) {
-      data.isActive = true;
-      data.status = 'live';
-    } else if (body.isActive !== undefined || body.isLive !== undefined || body.status === 'live') {
-      const nextLive = body.status === 'live' || Boolean(body.isActive ?? body.isLive);
+    } else if (body.isActive !== undefined || body.isLive !== undefined) {
+      const nextLive = Boolean(body.isActive ?? body.isLive);
       data.isActive = nextLive;
       if (nextLive) {
-        // Going LIVE: preserve current heard/unheard status in _preLiveStatus
-        const preLiveStatus = (existing.status !== 'live') ? existing.status : (currentAudioUrls._preLiveStatus || 'unheard');
-        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
         data.status = 'live';
+        const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
       } else {
-        // Stopping LIVE: restore previous heard/unheard status. NEVER force 'heard'!
         const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
         data.status = restoredStatus;
       }
+    }
+
+    // If this song is going live, turn off any other live songs in the same organization
+    if (data.status === 'live' && data.isActive === true && existing.organizationId) {
+      await prisma.song.updateMany({
+        where: {
+          id: { not: songId },
+          status: 'live',
+          organizationId: existing.organizationId,
+        },
+        data: {
+          status: 'heard',
+          isActive: false,
+        },
+      });
     }
 
     const updated = await prisma.song.update({
