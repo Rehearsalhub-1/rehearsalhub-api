@@ -853,8 +853,8 @@ router.post('/songs/import', requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-/** GET /subgroups/praise-nights — List subgroup rehearsals/programs */
-router.get('/praise-nights', requireAuth, async (req: Request, res: Response) => {
+/** GET /subgroups/praise-nights & /subgroups/member-rehearsals — List subgroup rehearsals/programs */
+router.get(['/praise-nights', '/member-rehearsals'], requireAuth, async (req: Request, res: Response) => {
   try {
     const { subGroupId, groupId } = req.query as Record<string, string>;
     const targetGroupId = subGroupId || groupId;
