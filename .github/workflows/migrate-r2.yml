@@ -28,12 +28,12 @@ jobs:
 
       - name: Run Cloud-to-Cloud Migration
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://postgres.iibsizcsglzokdhsfyei:Music123%23%2446hub@aws-0-eu-west-1.pooler.supabase.com:6543/postgres' }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || 'b2e5411830e116cf4ce6e91e90843db0' }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME || 'rehearsalhub-media' }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || '53609880149dce49393f0d762b8b4baf' }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || 'dfec6c0153c47aa9c036d9e8bbbe2739ec738352f55afa2f8fd70df95f67ae90' }}
-          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL || 'https://pub-cb7697578fcc48d3b3aeb70a47eb2f65.r2.dev' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
         run: |
           node scripts/scan-all-media.js
           if [ -n "${{ github.event.inputs.limit }}" ]; then

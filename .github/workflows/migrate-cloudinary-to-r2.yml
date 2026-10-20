@@ -44,9 +44,9 @@ jobs:
           R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
           API_BASE_URL:           ${{ secrets.API_BASE_URL }}
           R2_PUBLIC_URL:          ${{ secrets.R2_PUBLIC_URL }}
-          CLOUDINARY_CLOUD_NAME:  ${{ secrets.CLOUDINARY_CLOUD_NAME || 'dvtjjt3js' }}
-          CLOUDINARY_API_KEY:     ${{ secrets.CLOUDINARY_API_KEY || '696485534226686' }}
-          CLOUDINARY_API_SECRET:  ${{ secrets.CLOUDINARY_API_SECRET || 'rBWR9HSNegYoEQ5lLzrMqGOv0zk' }}
+          CLOUDINARY_CLOUD_NAME:  ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY:     ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET:  ${{ secrets.CLOUDINARY_API_SECRET }}
           DRY_RUN:                ${{ inputs.dry_run }}
 
       - name: Upload migration results

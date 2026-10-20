@@ -48,10 +48,19 @@ function formatSong(song: any) {
   return shapeSong(song);
 }
 
-function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
-  const targetZoneId = formatted.organizationId || formatted.zoneId || null;
-  const targetChurchId = formatted.groupId || formatted.subGroupId || null;
-  const filter = (targetZoneId || targetChurchId) ? { targetZoneId, targetChurchId } : undefined;
+function broadcastSongUpdate(
+  songId: string,
+  formatted: any,
+  isLive?: boolean,
+  contextZoneId?: string | null,
+  contextChurchId?: string | null
+) {
+  const targetZoneId = formatted.organizationId || formatted.zoneId || contextZoneId || null;
+  const targetChurchId = formatted.groupId || formatted.subGroupId || contextChurchId || null;
+  // If a song is going live or is live, ensure it has a targetZoneId.
+  // Unless it is explicitly marked scope: 'global', default to 'zone-001' so it never broadcasts unfiltered to all zones!
+  const effectiveFilterZoneId = targetZoneId || (formatted.scope === 'global' ? null : 'zone-001');
+  const filter = (effectiveFilterZoneId || targetChurchId) ? { targetZoneId: effectiveFilterZoneId, targetChurchId } : undefined;
 
   // Lightweight change event — contains metadata needed to update song rows in place quietly,
   // while omitting heavy fields (lyrics, notation, stems) to keep WS egress minimal.
@@ -61,7 +70,7 @@ function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
     status: formatted.status,
     isActive: formatted.isActive,
     updatedAt: formatted.updatedAt || new Date().toISOString(),
-    zoneId: targetZoneId,
+    zoneId: effectiveFilterZoneId,
     programId: formatted.programId || null,
     praiseNightId: formatted.praiseNightId || null,
     title: formatted.title,
@@ -102,7 +111,10 @@ function broadcastSongUpdate(songId: string, formatted: any, isLive?: boolean) {
 
   // live_song stays FULL payload — drives the real-time song display (do not change)
   const isNowLive = isLive !== undefined ? isLive : (formatted.status === 'live' && formatted.isActive);
-  broadcast('live_song', 'all', isNowLive ? formatted : { id: songId, status: formatted.status, isActive: false }, filter);
+  const livePayload = isNowLive
+    ? { ...formatted, organizationId: effectiveFilterZoneId, zoneId: effectiveFilterZoneId }
+    : { id: songId, status: formatted.status, isActive: false, organizationId: effectiveFilterZoneId, zoneId: effectiveFilterZoneId };
+  broadcast('live_song', 'all', livePayload, filter);
 }
 function isConductorGuideText(text: string | null | undefined): boolean {
   if (!text) return false;
@@ -221,8 +233,10 @@ function shapeSong(song: any) {
     isHqOnly: Boolean(song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly || (song as any).isHQOnly || (song as any).isHqOnly),
     scope: (song.status === 'hq_only' || (song.audioUrls as any)?._isHQOnly) ? 'hq' : 'global',
     rehearsalCount: Math.max(0, parseInt((song.rehearsalCount ?? (song as any).rehearsal_count) as any, 10) || 0),
-    organizationId: song.organizationId || null,
-    groupId: song.groupId || null,
+    organizationId: song.organizationId || primaryProgram?.organizationId || (song.audioUrls as any)?._liveZoneId || null,
+    zoneId: song.organizationId || primaryProgram?.organizationId || (song.audioUrls as any)?._liveZoneId || null,
+    groupId: song.groupId || primaryProgram?.groupId || (song.audioUrls as any)?._liveGroupId || null,
+    subGroupId: song.groupId || primaryProgram?.groupId || (song.audioUrls as any)?._liveGroupId || null,
     isActive: Boolean(song.status === 'live' && song.isActive !== false),
     isLive: Boolean(song.status === 'live' && song.isActive !== false),
     ...(() => {
@@ -817,9 +831,18 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
         status: 'live',
         isActive: true,
         OR: [
-          { isMaster: true },
           { organizationId: targetOrgId },
-          { organizationId: null },
+          {
+            programSongs: {
+              some: {
+                program: {
+                  organizationId: targetOrgId,
+                  isArchived: false,
+                  status: { not: 'archived' },
+                },
+              },
+            },
+          },
         ],
       },
       select: {
@@ -839,7 +862,22 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
       orderBy: { updatedAt: 'desc' },
     });
 
-    const formatted = liveSongs.map(formatSong);
+    const filtered = liveSongs.filter((s) => {
+      const liveZone = (s.audioUrls as any)?._liveZoneId;
+      if (liveZone) {
+        return String(liveZone).trim().toLowerCase() === String(targetOrgId).trim().toLowerCase();
+      }
+      if (s.organizationId) {
+        return String(s.organizationId).trim().toLowerCase() === String(targetOrgId).trim().toLowerCase();
+      }
+      const hasMatchingProgram = s.programSongs?.some((ps) =>
+        ps.program?.organizationId?.trim().toLowerCase() === String(targetOrgId).trim().toLowerCase() &&
+        ps.program?.status !== 'archived'
+      );
+      return Boolean(hasMatchingProgram);
+    });
+
+    const formatted = filtered.map(formatSong);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -1521,8 +1559,27 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       }).catch(() => {});
     }
 
+    const effectiveZoneId =
+      body.zoneId ||
+      body.organizationId ||
+      req.tenant?.effectiveZoneId ||
+      (req.headers['x-zone-id'] as string) ||
+      updated.organizationId ||
+      updated.programSongs?.[0]?.program?.organizationId ||
+      null;
+
+    const effectiveChurchId =
+      body.groupId ||
+      body.subGroupId ||
+      body.churchId ||
+      req.tenant?.effectiveChurchId ||
+      (req.headers['x-church-id'] as string) ||
+      updated.groupId ||
+      updated.programSongs?.[0]?.program?.groupId ||
+      null;
+
     const formatted = formatSong(updated);
-    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false);
+    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false, effectiveZoneId, effectiveChurchId);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     console.error('[songs:PATCH]', err);
@@ -1534,21 +1591,120 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 const updateSongStatusHandler = async (req: Request, res: Response) => {
   try {
     const songId = req.params.id;
-    const { status } = req.body;
+    const body = req.body || {};
+    const { status } = body;
     const isGoingLive = status === 'live';
 
-    const existing = await prisma.song.findUnique({ where: { id: songId } });
+    const existing = await prisma.song.findUnique({
+      where: { id: songId },
+      include: {
+        programSongs: { include: { program: true } },
+      },
+    });
+    if (!existing) return res.status(404).json({ success: false, error: 'Song not found' });
+
+    const effectiveZoneId =
+      body.zoneId ||
+      body.organizationId ||
+      req.tenant?.effectiveZoneId ||
+      (req.headers['x-zone-id'] as string) ||
+      existing.organizationId ||
+      existing.programSongs?.[0]?.program?.organizationId ||
+      null;
+
+    const effectiveChurchId =
+      body.groupId ||
+      body.subGroupId ||
+      body.churchId ||
+      req.tenant?.effectiveChurchId ||
+      (req.headers['x-church-id'] as string) ||
+      existing.groupId ||
+      existing.programSongs?.[0]?.program?.groupId ||
+      null;
+
     const currentAudioUrls = (existing?.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
-    let patchAudioUrls = currentAudioUrls;
+    let patchAudioUrls = { ...currentAudioUrls };
     let newStatus = status || 'active';
 
     if (isGoingLive) {
       const preLiveStatus = (existing?.status !== 'live') ? (existing?.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
-      patchAudioUrls = { ...currentAudioUrls, _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+      patchAudioUrls = {
+        ...currentAudioUrls,
+        _preLiveStatus: preLiveStatus,
+        _isHeard: preLiveStatus === 'heard',
+        _liveZoneId: effectiveZoneId,
+        _liveGroupId: effectiveChurchId,
+      };
     } else if (status === 'heard' || status === 'unheard') {
-      patchAudioUrls = { ...currentAudioUrls, _preLiveStatus: status, _isHeard: status === 'heard' };
+      patchAudioUrls = {
+        ...currentAudioUrls,
+        _preLiveStatus: status,
+        _isHeard: status === 'heard',
+        _liveZoneId: null,
+        _liveGroupId: null,
+      };
     } else if (existing?.status === 'live') {
       newStatus = currentAudioUrls._preLiveStatus || 'unheard';
+      patchAudioUrls = {
+        ...currentAudioUrls,
+        _liveZoneId: null,
+        _liveGroupId: null,
+      };
+    }
+
+    // If this song is going live, turn off other live songs in the same zone
+    if (isGoingLive && effectiveZoneId) {
+      const otherLiveSongs = await prisma.song.findMany({
+        where: {
+          id: { not: songId },
+          status: 'live',
+          isActive: true,
+          OR: [
+            { organizationId: effectiveZoneId },
+            {
+              programSongs: {
+                some: {
+                  program: {
+                    organizationId: effectiveZoneId,
+                  },
+                },
+              },
+            },
+          ],
+        },
+        include: {
+          roleAssignments: { include: { user: true } },
+          programSongs: { include: { program: true } },
+        },
+      });
+
+      for (const prev of otherLiveSongs) {
+        const prevAudio = (prev.audioUrls && typeof prev.audioUrls === 'object') ? (prev.audioUrls as any) : {};
+        const prevLiveZone = prevAudio._liveZoneId || prev.organizationId;
+        if (prevLiveZone && String(prevLiveZone).trim().toLowerCase() !== String(effectiveZoneId).trim().toLowerCase()) {
+          continue;
+        }
+
+        const restoredStatus = prevAudio._preLiveStatus || 'heard';
+        const turnedOff = await prisma.song.update({
+          where: { id: prev.id },
+          data: {
+            status: restoredStatus,
+            isActive: false,
+            audioUrls: {
+              ...prevAudio,
+              _liveZoneId: null,
+              _liveGroupId: null,
+            },
+          },
+          include: {
+            roleAssignments: { include: { user: true } },
+            programSongs: { include: { program: true } },
+          },
+        });
+        const formattedTurnedOff = formatSong(turnedOff);
+        broadcastSongUpdate(prev.id, formattedTurnedOff, false, effectiveZoneId, effectiveChurchId);
+      }
     }
 
     const updated = await prisma.song.update({
@@ -1565,7 +1721,7 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
     });
 
     const formatted = formatSong(updated);
-    broadcastSongUpdate(songId, formatted, isGoingLive);
+    broadcastSongUpdate(songId, formatted, isGoingLive, effectiveZoneId, effectiveChurchId);
     broadcast('song_status', songId, { id: songId, status: updated.status });
     res.json({ success: true, message: 'Song status updated', data: formatted });
   } catch (err) {
@@ -1581,8 +1737,32 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     const songId = req.params.id;
     const body = req.body || {};
 
-    const existing = await prisma.song.findUnique({ where: { id: songId } });
+    const existing = await prisma.song.findUnique({
+      where: { id: songId },
+      include: {
+        programSongs: { include: { program: true } },
+      },
+    });
     if (!existing) return res.status(404).json({ success: false, error: 'Song not found' });
+
+    const effectiveZoneId =
+      body.zoneId ||
+      body.organizationId ||
+      req.tenant?.effectiveZoneId ||
+      (req.headers['x-zone-id'] as string) ||
+      existing.organizationId ||
+      existing.programSongs?.[0]?.program?.organizationId ||
+      null;
+
+    const effectiveChurchId =
+      body.groupId ||
+      body.subGroupId ||
+      body.churchId ||
+      req.tenant?.effectiveChurchId ||
+      (req.headers['x-church-id'] as string) ||
+      existing.groupId ||
+      existing.programSongs?.[0]?.program?.groupId ||
+      null;
 
     const data: Record<string, any> = {};
     if (body.title !== undefined) data.title = body.title;
@@ -1674,15 +1854,32 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.isActive = false;
       const restoredStatus = (data.audioUrls || currentAudioUrls)._preLiveStatus || (existing.status !== 'live' ? existing.status : 'unheard');
       data.status = restoredStatus;
+      data.audioUrls = {
+        ...(data.audioUrls || currentAudioUrls),
+        _liveZoneId: null,
+        _liveGroupId: null,
+      };
       if (body.isHeard !== undefined) {
         data.status = body.isHeard ? 'heard' : 'unheard';
-        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: data.status, _isHeard: Boolean(body.isHeard) };
+        data.audioUrls = {
+          ...(data.audioUrls || currentAudioUrls),
+          _preLiveStatus: data.status,
+          _isHeard: Boolean(body.isHeard),
+          _liveZoneId: null,
+          _liveGroupId: null,
+        };
       }
     } else if (explicitlyGoingLive) {
       data.isActive = true;
       data.status = 'live';
       const preLiveStatus = (existing.status !== 'live') ? (existing.status || 'unheard') : (currentAudioUrls._preLiveStatus || 'unheard');
-      data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: preLiveStatus, _isHeard: preLiveStatus === 'heard' };
+      data.audioUrls = {
+        ...(data.audioUrls || currentAudioUrls),
+        _preLiveStatus: preLiveStatus,
+        _isHeard: preLiveStatus === 'heard',
+        _liveZoneId: effectiveZoneId,
+        _liveGroupId: effectiveChurchId,
+      };
     } else if (body.isHeard !== undefined) {
       const isHeard = Boolean(body.isHeard);
       data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _preLiveStatus: isHeard ? 'heard' : 'unheard', _isHeard: isHeard };
@@ -1695,6 +1892,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       if (['inactive', 'off', 'ended', 'stopped'].includes(s)) {
         data.isActive = false;
         data.status = (data.audioUrls || currentAudioUrls)._preLiveStatus || 'unheard';
+        data.audioUrls = { ...(data.audioUrls || currentAudioUrls), _liveZoneId: null, _liveGroupId: null };
       } else if (!wasLive) {
         data.status = s;
         data.isActive = false;
@@ -1704,19 +1902,59 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       }
     }
 
-    // If this song is going live, turn off any other live songs in the same organization
-    if (data.status === 'live' && data.isActive === true && existing.organizationId) {
-      await prisma.song.updateMany({
+    // If this song is going live, turn off any other live songs in the same zone
+    if (data.status === 'live' && data.isActive === true && effectiveZoneId) {
+      const otherLiveSongs = await prisma.song.findMany({
         where: {
           id: { not: songId },
           status: 'live',
-          organizationId: existing.organizationId,
+          isActive: true,
+          OR: [
+            { organizationId: effectiveZoneId },
+            {
+              programSongs: {
+                some: {
+                  program: {
+                    organizationId: effectiveZoneId,
+                  },
+                },
+              },
+            },
+          ],
         },
-        data: {
-          status: 'heard',
-          isActive: false,
+        include: {
+          roleAssignments: { include: { user: true } },
+          programSongs: { include: { program: true } },
         },
       });
+
+      for (const prev of otherLiveSongs) {
+        const prevAudio = (prev.audioUrls && typeof prev.audioUrls === 'object') ? (prev.audioUrls as any) : {};
+        const prevLiveZone = prevAudio._liveZoneId || prev.organizationId;
+        if (prevLiveZone && String(prevLiveZone).trim().toLowerCase() !== String(effectiveZoneId).trim().toLowerCase()) {
+          continue;
+        }
+
+        const restoredStatus = prevAudio._preLiveStatus || 'heard';
+        const turnedOff = await prisma.song.update({
+          where: { id: prev.id },
+          data: {
+            status: restoredStatus,
+            isActive: false,
+            audioUrls: {
+              ...prevAudio,
+              _liveZoneId: null,
+              _liveGroupId: null,
+            },
+          },
+          include: {
+            roleAssignments: { include: { user: true } },
+            programSongs: { include: { program: true } },
+          },
+        });
+        const formattedTurnedOff = formatSong(turnedOff);
+        broadcastSongUpdate(prev.id, formattedTurnedOff, false, effectiveZoneId, effectiveChurchId);
+      }
     }
 
     const updated = await prisma.song.update({
@@ -1729,7 +1967,7 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
     });
 
     const formatted = formatSong(updated);
-    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false);
+    broadcastSongUpdate(songId, formatted, updated.status === 'live' && updated.isActive !== false, effectiveZoneId, effectiveChurchId);
     res.json({ success: true, message: 'Song updated', data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to update song' });

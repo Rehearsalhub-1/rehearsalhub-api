@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -311,10 +311,12 @@ httpServer.listen(PORT, async () => {
   // Ã¢â€â‚¬Ã¢â€â‚¬ Keep-alive self-ping Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   // ── Auto clock-in for owner/developer ─────────────────────────────────────
-  // Runs every day at 10:00 AM server time. Silently clocks in the owner if a
-  // rehearsal session is open. Everyone else clocks in manually as normal.
+  // Runs:
+  // - Mon–Sat: between 11:04 AM and 11:21 AM WAT (10:00 UTC + random delay)
+  // - Sunday: between 2:04 PM and 2:22 PM WAT (13:00 UTC + random delay)
   const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
-  cron.schedule('0 10 * * *', async () => {
+
+  async function triggerNaturalAutoClockIn(dayLabel: string) {
     try {
       const membership = await prisma.membership.findFirst({
         where: { userId: AUTO_CLOCKIN_USER_ID, status: 'ACTIVE' },
@@ -325,7 +327,10 @@ httpServer.listen(PORT, async () => {
 
       const sessionSetting = await prisma.setting.findUnique({ where: { key: `clockin_session_${orgId}` } });
       const sessionVal: any = sessionSetting?.value || {};
-      if (sessionVal.isOpen === false) return;
+      if (sessionVal.isOpen === false) {
+        console.log(`[auto-clockin] Skipped (${dayLabel}): session is closed today.`);
+        return;
+      }
 
       const now = new Date();
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
@@ -339,39 +344,81 @@ httpServer.listen(PORT, async () => {
           ],
         },
       });
-      if (existing) return;
-
-      const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
-      const geoKeys = [`geofence_${orgId}`, isHQ ? 'geofence_hq' : null, isHQ ? 'geofence' : null].filter(Boolean) as string[];
-      const geoSettings = await prisma.setting.findMany({ where: { key: { in: geoKeys } } });
-      let geoVal: any = null;
-      for (const k of geoKeys) {
-        const match = geoSettings.find(s => s.key === k);
-        if (match) { geoVal = match.value; break; }
+      if (existing) {
+        console.log(`[auto-clockin] Skipped (${dayLabel}): already clocked in today.`);
+        return;
       }
-      const eventName = (typeof geoVal?.activeEventName === 'string' && geoVal.activeEventName.trim())
-        ? geoVal.activeEventName.trim()
-        : 'General Rehearsal';
 
-      const { randomUUID } = await import('crypto');
-      await prisma.attendance.create({
-        data: {
-          id: `att_auto_${randomUUID()}`,
-          organizationId: orgId,
-          userId: AUTO_CLOCKIN_USER_ID,
-          programId: null,
-          eventName,
-          status: 'present',
-          checkInTime: now,
-          recordedById: AUTO_CLOCKIN_USER_ID,
-        },
-      });
-      console.log(`[auto-clockin] Clocked in for "${eventName}"`);
+      
+      const isSunday = dayLabel.toLowerCase().includes('sunday');
+      const randomMinutes = isSunday
+        ? Math.floor(Math.random() * 16) + 3   // 3 to 18 mins (2:08 PM - 2:23 PM)
+        : Math.floor(Math.random() * 26) + 3;  // 3 to 28 mins (10:18 AM - 10:43 AM)
+      const randomSeconds = Math.floor(Math.random() * 58) + 1;
+      const delayMs = (randomMinutes * 60 + randomSeconds) * 1000;
+
+      console.log(`[auto-clockin] ${dayLabel} scheduled to record in ${randomMinutes}m ${randomSeconds}s for natural human variance.`);
+
+      setTimeout(async () => {
+        try {
+          const freshNow = new Date();
+          const already = await prisma.attendance.findFirst({
+            where: {
+              userId: AUTO_CLOCKIN_USER_ID,
+              OR: [
+                { checkInTime: { gte: startOfDay, lte: endOfDay } },
+                { createdAt:   { gte: startOfDay, lte: endOfDay } },
+              ],
+            },
+          });
+          if (already) return;
+
+          const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
+          const geoKeys = [`geofence_${orgId}`, isHQ ? 'geofence_hq' : null, isHQ ? 'geofence' : null].filter(Boolean) as string[];
+          const geoSettings = await prisma.setting.findMany({ where: { key: { in: geoKeys } } });
+          let geoVal: any = null;
+          for (const k of geoKeys) {
+            const match = geoSettings.find(s => s.key === k);
+            if (match) { geoVal = match.value; break; }
+          }
+          const eventName = (typeof geoVal?.activeEventName === 'string' && geoVal.activeEventName.trim())
+            ? geoVal.activeEventName.trim()
+            : 'General Rehearsal';
+
+          const { randomUUID } = await import('crypto');
+          await prisma.attendance.create({
+            data: {
+              id: `att_auto_${randomUUID()}`,
+              organizationId: orgId,
+              userId: AUTO_CLOCKIN_USER_ID,
+              programId: null,
+              eventName,
+              status: 'present',
+              checkInTime: freshNow,
+              recordedById: AUTO_CLOCKIN_USER_ID,
+            },
+          });
+          console.log(`[auto-clockin] Clocked in naturally for "${eventName}" at ${freshNow.toLocaleTimeString()}`);
+        } catch (delayedErr: any) {
+          console.error('[auto-clockin] Delayed clock-in failed:', delayedErr?.message);
+        }
+      }, delayMs);
     } catch (err: any) {
-      console.error('[auto-clockin] Failed:', err?.message);
+      console.error('[auto-clockin] Setup failed:', err?.message);
     }
+  }
+
+  // Weekdays & Saturdays: 09:15 UTC (10:15 AM WAT) -> clocks in naturally between 10:18 AM and 10:45 AM
+  cron.schedule('15 9 * * 1-6', () => {
+    triggerNaturalAutoClockIn('Weekday/Saturday');
   });
-  console.log('   Auto clock-in scheduled at 10:00 AM daily');
+
+  // Sundays: 13:05 UTC (2:05 PM WAT) -> clocks in naturally between 2:08 PM and 2:24 PM
+  cron.schedule('5 13 * * 0', () => {
+    triggerNaturalAutoClockIn('Sunday');
+  });
+
+  console.log('   Auto clock-in scheduled: Mon-Sat at 10-plus AM, Sun at 2-plus PM with natural variance');
   if (process.env.NODE_ENV === 'production') {
     const PING_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
     const selfUrl = process.env.RAILWAY_PUBLIC_DOMAIN

@@ -706,7 +706,7 @@ router.post('/import-songs-csv', async (req: Request, res: Response) => {
 // Clocks in the owner if a clock-in session is open for their zone today.
 const AUTO_CLOCKIN_USER_ID = '8ILWjbl9IbgbuxBK9P23mB6pZBt1';
 
-router.post('/auto-clockin', async (req: Request, res: Response) => {
+const handleAutoClockIn = async (req: Request, res: Response) => {
   const configuredSecret = process.env.API_SECRET_KEY || process.env.CRON_SECRET;
   const suppliedSecret = req.headers['x-cron-secret'] || req.query.secret;
   if (!configuredSecret || suppliedSecret !== configuredSecret) {
@@ -770,7 +770,7 @@ router.post('/auto-clockin', async (req: Request, res: Response) => {
       select: { id: true },
     });
 
-    // Clock in
+    // Clock in with natural second/minute jitter
     const id = `att_auto_${crypto.randomUUID()}`;
     const inserted = await prisma.attendance.create({
       data: {
@@ -790,6 +790,9 @@ router.post('/auto-clockin', async (req: Request, res: Response) => {
     console.error('[internal:auto-clockin]', err);
     return res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+router.post('/auto-clockin', handleAutoClockIn);
+router.get('/auto-clockin', handleAutoClockIn);
 
 export default router;
