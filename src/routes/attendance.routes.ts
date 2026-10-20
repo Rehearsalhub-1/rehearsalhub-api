@@ -73,7 +73,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       ];
     }
 
-    const takeLimit = Math.min(parseInt(limit as string, 10) || 5000, 20000);
+    const takeLimit = limit === 'all'
+      ? 100000
+      : Math.min(parseInt(limit as string, 10) || 50000, 100000);
 
     const rows = await prisma.attendance.findMany({
       where: whereClause,
@@ -95,11 +97,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 const handleGetMyAttendance = async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 1000, 5000);
     const rows = await prisma.attendance.findMany({
       where: { userId },
       include: { user: true },
       orderBy: { checkInTime: 'desc' },
-      take: 200,
+      take: limit,
     });
     res.json({ success: true, count: rows.length, data: rows.map(shapeAttendance) });
   } catch (err) {

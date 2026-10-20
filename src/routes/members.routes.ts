@@ -179,7 +179,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
     const isHqAdmin = auth.role === 'admin' || auth.role === 'hq_admin' || auth.role === 'super_admin';
-    const { scope, search, zoneId } = req.query as { scope?: string; search?: string; zoneId?: string };
+    const { scope, search, zoneId, limit } = req.query as { scope?: string; search?: string; zoneId?: string; limit?: string };
 
     let whereClause: any = {};
 
@@ -202,6 +202,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       ];
     }
 
+    const takeLimit = Math.min(parseInt(limit as string, 10) || 1000, 10000);
+
     const memberships = await prisma.membership.findMany({
       where: whereClause,
       include: {
@@ -209,7 +211,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         organization: true,
         group: true,
       },
-      take: 100,
+      take: takeLimit,
       orderBy: { joinedAt: 'desc' },
     });
 
