@@ -8,6 +8,9 @@ const router = Router();
 function shapeAttendance(row: any) {
   const user = row.user || {};
   const userName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Singer';
+  const checkInTime = row.checkInTime || row.scannedAt || row.createdAt;
+  const d = checkInTime ? new Date(checkInTime) : null;
+  const dateString = d ? d.toLocaleDateString('en-CA') : '';
   return {
     id: row.id,
     userId: row.userId,
@@ -18,7 +21,9 @@ function shapeAttendance(row: any) {
     status: row.status || 'present',
     organizationId: row.organizationId,
     zoneId: row.organizationId,
-    checkInTime: row.checkInTime || row.scannedAt || row.createdAt,
+    checkInTime,
+    dateString,
+    date_string: dateString,
     scannedAt: row.scannedAt || null,
     qrCode: row.qrCode || null,
     recordedById: row.recordedById || null,
@@ -29,7 +34,7 @@ function shapeAttendance(row: any) {
 /** GET /attendance — List attendance */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId, programId } = req.query as Record<string, string>;
+    const { zoneId, programId, limit, date, startDate, endDate, month } = req.query as Record<string, string>;
     const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || null;
     const isGlobal = req.tenant?.isHQAdmin && (req.tenant?.isGlobalView || !effectiveZoneId);
 
@@ -41,13 +46,42 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       whereClause.programId = programId;
     }
 
+    // Date filtering support
+    if (date) {
+      const dayStart = new Date(`${date}T00:00:00.000Z`);
+      const dayEnd = new Date(`${date}T23:59:59.999Z`);
+      // 14-hour buffer to handle all international timezone shifts
+      whereClause.OR = [
+        { checkInTime: { gte: new Date(dayStart.getTime() - 14 * 3600 * 1000), lte: new Date(dayEnd.getTime() + 14 * 3600 * 1000) } },
+        { createdAt: { gte: new Date(dayStart.getTime() - 14 * 3600 * 1000), lte: new Date(dayEnd.getTime() + 14 * 3600 * 1000) } },
+      ];
+    } else if (startDate || endDate) {
+      const s = startDate ? new Date(startDate) : new Date('2020-01-01');
+      const e = endDate ? new Date(endDate) : new Date('2099-12-31');
+      whereClause.OR = [
+        { checkInTime: { gte: s, lte: e } },
+        { createdAt: { gte: s, lte: e } },
+      ];
+    } else if (month) {
+      // e.g. "2026-10"
+      const [year, m] = month.split('-').map(Number);
+      const s = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0));
+      const e = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999));
+      whereClause.OR = [
+        { checkInTime: { gte: s, lte: e } },
+        { createdAt: { gte: s, lte: e } },
+      ];
+    }
+
+    const takeLimit = Math.min(parseInt(limit as string, 10) || 5000, 20000);
+
     const rows = await prisma.attendance.findMany({
       where: whereClause,
       include: {
         user: true,
       },
       orderBy: { checkInTime: 'desc' },
-      take: 200,
+      take: takeLimit,
     });
 
     res.json({ success: true, count: rows.length, data: rows.map(shapeAttendance) });
