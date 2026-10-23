@@ -1652,60 +1652,6 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
       };
     }
 
-    // If this song is going live, turn off other live songs in the same zone
-    if (isGoingLive && effectiveZoneId) {
-      const otherLiveSongs = await prisma.song.findMany({
-        where: {
-          id: { not: songId },
-          status: 'live',
-          isActive: true,
-          OR: [
-            { organizationId: effectiveZoneId },
-            {
-              programSongs: {
-                some: {
-                  program: {
-                    organizationId: effectiveZoneId,
-                  },
-                },
-              },
-            },
-          ],
-        },
-        include: {
-          roleAssignments: { include: { user: true } },
-          programSongs: { include: { program: true } },
-        },
-      });
-
-      for (const prev of otherLiveSongs) {
-        const prevAudio = (prev.audioUrls && typeof prev.audioUrls === 'object') ? (prev.audioUrls as any) : {};
-        const prevLiveZone = prevAudio._liveZoneId || prev.organizationId;
-        if (prevLiveZone && String(prevLiveZone).trim().toLowerCase() !== String(effectiveZoneId).trim().toLowerCase()) {
-          continue;
-        }
-
-        const restoredStatus = prevAudio._preLiveStatus || 'heard';
-        const turnedOff = await prisma.song.update({
-          where: { id: prev.id },
-          data: {
-            status: restoredStatus,
-            isActive: false,
-            audioUrls: {
-              ...prevAudio,
-              _liveZoneId: null,
-              _liveGroupId: null,
-            },
-          },
-          include: {
-            roleAssignments: { include: { user: true } },
-            programSongs: { include: { program: true } },
-          },
-        });
-        const formattedTurnedOff = formatSong(turnedOff);
-        broadcastSongUpdate(prev.id, formattedTurnedOff, false, effectiveZoneId, effectiveChurchId);
-      }
-    }
 
     const updated = await prisma.song.update({
       where: { id: songId },
@@ -1902,60 +1848,6 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       }
     }
 
-    // If this song is going live, turn off any other live songs in the same zone
-    if (data.status === 'live' && data.isActive === true && effectiveZoneId) {
-      const otherLiveSongs = await prisma.song.findMany({
-        where: {
-          id: { not: songId },
-          status: 'live',
-          isActive: true,
-          OR: [
-            { organizationId: effectiveZoneId },
-            {
-              programSongs: {
-                some: {
-                  program: {
-                    organizationId: effectiveZoneId,
-                  },
-                },
-              },
-            },
-          ],
-        },
-        include: {
-          roleAssignments: { include: { user: true } },
-          programSongs: { include: { program: true } },
-        },
-      });
-
-      for (const prev of otherLiveSongs) {
-        const prevAudio = (prev.audioUrls && typeof prev.audioUrls === 'object') ? (prev.audioUrls as any) : {};
-        const prevLiveZone = prevAudio._liveZoneId || prev.organizationId;
-        if (prevLiveZone && String(prevLiveZone).trim().toLowerCase() !== String(effectiveZoneId).trim().toLowerCase()) {
-          continue;
-        }
-
-        const restoredStatus = prevAudio._preLiveStatus || 'heard';
-        const turnedOff = await prisma.song.update({
-          where: { id: prev.id },
-          data: {
-            status: restoredStatus,
-            isActive: false,
-            audioUrls: {
-              ...prevAudio,
-              _liveZoneId: null,
-              _liveGroupId: null,
-            },
-          },
-          include: {
-            roleAssignments: { include: { user: true } },
-            programSongs: { include: { program: true } },
-          },
-        });
-        const formattedTurnedOff = formatSong(turnedOff);
-        broadcastSongUpdate(prev.id, formattedTurnedOff, false, effectiveZoneId, effectiveChurchId);
-      }
-    }
 
     const updated = await prisma.song.update({
       where: { id: songId },
