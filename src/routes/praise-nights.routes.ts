@@ -147,15 +147,32 @@ function shapeProgram(p: any) {
             audioFile: audioUrl,
             audioUrl: audioUrl,
             audioUrls: audioUrls,
-            category: s.category || 'Previously ministered praise songs',
+            // ── Category: use real data, no hardcoded fallback ──────────────
+            category: s.category || null,
+            categories: Array.isArray((s.audioUrls as any)?._categories) && (s.audioUrls as any)._categories.length > 0
+              ? (s.audioUrls as any)._categories
+              : (Array.isArray(s.categories) && s.categories.length > 0 ? s.categories : (s.category ? [s.category] : [])),
+            // ── Status / Live state ──────────────────────────────────────────
             status: s.status || 'unheard',
             isActive: Boolean(s.status === 'live' && s.isActive !== false),
             isLive: Boolean(s.status === 'live' && s.isActive !== false),
+            isHeard: Boolean(
+              s.status === 'heard' ||
+              (s.audioUrls as any)?._isHeard === true ||
+              (s.status === 'live' && (s.audioUrls as any)?._preLiveStatus === 'heard')
+            ),
+            heard: Boolean(
+              s.status === 'heard' ||
+              (s.audioUrls as any)?._isHeard === true ||
+              (s.status === 'live' && (s.audioUrls as any)?._preLiveStatus === 'heard')
+            ),
             isMaster: Boolean(s.isMaster || s.is_master),
             isMinistered: Boolean(s.isMinistered || s.is_ministered),
             rehearsalCount: resolvedRehearsalCount,
             organizationId: s.organizationId || s.organization_id || null,
+            zoneId: s.organizationId || s.organization_id || null,
             groupId: s.groupId || s.group_id || null,
+            subGroupId: s.groupId || s.group_id || null,
             imageUrl: resolvedImageUrl,
             customParts: s.customParts || s.custom_parts || null,
             comments: parsedCommentsList,
