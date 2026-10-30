@@ -414,6 +414,128 @@ const handleKingsChatLogin = async (req: any, res: any) => {
 router.post('/kingschat-login', handleKingsChatLogin);
 router.post('/kingschat', handleKingsChatLogin);
 
+// GET /auth/linked-accounts - Get all accounts linked to current user
+router.get('/linked-accounts', requireAuth, async (req, res) => {
+  try {
+    const userId = res.locals.auth?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { memberships: { include: { organization: true, group: true } } },
+    });
+
+    if (!currentUser) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
+    const matchingProfiles = await getKingschatProfiles(
+      currentUser.kingschatId,
+      currentUser.email,
+      null,
+      null,
+      currentUser.phone,
+    );
+
+    // Fetch meta settings for all matched profiles to accurately show church name and role
+    const accounts = await Promise.all(
+      matchingProfiles.map(async (p) => {
+        let churchName = (p.rawData as any)?.church || '';
+        let effectiveRole = p.role;
+
+        try {
+          const meta = await prisma.setting.findUnique({ where: { key: `profile_meta_${p.id}` } });
+          const metaVal: any = meta?.value || {};
+          if (metaVal.church) churchName = metaVal.church;
+          if (metaVal.role) effectiveRole = metaVal.role;
+        } catch {}
+
+        return {
+          id: p.id,
+          email: p.email,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          role: effectiveRole,
+          hasHqAccess: p.hasHqAccess,
+          avatarUrl: p.avatarUrl,
+          phone: p.phone,
+          zoneCode:
+            (p.rawData as any)?.zoneCode ||
+            (p.rawData as any)?.zone_code ||
+            (p.rawData as any)?.zoneId ||
+            '',
+          church: churchName,
+          isCurrent: p.id === userId,
+        };
+      })
+    );
+
+    res.json({ success: true, data: accounts });
+  } catch (err: any) {
+    console.error('[auth/linked-accounts error]', err);
+    res.status(500).json({ success: false, error: 'Failed to retrieve linked accounts' });
+  }
+});
+
+// POST /auth/switch-account - Seamlessly switch active session to a linked account
+router.post('/switch-account', requireAuth, async (req, res) => {
+  try {
+    const currentUserId = res.locals.auth?.userId;
+    const { targetUserId } = req.body;
+
+    if (!targetUserId) {
+      res.status(400).json({ success: false, error: 'targetUserId is required' });
+      return;
+    }
+
+    const currentUser = await prisma.user.findUnique({ where: { id: currentUserId } });
+    if (!currentUser) {
+      res.status(404).json({ success: false, error: 'Current user not found' });
+      return;
+    }
+
+    // Verify targetUserId is genuinely linked to current user
+    const matchingProfiles = await getKingschatProfiles(
+      currentUser.kingschatId,
+      currentUser.email,
+      null,
+      null,
+      currentUser.phone,
+      targetUserId,
+    );
+
+    const targetProfile = matchingProfiles.find((p) => p.id === targetUserId);
+    if (!targetProfile) {
+      res.status(403).json({ success: false, error: 'Unauthorized to switch to this account' });
+      return;
+    }
+
+    const tokens = await issueTokensForProfile(targetProfile);
+
+    res.json({
+      success: true,
+      data: tokens,
+      profile: {
+        id: targetProfile.id,
+        email: targetProfile.email,
+        firstName: targetProfile.firstName,
+        lastName: targetProfile.lastName,
+        role: tokens.user.role || targetProfile.role,
+        hasHqAccess: tokens.user.hasHqAccess ?? targetProfile.hasHqAccess,
+        memberships: tokens.user.memberships || [],
+      },
+    });
+  } catch (err: any) {
+    console.error('[auth/switch-account error]', err);
+    res.status(500).json({ success: false, error: 'Failed to switch account' });
+  }
+});
+
+
 const resetPasswordSchema = z.object({
   email: z.string().email(),
   otp: z.string().optional(),
