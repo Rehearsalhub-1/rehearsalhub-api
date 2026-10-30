@@ -461,8 +461,14 @@ export async function register(input: {
   const email = input.email.toLowerCase().trim();
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(input.password);
-  const cleanZoneCode = input.zoneCode.trim().toUpperCase();
+  const rawZoneCode = input.zoneCode.trim().toUpperCase();
+  // ZNL-prefixed codes signal a coordinator/zone-admin signup.
+  // Strip the ZNL prefix for org lookup but assign ZONE_ADMIN role.
+  const isCoordinatorSignup = rawZoneCode.startsWith('ZNL');
+  const cleanZoneCode = isCoordinatorSignup ? rawZoneCode.slice(3) : rawZoneCode;
   const isHQRequest = isHQZoneCode(cleanZoneCode);
+  // Membership role to assign: ZONE_ADMIN for ZNL codes, MEMBER otherwise
+  const membershipRole = isCoordinatorSignup ? 'ZONE_ADMIN' : 'MEMBER';
 
   const existing = await prisma.user.findFirst({
     where: { email: { equals: email, mode: 'insensitive' } },
@@ -474,6 +480,9 @@ export async function register(input: {
       OR: [
         { code: { equals: cleanZoneCode, mode: 'insensitive' } },
         { invitationCode: { equals: cleanZoneCode, mode: 'insensitive' } },
+        // Fallback: try the raw code (with ZNL) in case org uses that format
+        { code: { equals: rawZoneCode, mode: 'insensitive' } },
+        { invitationCode: { equals: rawZoneCode, mode: 'insensitive' } },
       ],
     },
   });
@@ -496,7 +505,7 @@ export async function register(input: {
             memberships: {
               create: {
                 organizationId: org.id,
-                role: 'MEMBER',
+                role: membershipRole,
                 status: 'ACTIVE',
               },
             },
