@@ -146,6 +146,10 @@ export type AuthUser = {
   role: string;
   zoneId: string | null;
   zone_id?: string | null;
+  churchId?: string | null;
+  churchName?: string | null;
+  church?: string | null;
+  churches?: Array<{ id: string; name: string; zoneId?: string | null }>;
   firstName?: string | null;
   lastName?: string | null;
   first_name?: string | null;
@@ -194,15 +198,33 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
   }).catch(() => []);
 
   const combinedMap = new Map<string, any>();
+  const seenChurchIds = new Set<string>();
 
   // Ingest relational memberships
   for (const m of dbMemberships) {
     const orgId = m.organizationId;
-    combinedMap.set(orgId.toLowerCase(), {
+    const subgroupObj = (m as any).group
+      ? {
+          id: (m as any).group.id,
+          name: (m as any).group.name,
+          type: (m as any).group.type,
+          status: (m as any).group.status,
+        }
+      : null;
+
+    if (m.groupId) {
+      seenChurchIds.add(m.groupId);
+    }
+
+    const mapKey = `${orgId.toLowerCase()}:${m.groupId || 'zone'}`;
+    combinedMap.set(mapKey, {
       id: m.id,
       userId: m.userId,
       organizationId: orgId,
+      groupId: m.groupId,
       subgroupId: m.groupId,
+      groupName: subgroupObj?.name || null,
+      subgroupName: subgroupObj?.name || null,
       role: m.role || 'MEMBER',
       status: m.status || 'ACTIVE',
       hasHqAccess: isHQRole(m.role || ''),
@@ -225,19 +247,98 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
             isHq: orgId === 'zone-001',
             invitationCode: orgId,
           },
-      subgroup: (m as any).group
-        ? {
-            id: (m as any).group.id,
-            name: (m as any).group.name,
-            type: (m as any).group.type,
-            status: (m as any).group.status,
-          }
-        : null,
+      group: subgroupObj,
+      subgroup: subgroupObj,
     });
   }
 
+  // 1b. Also ingest any additional coordinated churches from profile_meta_${userId}
+  // so multi-church coordinators in the same zone retain all their churches
+  try {
+    let meta: any = userRawData && typeof userRawData === 'object' ? userRawData : null;
+    if (!meta || (!meta.churches && !meta.churchId)) {
+      const metaRow = await prisma.setting.findUnique({ where: { key: `profile_meta_${userId}` } });
+      if (metaRow?.value && typeof metaRow.value === 'object') {
+        meta = metaRow.value;
+      }
+    }
+
+    if (meta) {
+      const extraChurchIds = new Set<string>();
+      if (Array.isArray(meta.churches)) {
+        for (const c of meta.churches) {
+          const cid = String(c?.id || c?.churchId || c?.groupId || '').trim();
+          if (cid && !seenChurchIds.has(cid)) {
+            extraChurchIds.add(cid);
+          }
+        }
+      }
+      if (meta.churchId && !seenChurchIds.has(String(meta.churchId))) {
+        const roleLower = String(meta.role || '').toLowerCase();
+        if (roleLower.includes('coord') || roleLower.includes('admin') || Array.isArray(meta.churches)) {
+          extraChurchIds.add(String(meta.churchId));
+        }
+      }
+
+      if (extraChurchIds.size > 0) {
+        const extraGroups = await prisma.group.findMany({
+          where: { id: { in: Array.from(extraChurchIds) } },
+          include: { organization: true },
+        }).catch(() => []);
+
+        for (const g of extraGroups) {
+          const orgId = g.organizationId;
+          const subgroupObj = {
+            id: g.id,
+            name: g.name,
+            type: g.type,
+            status: g.status,
+          };
+          const mapKey = `${orgId.toLowerCase()}:${g.id}`;
+          if (!combinedMap.has(mapKey)) {
+            combinedMap.set(mapKey, {
+              id: `meta_church_${g.id}`,
+              userId,
+              organizationId: orgId,
+              groupId: g.id,
+              subgroupId: g.id,
+              groupName: g.name,
+              subgroupName: g.name,
+              role: 'GROUP_ADMIN',
+              status: 'ACTIVE',
+              hasHqAccess: false,
+              organization: (g as any).organization
+                ? {
+                    id: (g as any).organization.id,
+                    name: (g as any).organization.name,
+                    code: (g as any).organization.code,
+                    country: (g as any).organization.country,
+                    region: (g as any).organization.region,
+                    isHq: (g as any).organization.isHq,
+                    invitationCode: (g as any).organization.invitationCode,
+                  }
+                : {
+                    id: orgId,
+                    name: orgId,
+                    code: orgId,
+                    country: null,
+                    region: null,
+                    isHq: orgId === 'zone-001',
+                    invitationCode: orgId,
+                  },
+              group: subgroupObj,
+              subgroup: subgroupObj,
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // Non-blocking fallback
+  }
+
   // 2. Only check legacy zone_members/hq_members and raw zone codes if relational memberships are empty
-  if (dbMemberships.length === 0) {
+  if (dbMemberships.length === 0 && combinedMap.size === 0) {
     const [legacyZoneRows, legacyHqRows] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(
         `SELECT * FROM zone_members WHERE user_id = $1`,
@@ -263,29 +364,31 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
             id: zm.id || `zm_${effectiveOrgId}`,
             userId,
             organizationId: effectiveOrgId,
+            groupId: null,
             subgroupId: null,
             role: (zm.role || 'MEMBER').toUpperCase(),
             status: (zm.status || 'ACTIVE').toUpperCase(),
             hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
             organization: org
               ? {
-                  id: org.id,
-                  name: org.name,
-                  code: org.code,
-                  country: org.country,
-                  region: org.region,
-                  isHq: org.isHq,
-                  invitationCode: org.invitationCode,
-                }
+                   id: org.id,
+                   name: org.name,
+                   code: org.code,
+                   country: org.country,
+                   region: org.region,
+                   isHq: org.isHq,
+                   invitationCode: org.invitationCode,
+                 }
               : {
-                  id: effectiveOrgId,
-                  name: effectiveOrgId,
-                  code: effectiveOrgId,
-                  country: null,
-                  region: null,
-                  isHq: effectiveOrgId === 'zone-001',
-                  invitationCode: effectiveOrgId,
-                },
+                   id: effectiveOrgId,
+                   name: effectiveOrgId,
+                   code: effectiveOrgId,
+                   country: null,
+                   region: null,
+                   isHq: effectiveOrgId === 'zone-001',
+                   invitationCode: effectiveOrgId,
+                 },
+            group: null,
             subgroup: null,
           });
         }
@@ -304,6 +407,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
             id: hm.id || `hm_${effectiveOrgId}`,
             userId,
             organizationId: effectiveOrgId,
+            groupId: null,
             subgroupId: null,
             role: (hm.role || 'HQ_ADMIN').toUpperCase(),
             status: (hm.status || 'ACTIVE').toUpperCase(),
@@ -327,6 +431,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
                   isHq: true,
                   invitationCode: effectiveOrgId,
                 },
+            group: null,
             subgroup: null,
           });
         }
@@ -344,6 +449,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
           id: `raw_${effectiveOrgId}`,
           userId,
           organizationId: effectiveOrgId,
+          groupId: null,
           subgroupId: null,
           role: 'MEMBER',
           status: 'ACTIVE',
@@ -367,6 +473,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
                 isHq: effectiveOrgId === 'zone-001',
                 invitationCode: effectiveOrgId,
               },
+          group: null,
           subgroup: null,
         });
       }
@@ -381,6 +488,9 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
 
   let resolvedRole = tokenRole(profile);
   let resolvedZoneId = zoneIdFromProfile(profile);
+  let resolvedChurchId: string | null = null;
+  let resolvedChurchName: string | null = null;
+  let resolvedChurches: Array<{ id: string; name: string; zoneId?: string | null }> = [];
   let canonicalMemberships: any[] = [];
 
   try {
@@ -390,9 +500,25 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
       const hqAdminMembership = canonicalMemberships.find(m =>
         ['hq_admin','HQ_ADMIN','admin','ADMIN','super_admin','SUPER_ADMIN','boss','BOSS','president','PRESIDENT','director','DIRECTOR','oftp','OFTP','executive','EXECUTIVE'].includes(m.role || '')
       );
+      const zoneAdminMembership = canonicalMemberships.find(m =>
+        isZonalOrHQAdminRole(m.role || '')
+      );
       const adminMembership = canonicalMemberships.find(m =>
         ADMIN_MEMBERSHIP_ROLES.has(m.role || '')
       );
+
+      const churchMemberships = canonicalMemberships.filter(
+        m => (m.subgroupId || m.groupId) && ADMIN_MEMBERSHIP_ROLES.has(m.role || '')
+      );
+      resolvedChurches = churchMemberships.map(m => ({
+        id: String(m.subgroupId || m.groupId),
+        name: String(m.subgroup?.name || m.group?.name || m.subgroupName || m.groupName || 'Church'),
+        zoneId: m.organizationId || null,
+      }));
+      if (resolvedChurches.length > 0) {
+        resolvedChurchId = resolvedChurches[0].id;
+        resolvedChurchName = resolvedChurches[0].name;
+      }
 
       if (hqAdminMembership) {
         const mRole = (hqAdminMembership.role || '').toLowerCase();
@@ -402,6 +528,9 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
           resolvedRole = 'hq_admin';
         }
         resolvedZoneId = resolvedZoneId || hqAdminMembership.organizationId;
+      } else if (zoneAdminMembership) {
+        resolvedRole = tokenRole({ ...profile, role: zoneAdminMembership.role });
+        resolvedZoneId = resolvedZoneId || zoneAdminMembership.organizationId || null;
       } else if (adminMembership) {
         resolvedRole = tokenRole({ ...profile, role: adminMembership.role });
         resolvedZoneId = resolvedZoneId || adminMembership.organizationId || null;
@@ -416,7 +545,12 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
   await prisma.refreshToken.create({
     data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() },
   });
-  const accessToken = signAccessToken({ sub: profile.id, role: resolvedRole, zoneId: resolvedZoneId ?? undefined });
+  const accessToken = signAccessToken({
+    sub: profile.id,
+    role: resolvedRole,
+    zoneId: resolvedZoneId ?? undefined,
+    churchId: resolvedChurchId ?? undefined,
+  });
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || email || 'Member';
   return {
     accessToken,
@@ -429,6 +563,10 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
       role: resolvedRole,
       zoneId: resolvedZoneId,
       zone_id: resolvedZoneId,
+      churchId: resolvedChurchId,
+      churchName: resolvedChurchName,
+      church: resolvedChurchName,
+      churches: resolvedChurches,
       firstName: profile.firstName,
       lastName: profile.lastName,
       first_name: profile.firstName,
@@ -708,7 +846,10 @@ export type MeResult = AuthUser & {
     id: string;
     userId: string;
     organizationId: string;
+    groupId?: string | null;
     subgroupId: string | null;
+    groupName?: string | null;
+    subgroupName?: string | null;
     role: string;
     status: string;
     hasHqAccess: boolean;
@@ -721,6 +862,12 @@ export type MeResult = AuthUser & {
       isHq: boolean;
       invitationCode: string | null;
     };
+    group?: {
+      id: string;
+      name: string;
+      type: string | null;
+      status: string | null;
+    } | null;
     subgroup: {
       id: string;
       name: string;
@@ -766,7 +913,7 @@ export async function getMe(profileId: string): Promise<MeResult> {
   } catch {
     // Non-blocking fallback if settings table is not present
   }
-  const canonicalMemberships = await fetchAllUserMemberships(profileId);
+  const canonicalMemberships = await fetchAllUserMemberships(profileId, meta);
 
   const zoneMembers = canonicalMemberships
     .filter((m) => !m.hasHqAccess)
@@ -807,12 +954,47 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
   const zoneName = primaryOrg?.name || primaryZoneId;
 
+  const churchesMap = new Map<string, { id: string; name: string; zoneId?: string | null }>();
+  for (const m of canonicalMemberships) {
+    const cid = m.subgroupId || m.groupId;
+    if (cid && ADMIN_MEMBERSHIP_ROLES.has(m.role || '')) {
+      churchesMap.set(String(cid), {
+        id: String(cid),
+        name: String(m.subgroup?.name || m.group?.name || m.subgroupName || m.groupName || 'Church'),
+        zoneId: m.organizationId || primaryZoneId,
+      });
+    }
+  }
+  if (Array.isArray(meta.churches)) {
+    for (const c of meta.churches) {
+      const cid = String(c?.id || c?.churchId || c?.groupId || '').trim();
+      if (cid && !churchesMap.has(cid)) {
+        churchesMap.set(cid, {
+          id: cid,
+          name: String(c?.name || c?.churchName || c?.groupName || 'Church'),
+          zoneId: c?.zoneId || c?.organizationId || primaryZoneId,
+        });
+      }
+    }
+  }
+  if (meta.churchId && !churchesMap.has(String(meta.churchId))) {
+    churchesMap.set(String(meta.churchId), {
+      id: String(meta.churchId),
+      name: String(meta.church || 'Church'),
+      zoneId: primaryZoneId,
+    });
+  }
+  const churches = Array.from(churchesMap.values());
+  const firstChurchMembership = canonicalMemberships.find((m) => m.subgroupId || m.groupId);
+
   const username = meta.username || meta.alias || (user.email ? user.email.split('@')[0] : null);
   const middleName = meta.middle_name || meta.middleName || null;
   const gender = meta.gender || null;
   const birthday = meta.birthday || null;
   const region = meta.region || primaryOrg?.region || null;
-  const church = meta.church || canonicalMemberships[0]?.subgroup?.name || null;
+  const churchId = churches[0]?.id || meta.churchId || firstChurchMembership?.subgroupId || null;
+  const church = churches[0]?.name || meta.church || firstChurchMembership?.subgroup?.name || null;
+  const churchName = church;
   const designation = meta.designation || 'Member';
   const administration = meta.administration || (hasHqAdmin ? 'Admin' : 'Member');
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Member';
@@ -852,6 +1034,9 @@ export async function getMe(profileId: string): Promise<MeResult> {
     birthday,
     region,
     church,
+    churchId,
+    churchName,
+    churches,
     designation,
     administration,
     voicePart: designation,

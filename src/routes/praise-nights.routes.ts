@@ -229,17 +229,18 @@ function shapeProgram(p: any) {
 // GET /programs or /praise-nights
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId, category, groupId, subGroupId, includeChurch } = req.query as {
+    const { zoneId, category, groupId, subGroupId, churchId, includeChurch } = req.query as {
       zoneId?: string;
       category?: string;
       groupId?: string;
       subGroupId?: string;
+      churchId?: string;
       includeChurch?: string;
     };
     const auth = res.locals.auth;
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
     const targetZone = zoneId || req.tenant?.effectiveZoneId;
-    const targetGroup = groupId || subGroupId || null;
+    const targetGroup = groupId || subGroupId || churchId || (req.tenant?.mode === 'church' ? req.tenant.effectiveChurchId : null) || null;
 
     const where: any = {};
     if (category && category !== 'all') {
@@ -328,11 +329,12 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
 // POST /programs or /praise-nights — Create program
 router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
-    const { name, date, zoneId, category, status, location, bannerImage, songIds, pageCategory } = req.body;
+    const { name, date, zoneId, groupId, subGroupId, churchId, category, status, location, bannerImage, songIds, pageCategory } = req.body;
     const programId = req.body.id || `prog_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const effectiveCategory = category || (status === 'ongoing' ? 'ongoing' : status === 'archive' ? 'archive' : 'pre-rehearsal');
     const effectiveStatus = status || effectiveCategory;
     const orgId = zoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const effectiveGroupId = groupId || subGroupId || churchId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || null;
     const uniqueSongIds = Array.from(new Set(Array.isArray(songIds) ? songIds.map(String) : []));
 
     if (pageCategory) {
@@ -346,6 +348,7 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
         name: name || 'Program',
         date: date || new Date().toISOString().split('T')[0],
         organizationId: orgId,
+        groupId: effectiveGroupId,
         category: effectiveCategory,
         status: effectiveStatus,
         isActive: effectiveStatus === 'ongoing',

@@ -7,7 +7,10 @@ const router = Router();
 
 function shapeAttendance(row: any) {
   const user = row.user || {};
-  const userName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Singer';
+  const manualName = typeof row.qrCode === 'string' && row.qrCode.startsWith('manual:')
+    ? row.qrCode.slice(7).trim()
+    : '';
+  const userName = manualName || [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Singer';
   const checkInTime = row.checkInTime || row.scannedAt || row.createdAt;
   const d = checkInTime ? new Date(checkInTime) : null;
   const dateString = d ? d.toLocaleDateString('en-CA') : '';
@@ -25,7 +28,9 @@ function shapeAttendance(row: any) {
     dateString,
     date_string: dateString,
     scannedAt: row.scannedAt || null,
-    qrCode: row.qrCode || null,
+    qrCode: manualName ? null : (row.qrCode || null),
+    method: manualName ? 'manual' : (row.qrCode ? 'scanner' : undefined),
+    isManual: Boolean(manualName),
     recordedById: row.recordedById || null,
     createdAt: row.createdAt,
   };
@@ -34,13 +39,21 @@ function shapeAttendance(row: any) {
 /** GET /attendance — List attendance */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId, programId, limit, date, startDate, endDate, month } = req.query as Record<string, string>;
+    const { zoneId, subGroupId, churchId, groupId, programId, limit, date, startDate, endDate, month } = req.query as Record<string, string>;
     const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || null;
-    const isGlobal = req.tenant?.isHQAdmin && (req.tenant?.isGlobalView || !effectiveZoneId);
+    const effectiveChurchId = subGroupId || churchId || groupId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || null;
+    const isGlobal = req.tenant?.isHQAdmin && (req.tenant?.isGlobalView || !effectiveZoneId) && !effectiveChurchId;
 
     const whereClause: any = {};
     if (!isGlobal) {
       whereClause.organizationId = effectiveZoneId || 'zone-001';
+    }
+    if (effectiveChurchId) {
+      whereClause.user = {
+        memberships: {
+          some: { groupId: effectiveChurchId },
+        },
+      };
     }
     if (programId) {
       whereClause.programId = programId;
@@ -114,15 +127,16 @@ const handleGetMyAttendance = async (req: Request, res: Response) => {
 router.get('/mine', requireAuth, handleGetMyAttendance);
 router.get('/personal', requireAuth, handleGetMyAttendance);
 
-/** GET /attendance/session — Get live clock-in status for a zone */
+/** GET /attendance/session — Get live clock-in status for a zone or church */
 router.get('/session', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { zoneId } = req.query as { zoneId?: string };
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
-    if (!effectiveZoneId) {
+    const { zoneId, subGroupId, churchId } = req.query as { zoneId?: string; subGroupId?: string; churchId?: string };
+    const effectiveChurchId = subGroupId || churchId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || null;
+    const effectiveScopeId = effectiveChurchId || zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
+    if (!effectiveScopeId) {
       return res.status(400).json({ success: false, error: 'zoneId query param or tenant scope is required' });
     }
-    const key = `clockin_session_${effectiveZoneId}`;
+    const key = `clockin_session_${effectiveScopeId}`;
 
     const setting = await prisma.setting.findUnique({ where: { key } });
     const val: any = setting?.value || {};
@@ -130,7 +144,7 @@ router.get('/session', requireAuth, async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        zoneId: effectiveZoneId,
+        zoneId: effectiveScopeId,
         isOpen: val.isOpen !== false, // Defaults to true if never explicitly closed
         lastToggledAt: val.lastToggledAt || null,
         toggledBy: val.toggledBy || null,
@@ -146,12 +160,13 @@ router.get('/session', requireAuth, async (req: Request, res: Response) => {
 router.post('/session/toggle', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { zoneId, isOpen } = req.body;
-    const effectiveZoneId = zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
-    if (!effectiveZoneId) {
+    const { zoneId, subGroupId, churchId, isOpen } = req.body;
+    const effectiveChurchId = subGroupId || churchId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || null;
+    const effectiveScopeId = effectiveChurchId || zoneId || req.tenant?.effectiveZoneId || res.locals.auth?.zoneId || null;
+    if (!effectiveScopeId) {
       return res.status(400).json({ success: false, error: 'zoneId is required to toggle session' });
     }
-    const key = `clockin_session_${effectiveZoneId}`;
+    const key = `clockin_session_${effectiveScopeId}`;
 
     const updatedValue = {
       isOpen: Boolean(isOpen),
@@ -168,7 +183,7 @@ router.post('/session/toggle', requireAuth, requireTenantAdmin, async (req: Requ
     res.json({
       success: true,
       data: {
-        zoneId: effectiveZoneId,
+        zoneId: effectiveScopeId,
         ...updatedValue,
       },
     });
@@ -191,17 +206,41 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 /** POST /attendance/check-in & POST /attendance */
 const handleCheckIn = async (req: Request, res: Response) => {
-  const targetUserId = req.body?.userId || res.locals.auth?.userId;
+  let targetUserId = req.body?.userId || res.locals.auth?.userId;
   try {
     const auth = res.locals.auth;
-    const { userId, programId, eventName, qrCode, zoneId, churchId, subGroupId, latitude, longitude, isMocked } = req.body;
+    const {
+      userId,
+      user_name,
+      userName,
+      programId,
+      eventName,
+      qrCode,
+      zoneId,
+      churchId,
+      subGroupId,
+      latitude,
+      longitude,
+      isMocked,
+      method,
+    } = req.body;
     if (isMocked === true || req.body?.mocked === true) {
       return res.status(403).json({
         success: false,
         error: 'Simulated location or mock GPS detected. Clock-in rejected.',
       });
     }
+    let effectiveChurchId = churchId || subGroupId || req.tenant?.effectiveChurchId || auth?.churchId || null;
     let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    if (orgId && String(orgId).startsWith('grp_')) {
+      effectiveChurchId = effectiveChurchId || String(orgId);
+      const grp = await prisma.group.findUnique({ where: { id: String(orgId) }, select: { organizationId: true } });
+      orgId = grp?.organizationId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    }
+    if (!orgId && effectiveChurchId) {
+      const grp = await prisma.group.findUnique({ where: { id: String(effectiveChurchId) }, select: { organizationId: true } });
+      orgId = grp?.organizationId || undefined;
+    }
     if (!orgId) {
       const userMem = await prisma.membership.findFirst({
         where: { userId: targetUserId, status: 'ACTIVE' },
@@ -212,27 +251,52 @@ const handleCheckIn = async (req: Request, res: Response) => {
     if (!orgId) {
       return res.status(400).json({ success: false, error: 'Zone identification is required for attendance clock-in.' });
     }
-    const effectiveChurchId = churchId || subGroupId || req.tenant?.effectiveChurchId || auth?.churchId || null;
+
+    const manualSingerName = (typeof user_name === 'string' && user_name.trim()) || (typeof userName === 'string' && userName.trim()) || '';
+    let isUnmatchedManual = false;
+    if (!userId && manualSingerName) {
+      // Try to resolve singer by name within the organization
+      const parts = manualSingerName.split(/\s+/);
+      const first = parts[0] || '';
+      const last = parts.slice(1).join(' ');
+      const matchedMembership = await prisma.membership.findFirst({
+        where: {
+          organizationId: orgId,
+          ...(effectiveChurchId ? { groupId: effectiveChurchId } : {}),
+          user: {
+            firstName: { equals: first, mode: 'insensitive' },
+            ...(last ? { lastName: { equals: last, mode: 'insensitive' } } : {}),
+          },
+        },
+        select: { userId: true },
+      });
+      if (matchedMembership?.userId) {
+        targetUserId = matchedMembership.userId;
+      } else {
+        isUnmatchedManual = true;
+      }
+    }
+
     const now = new Date();
     const id = (typeof req.body.id === 'string' && req.body.id.trim())
       ? req.body.id.trim()
       : `att_${crypto.randomUUID()}`;
 
-    // 1. Guard: Check if clock-in session is open for this zone
-    const sessionKey = `clockin_session_${orgId}`;
+    // 1. Guard: Check if clock-in session is open for this church or zone
+    const sessionKey = `clockin_session_${effectiveChurchId || orgId}`;
     const sessionSetting = await prisma.setting.findUnique({ where: { key: sessionKey } });
     const sessionVal: any = sessionSetting?.value || {};
-    if (sessionVal.isOpen === false) {
+    if (sessionVal.isOpen === false && method !== 'manual' && method !== 'scanner') {
       return res.status(403).json({
         success: false,
         error: 'Clock-in is currently closed for this rehearsal. Late arrivals cannot check in.',
       });
     }
 
-    // 2. Guard: Enforce geofence location verification if configured
+    // 2. Guard: Enforce geofence location verification if configured (skip for admin manual/scanner check-in)
     // Developer/owner bypass — this user participates remotely and is exempt from geofence.
     const REMOTE_EXEMPT_USERS = new Set(['8ILWjbl9IbgbuxBK9P23mB6pZBt1']);
-    const isRemoteExempt = REMOTE_EXEMPT_USERS.has(targetUserId);
+    const isRemoteExempt = REMOTE_EXEMPT_USERS.has(targetUserId) || method === 'manual' || method === 'scanner';
 
     const isHQ = orgId === 'zone-001' || orgId === 'hq' || orgId === 'loveworld-singers-hq';
     const candidateKeys = [
@@ -280,27 +344,29 @@ const handleCheckIn = async (req: Request, res: Response) => {
       }
     }
 
-    // 3. Guard: Enforce ONLY ONCE A DAY clock-in rule
+    // 3. Guard: Enforce ONLY ONCE A DAY clock-in rule (skip if unmatched manual entry by admin)
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const existingToday = await prisma.attendance.findFirst({
-      where: {
-        userId: targetUserId,
-        OR: [
-          { checkInTime: { gte: startOfDay, lte: endOfDay } },
-          { createdAt: { gte: startOfDay, lte: endOfDay } },
-        ],
-      },
-      include: { user: true },
-    });
-
-    if (existingToday) {
-      return res.status(409).json({
-        success: false,
-        error: 'You have already clocked in for today.',
-        data: shapeAttendance(existingToday),
+    if (!isUnmatchedManual) {
+      const existingToday = await prisma.attendance.findFirst({
+        where: {
+          userId: targetUserId,
+          OR: [
+            { checkInTime: { gte: startOfDay, lte: endOfDay } },
+            { createdAt: { gte: startOfDay, lte: endOfDay } },
+          ],
+        },
+        include: { user: true },
       });
+
+      if (existingToday) {
+        return res.status(409).json({
+          success: false,
+          error: 'You have already clocked in for today.',
+          data: shapeAttendance(existingToday),
+        });
+      }
     }
 
     // 4. Resolve active program if any
@@ -313,12 +379,15 @@ const handleCheckIn = async (req: Request, res: Response) => {
       const activeProgram = await prisma.program.findFirst({
         where: {
           organizationId: orgId,
+          ...(effectiveChurchId ? { groupId: effectiveChurchId } : {}),
           isActive: true,
         },
         select: { id: true },
       });
       resolvedProgramId = activeProgram?.id || null;
     }
+
+    const effectiveQrCode = qrCode || (isUnmatchedManual && manualSingerName ? `manual:${manualSingerName}` : null);
 
     const inserted = await prisma.attendance.create({
       data: {
@@ -333,7 +402,7 @@ const handleCheckIn = async (req: Request, res: Response) => {
         status: 'present',
         checkInTime: now,
         scannedAt: qrCode ? now : null,
-        qrCode: qrCode || null,
+        qrCode: effectiveQrCode,
         recordedById: auth.userId,
       },
       include: { user: true },
@@ -369,14 +438,24 @@ router.post('/', requireAuth, handleCheckIn);
 router.post('/manual', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const auth = res.locals.auth;
-    const { userId, programId, eventName, status = 'present', zoneId } = req.body;
-    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    const { userId, user_name, userName, programId, eventName, status = 'present', zoneId, churchId, subGroupId } = req.body;
+    const manualSingerName = (typeof user_name === 'string' && user_name.trim()) || (typeof userName === 'string' && userName.trim()) || '';
+    const resolvedUserId = userId || auth?.userId;
+    if (!resolvedUserId) return res.status(400).json({ success: false, error: 'userId is required' });
 
     const id = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     let orgId = zoneId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    if (orgId && String(orgId).startsWith('grp_')) {
+      const grp = await prisma.group.findUnique({ where: { id: String(orgId) }, select: { organizationId: true } });
+      orgId = grp?.organizationId || req.tenant?.effectiveZoneId || auth?.zoneId;
+    }
+    if (!orgId && (churchId || subGroupId)) {
+      const grp = await prisma.group.findUnique({ where: { id: String(churchId || subGroupId) }, select: { organizationId: true } });
+      orgId = grp?.organizationId || undefined;
+    }
     if (!orgId) {
       const userMem = await prisma.membership.findFirst({
-        where: { userId, status: 'ACTIVE' },
+        where: { userId: resolvedUserId, status: 'ACTIVE' },
         select: { organizationId: true },
       });
       orgId = userMem?.organizationId;
@@ -390,11 +469,12 @@ router.post('/manual', requireAuth, requireTenantAdmin, async (req: Request, res
       data: {
         id,
         organizationId: orgId,
-        userId,
+        userId: resolvedUserId,
         programId: programId || null,
         eventName: eventName || 'Rehearsal',
         status,
         checkInTime: now,
+        qrCode: !userId && manualSingerName ? `manual:${manualSingerName}` : null,
         recordedById: auth.userId,
       },
       include: { user: true },

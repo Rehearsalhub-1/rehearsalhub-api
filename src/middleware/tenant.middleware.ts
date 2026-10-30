@@ -65,16 +65,16 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
   const role: string = (auth.role || '').toLowerCase();
   const isHQAdmin = HQ_ROLES.has(role) || Boolean(auth.hasHqAccess || auth.has_hq_access);
   const isZoneAdmin = role === 'zone_admin' || role === 'zone_coordinator' || role === 'subgroup_admin' || role === 'subgroup_coordinator';
-  const isChurchCoordinator = role === 'church_coordinator';
+  const isChurchCoordinator = role === 'church_coordinator' || role === 'church_admin' || role === 'group_admin' || role === 'group_coordinator';
 
-  // Read client-requested scope headers (only trusted for HQ Admins)
+  // Read client-requested scope headers
   const headerZoneId = (req.headers['x-zone-id'] as string) || (req.headers['x-zone-code'] as string) || null;
   const headerChurchId = (req.headers['x-church-id'] as string) || (req.headers['x-subgroup-id'] as string) || null;
   const headerScope = (req.headers['x-scope'] as string) || null; // 'global' | 'zone' | 'church'
 
   // Also check query params for backward compat (clients should migrate to headers)
   const queryZoneId = (req.query.zoneId as string) || (req.query.zone_code as string) || null;
-  const queryChurchId = (req.query.subGroupId as string) || (req.query.churchId as string) || null;
+  const queryChurchId = (req.query.subGroupId as string) || (req.query.churchId as string) || (req.query.groupId as string) || null;
 
   let effectiveZoneId: string | null = null;
   let effectiveChurchId: string | null = null;
@@ -99,18 +99,25 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
       mode = 'global';
     }
   } else if (isChurchCoordinator) {
-    // Church coordinators are HARD-LOCKED to their JWT churchId.
-    effectiveChurchId = auth.churchId || null;
-    effectiveZoneId = auth.zoneId || null;
+    // Church coordinators can switch between the churches they coordinate via x-church-id / churchId,
+    // falling back to their primary JWT churchId.
+    const requestedChurchId = headerChurchId || queryChurchId || null;
+    effectiveChurchId = requestedChurchId || auth.churchId || null;
+    effectiveZoneId = headerZoneId || queryZoneId || auth.zoneId || null;
     mode = 'church';
   } else if (isZoneAdmin) {
-    // Zone admins are LOCKED to their ONE admin org.
-    // If verifyAdminScope ran first, use the DB-verified scope.
-    // Otherwise fall back to JWT zoneId (less secure but non-blocking).
+    // Zone admins are LOCKED to their ONE admin org, but can switch into a church scope
+    // within their zone when dual-role or managing a church (x-scope: church + x-church-id).
     const dbVerifiedZoneId = (res as any)?.locals?.adminScope?.effectiveZoneId;
-    effectiveZoneId = dbVerifiedZoneId || auth.zoneId || null;
-    effectiveChurchId = null;
-    mode = effectiveZoneId ? 'zone' : 'global';
+    effectiveZoneId = dbVerifiedZoneId || auth.zoneId || headerZoneId || queryZoneId || null;
+    const requestedChurchId = headerChurchId || queryChurchId || null;
+    if (requestedChurchId && (headerScope === 'church' || Boolean(queryChurchId))) {
+      effectiveChurchId = requestedChurchId;
+      mode = 'church';
+    } else {
+      effectiveChurchId = null;
+      mode = effectiveZoneId ? 'zone' : 'global';
+    }
   } else {
     // Regular members — lock to their JWT zone
     effectiveZoneId = auth.zoneId || null;

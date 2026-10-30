@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 
-const ADMIN_ROLES = new Set(['super_admin', 'admin', 'hq_admin', 'president', 'director', 'oftp', 'executive', 'boss', 'zone_admin', 'zone_coordinator', 'subgroup_admin', 'subgroup_coordinator', 'church_coordinator']);
+const ADMIN_ROLES = new Set([
+  'super_admin', 'admin', 'hq_admin', 'president', 'director', 'oftp', 'executive', 'boss',
+  'zone_admin', 'zone_coordinator', 'subgroup_admin', 'subgroup_coordinator',
+  'church_coordinator', 'church_admin', 'group_admin', 'group_coordinator',
+]);
 
 /**
  * DB-VERIFIED ADMIN SCOPE MIDDLEWARE
@@ -29,7 +33,12 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
     const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin' ||
       role === 'president' || role === 'director' || role === 'oftp' || role === 'executive' || role === 'boss';
     const isZoneAdminRole = role === 'zone_admin' || role === 'zone_coordinator';
-    const isSubgroupRole = role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
+    const isSubgroupRole =
+      role === 'subgroup_admin' || role === 'subgroup_coordinator' ||
+      role === 'church_coordinator' || role === 'church_admin' ||
+      role === 'group_admin' || role === 'group_coordinator';
+    const headerSubgroupId = (req.headers['x-subgroup-id'] as string) || (req.headers['x-church-id'] as string) || null;
+    const headerScope = (req.headers['x-scope'] as string) || null;
 
     if (!ADMIN_ROLES.has(role)) {
       res.status(403).json({ success: false, error: 'Forbidden: admin access required' });
@@ -61,7 +70,7 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
         adminOrgId: hqMembership?.organizationId || 'zone-001',
         // If they're scoping to a specific zone, use that; otherwise global
         effectiveZoneId: headerZoneId || null,
-        effectiveSubgroupId: (req.headers['x-subgroup-id'] as string) || (req.headers['x-church-id'] as string) || null,
+        effectiveSubgroupId: headerSubgroupId,
         isGlobalView: !headerZoneId,
       };
 
@@ -92,10 +101,10 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
         res.locals.adminScope = {
           isHQAdmin: false,
           isZoneAdmin: true,
-          isSubgroupAdmin: false,
+          isSubgroupAdmin: Boolean(headerSubgroupId && headerScope === 'church'),
           adminOrgId: jwtZoneId,
           effectiveZoneId: jwtZoneId, // LOCKED — cannot be overridden
-          effectiveSubgroupId: null,
+          effectiveSubgroupId: headerScope === 'church' ? headerSubgroupId : null,
           isGlobalView: false,
         };
         next();
@@ -105,10 +114,10 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
       res.locals.adminScope = {
         isHQAdmin: false,
         isZoneAdmin: true,
-        isSubgroupAdmin: false,
+        isSubgroupAdmin: Boolean(headerSubgroupId && headerScope === 'church'),
         adminOrgId: adminMembership.organizationId,
         effectiveZoneId: adminMembership.organizationId, // LOCKED to their ONE admin org
-        effectiveSubgroupId: null,
+        effectiveSubgroupId: headerScope === 'church' ? headerSubgroupId : null,
         isGlobalView: false,
       };
 
@@ -117,12 +126,20 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
     }
 
     if (isSubgroupRole) {
-      // Subgroup/church admin — locked to their subgroup
+      // Subgroup/church admin — locked to their coordinated churches
       const subgroupMembership = await prisma.membership.findFirst({
         where: {
           userId: auth.userId,
           groupId: { not: null },
-          role: { in: ['SUBGROUP_ADMIN', 'subgroup_admin', 'church_coordinator', 'CHURCH_COORDINATOR', 'subgroup_coordinator', 'SUBGROUP_COORDINATOR'] },
+          role: {
+            in: [
+              'GROUP_ADMIN', 'group_admin',
+              'CHURCH_ADMIN', 'church_admin',
+              'SUBGROUP_ADMIN', 'subgroup_admin',
+              'church_coordinator', 'CHURCH_COORDINATOR',
+              'subgroup_coordinator', 'SUBGROUP_COORDINATOR',
+            ],
+          },
           status: { not: 'INACTIVE' },
         },
         include: { organization: true, group: true },
@@ -139,7 +156,7 @@ export async function verifyAdminScope(req: Request, res: Response, next: NextFu
         isSubgroupAdmin: true,
         adminOrgId: subgroupMembership.organizationId,
         effectiveZoneId: subgroupMembership.organizationId,
-        effectiveSubgroupId: subgroupMembership.groupId, // LOCKED
+        effectiveSubgroupId: headerSubgroupId || subgroupMembership.groupId,
         isGlobalView: false,
       };
 
@@ -165,10 +182,14 @@ export function attachAdminScope(req: Request, res: Response, next: NextFunction
   const isHQRole = role === 'super_admin' || role === 'admin' || role === 'hq_admin' ||
     role === 'president' || role === 'director' || role === 'oftp' || role === 'executive' || role === 'boss';
   const isZoneAdminRole = role === 'zone_admin' || role === 'zone_coordinator';
-  const isSubgroupRole = role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
+  const isSubgroupRole =
+    role === 'subgroup_admin' || role === 'subgroup_coordinator' ||
+    role === 'church_coordinator' || role === 'church_admin' ||
+    role === 'group_admin' || role === 'group_coordinator';
 
   const headerZoneId = (req.headers['x-zone-id'] as string) || (req.headers['x-organization-id'] as string) || null;
   const headerSubgroupId = (req.headers['x-subgroup-id'] as string) || (req.headers['x-church-id'] as string) || null;
+  const headerScope = (req.headers['x-scope'] as string) || null;
 
   if (isHQRole) {
     res.locals.adminScope = {
@@ -181,10 +202,10 @@ export function attachAdminScope(req: Request, res: Response, next: NextFunction
   } else if (isZoneAdminRole) {
     // JWT role — zone locked to JWT claim (use verifyAdminScope for DB verification)
     res.locals.adminScope = {
-      isHQAdmin: false, isZoneAdmin: true, isSubgroupAdmin: false,
+      isHQAdmin: false, isZoneAdmin: true, isSubgroupAdmin: Boolean(headerSubgroupId && headerScope === 'church'),
       adminOrgId: auth?.zoneId || null,
       effectiveZoneId: auth?.zoneId || null, // LOCKED
-      effectiveSubgroupId: null,
+      effectiveSubgroupId: headerScope === 'church' ? headerSubgroupId : null,
       isGlobalView: false,
     };
   } else if (isSubgroupRole) {
@@ -192,7 +213,7 @@ export function attachAdminScope(req: Request, res: Response, next: NextFunction
       isHQAdmin: false, isZoneAdmin: false, isSubgroupAdmin: true,
       adminOrgId: auth?.zoneId || null,
       effectiveZoneId: auth?.zoneId || null,
-      effectiveSubgroupId: auth?.churchId || null, // LOCKED
+      effectiveSubgroupId: headerSubgroupId || auth?.churchId || null,
       isGlobalView: false,
     };
   } else {

@@ -513,6 +513,7 @@ router.patch('/:userId', requireAuth, async (req, res) => {
 
     updatedMeta = {
       ...currentMeta,
+      ...(body.role !== undefined && isAdmin ? { role: body.role } : {}),
       ...(body.username !== undefined ? { username: body.username } : {}),
       ...(body.alias !== undefined ? { alias: body.alias } : {}),
       ...(body.middle_name !== undefined ? { middle_name: body.middle_name } : {}),
@@ -601,6 +602,89 @@ router.patch('/:userId', requireAuth, async (req, res) => {
   broadcast('profile', userId, formatted);
   res.json({ success: true, message: 'Profile updated', data: formatted });
 });
+
+// PATCH /profiles/:userId/role & POST /profiles/:userId/role — Update member role (Zone Admin / HQ Admin / Church Admin)
+const handleUpdateRole = async (req: any, res: any) => {
+  try {
+    const { userId } = req.params;
+    const auth = res.locals.auth;
+    const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin' || auth?.role === 'super_admin';
+    const isZoneAdmin = auth?.role === 'zone_admin' || auth?.role === 'zone_coordinator';
+    const isAdmin = isHqAdmin || isZoneAdmin || canManageTenant(auth?.role);
+
+    if (!isAdmin) {
+      res.status(403).json({ success: false, error: 'Forbidden: Only admins can change member roles' });
+      return;
+    }
+
+    const rawRole = String(req.body?.role || '').toLowerCase().trim();
+    if (!rawRole) {
+      res.status(400).json({ success: false, error: 'role is required' });
+      return;
+    }
+
+    if ((rawRole === 'hq_admin' || rawRole === 'super_admin') && !isHqAdmin) {
+      res.status(403).json({ success: false, error: 'Only HQ Admins can assign HQ Admin role' });
+      return;
+    }
+
+    const dbRole =
+      rawRole === 'hq_admin' || rawRole === 'super_admin'
+        ? 'HQ_ADMIN'
+        : rawRole === 'zone_admin' || rawRole === 'zone_coordinator'
+          ? 'ZONE_ADMIN'
+          : rawRole === 'church_admin' || rawRole === 'church_coordinator' || rawRole === 'group_admin'
+            ? 'GROUP_ADMIN'
+            : 'MEMBER';
+
+    const metaRole =
+      dbRole === 'HQ_ADMIN'
+        ? 'hq_admin'
+        : dbRole === 'ZONE_ADMIN'
+          ? 'zone_coordinator'
+          : dbRole === 'GROUP_ADMIN'
+            ? 'church_coordinator'
+            : 'member';
+
+    const targetZoneId = req.body?.zoneId || req.tenant?.effectiveZoneId || auth?.zoneId || null;
+
+    if (targetZoneId) {
+      await prisma.membership.updateMany({
+        where: { userId, organizationId: targetZoneId },
+        data: { role: dbRole },
+      });
+    } else {
+      await prisma.membership.updateMany({
+        where: { userId },
+        data: { role: dbRole },
+      });
+    }
+
+    const metaKey = `profile_meta_${userId}`;
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } }).catch(() => null);
+    const currentMeta: Record<string, any> =
+      existingMeta?.value && typeof existingMeta.value === 'object' ? (existingMeta.value as Record<string, any>) : {};
+
+    const updatedMeta = {
+      ...currentMeta,
+      role: metaRole,
+    };
+
+    await prisma.setting.upsert({
+      where: { key: metaKey },
+      create: { key: metaKey, value: updatedMeta },
+      update: { value: updatedMeta },
+    });
+
+    res.json({ success: true, message: 'Role updated successfully', role: metaRole });
+  } catch (err: any) {
+    console.error('[profiles/:userId/role]', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update role' });
+  }
+};
+
+router.patch('/:userId/role', requireAuth, handleUpdateRole);
+router.post('/:userId/role', requireAuth, handleUpdateRole);
 
 // POST /profiles/:userId/password
 router.post('/:userId/password', requireAuth, async (req, res) => {

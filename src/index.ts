@@ -241,28 +241,60 @@ app.get('/api/settings/:id', apiKeyAuth, async (req, res) => {
 app.get('/admin/dashboard/stats', requireAuth, async (req: express.Request, res: express.Response) => {
   try {
     const auth = (res as any).locals?.auth || {};
-    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin';
-    const { zoneId, churchId } = req.query as { zoneId?: string; churchId?: string };
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+    const { zoneId, churchId, subGroupId, groupId } = req.query as {
+      zoneId?: string;
+      churchId?: string;
+      subGroupId?: string;
+      groupId?: string;
+    };
     const effectiveZone = zoneId || (req as any).tenant?.effectiveZoneId || 'zone-001';
-    const effectiveChurch = churchId || null;
+    const effectiveChurch =
+      churchId ||
+      subGroupId ||
+      groupId ||
+      ((req as any).tenant?.mode === 'church' ? (req as any).tenant?.effectiveChurchId : null) ||
+      null;
 
     const orgFilter = effectiveChurch
       ? { groupId: effectiveChurch }
-      : isHqAdmin
+      : isHqAdmin && (!zoneId || zoneId === 'zone-001')
       ? {}
       : { organizationId: effectiveZone };
 
     const memberFilter = effectiveChurch
       ? { groupId: effectiveChurch }
-      : isHqAdmin
+      : isHqAdmin && (!zoneId || zoneId === 'zone-001')
       ? {}
+      : { organizationId: effectiveZone };
+
+    const songFilter = effectiveChurch
+      ? { groupId: effectiveChurch }
+      : isHqAdmin && (!zoneId || zoneId === 'zone-001')
+      ? { isMaster: true }
       : { organizationId: effectiveZone };
 
     const [totalMembers, activePrograms, totalSongs, pendingSongs] = await Promise.all([
       prisma.membership.count({ where: memberFilter }),
-      prisma.program.count({ where: { ...orgFilter, groupId: effectiveChurch || null } }),
-      prisma.song.count({ where: { isMaster: true } }),
-      prisma.song.count({ where: { status: 'pending', category: 'Submitted Songs', ...(effectiveChurch ? { organizationId: effectiveZone } : (isHqAdmin ? {} : { organizationId: effectiveZone })) } }),
+      prisma.program.count({
+        where: {
+          ...orgFilter,
+          groupId: effectiveChurch || null,
+          category: { not: 'ministered' },
+        },
+      }),
+      prisma.song.count({ where: songFilter }),
+      prisma.song.count({
+        where: {
+          status: 'pending',
+          category: 'Submitted Songs',
+          ...(effectiveChurch
+            ? { organizationId: effectiveZone }
+            : isHqAdmin && (!zoneId || zoneId === 'zone-001')
+            ? {}
+            : { organizationId: effectiveZone }),
+        },
+      }),
     ]);
 
     res.json({

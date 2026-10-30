@@ -2,13 +2,60 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, requireZoneOrHqAdmin } from '../auth/auth.middleware';
+import { isZonalOrHQAdminRole } from '../auth/auth.service';
 
 const router = Router();
 
-function shapeGroup(g: any) {
-  const coord = g.memberships?.[0]?.user;
-  const coordinatorName = coord ? [coord.firstName, coord.lastName].filter(Boolean).join(' ') || coord.email : (g.coordinatorName || undefined);
-  const coordinatorEmail = coord?.email || g.coordinatorEmail || undefined;
+function shapeGroup(g: any, groupMeta?: any) {
+  const coordMap = new Map<string, { id: string; name: string; email: string }>();
+
+  if (Array.isArray(groupMeta?.coordinators)) {
+    for (const c of groupMeta.coordinators) {
+      const cid = String(c?.id || c?.userId || '').trim();
+      if (cid) {
+        coordMap.set(cid, {
+          id: cid,
+          name: String(c?.name || c?.email || 'Coordinator'),
+          email: String(c?.email || ''),
+        });
+      }
+    }
+  }
+
+  if (groupMeta?.coordinatorId && !coordMap.has(String(groupMeta.coordinatorId))) {
+    coordMap.set(String(groupMeta.coordinatorId), {
+      id: String(groupMeta.coordinatorId),
+      name: String(groupMeta.coordinatorName || groupMeta.coordinatorEmail || 'Coordinator'),
+      email: String(groupMeta.coordinatorEmail || ''),
+    });
+  }
+
+  if (Array.isArray(g.memberships)) {
+    for (const m of g.memberships) {
+      const u = m?.user;
+      if (u?.id && !coordMap.has(String(u.id))) {
+        const uName = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'Coordinator';
+        coordMap.set(String(u.id), {
+          id: String(u.id),
+          name: uName,
+          email: u.email || '',
+        });
+      }
+    }
+  }
+
+  const coordinators = Array.from(coordMap.values());
+  const primary = coordinators[0];
+
+  const coordinatorName =
+    coordinators.length > 2
+      ? `${coordinators[0].name}, ${coordinators[1].name} +${coordinators.length - 2}`
+      : coordinators.length > 0
+        ? coordinators.map((c) => c.name).join(', ')
+        : g.coordinatorName || undefined;
+
+  const coordinatorEmail = primary?.email || g.coordinatorEmail || undefined;
+  const coordinatorId = primary?.id || g.coordinatorId || undefined;
 
   return {
     id: g.id,
@@ -20,24 +67,80 @@ function shapeGroup(g: any) {
     status: g.status || 'active',
     description: g.description || '',
     estimatedMembers: g.estimatedMembers || 0,
+    memberCount: g._count?.memberships ?? g.memberCount ?? 0,
+    coordinatorId,
     coordinatorName,
     coordinatorEmail,
+    coordinators,
     createdAt: g.createdAt,
     updatedAt: g.updatedAt,
   };
+}
+
+async function getUserCoordinatedGroups(userId: string, includeMemberGroups: boolean = false) {
+  const memberships = await prisma.membership.findMany({
+    where: includeMemberGroups
+      ? { userId, groupId: { not: null } }
+      : {
+          userId,
+          groupId: { not: null },
+          role: {
+            in: [
+              'GROUP_ADMIN', 'group_admin',
+              'CHURCH_COORDINATOR', 'church_coordinator',
+              'CHURCH_ADMIN', 'church_admin',
+              'SUBGROUP_ADMIN', 'subgroup_admin',
+              'SUBGROUP_COORDINATOR', 'subgroup_coordinator',
+              'ZONE_ADMIN', 'zone_admin',
+              'ZONE_COORDINATOR', 'zone_coordinator',
+              'HQ_ADMIN', 'hq_admin', 'ADMIN', 'admin', 'SUPER_ADMIN', 'super_admin',
+            ],
+          },
+        },
+    include: { group: true },
+  });
+
+  const groupMap = new Map<string, any>();
+  for (const m of memberships) {
+    if (m.group) {
+      groupMap.set(m.group.id, m.group);
+    }
+  }
+
+  try {
+    const metaSetting = await prisma.setting.findUnique({ where: { key: `profile_meta_${userId}` } });
+    const meta: any = metaSetting?.value || {};
+    const extraIds = new Set<string>();
+    if (meta.churchId && !groupMap.has(String(meta.churchId))) {
+      extraIds.add(String(meta.churchId));
+    }
+    if (Array.isArray(meta.churches)) {
+      for (const c of meta.churches) {
+        const cid = c?.id || c?.churchId || c?.groupId;
+        if (cid && !groupMap.has(String(cid))) {
+          extraIds.add(String(cid));
+        }
+      }
+    }
+    if (extraIds.size > 0) {
+      const extraGroups = await prisma.group.findMany({
+        where: { id: { in: Array.from(extraIds) } },
+      });
+      for (const g of extraGroups) {
+        groupMap.set(g.id, g);
+      }
+    }
+  } catch {}
+
+  return Array.from(groupMap.values());
 }
 
 /** GET /subgroups/mine */
 router.get('/mine', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const memberships = await prisma.membership.findMany({
-      where: { userId, groupId: { not: null } },
-      include: { group: true },
-    });
-
-    const groups = memberships.map((m) => m.group).filter(Boolean);
-    res.json({ success: true, data: groups.map(shapeGroup) });
+    const groups = await getUserCoordinatedGroups(userId, true);
+    res.json({ success: true, data: groups.map((g) => shapeGroup(g)) });
   } catch (err) {
     console.error('[subgroups/mine]', err);
     res.status(500).json({ success: false, error: 'Failed to load your groups' });
@@ -48,13 +151,8 @@ router.get('/mine', requireAuth, async (req: Request, res: Response) => {
 router.get('/coordinated', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = res.locals.auth.userId as string;
-    const memberships = await prisma.membership.findMany({
-      where: { userId, role: 'GROUP_ADMIN', groupId: { not: null } },
-      include: { group: true },
-    });
-
-    const groups = memberships.map((m) => m.group).filter(Boolean);
-    res.json({ success: true, data: groups.map(shapeGroup) });
+    const groups = await getUserCoordinatedGroups(userId, false);
+    res.json({ success: true, data: groups.map((g) => shapeGroup(g)) });
   } catch (err) {
     console.error('[subgroups/coordinated]', err);
     res.status(500).json({ success: false, error: 'Failed to load coordinated groups' });
@@ -92,16 +190,33 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const groups = await prisma.group.findMany({
       where: whereClause,
       include: {
+        _count: {
+          select: { memberships: true },
+        },
         memberships: {
           where: { role: 'GROUP_ADMIN' },
           include: { user: true },
-          take: 1,
         },
       },
       orderBy: { name: 'asc' },
     });
 
-    res.json({ success: true, count: groups.length, data: groups.map(shapeGroup) });
+    const groupMetaMap = new Map<string, any>();
+    if (groups.length > 0) {
+      try {
+        const metaKeys = groups.map((g) => `group_meta_${g.id}`);
+        const metaSettings = await prisma.setting.findMany({ where: { key: { in: metaKeys } } });
+        for (const s of metaSettings) {
+          groupMetaMap.set(s.key.replace('group_meta_', ''), s.value);
+        }
+      } catch {}
+    }
+
+    res.json({
+      success: true,
+      count: groups.length,
+      data: groups.map((g) => shapeGroup(g, groupMetaMap.get(g.id))),
+    });
   } catch (err) {
     console.error('[subgroups/ GET]', err);
     res.status(500).json({ success: false, error: 'Failed to load groups' });
@@ -111,9 +226,25 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 /** GET /subgroups/:id */
 router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const group = await prisma.group.findUnique({ where: { id: req.params.id } });
+    const group = await prisma.group.findUnique({
+      where: { id: req.params.id },
+      include: {
+        _count: {
+          select: { memberships: true },
+        },
+        memberships: {
+          where: { role: 'GROUP_ADMIN' },
+          include: { user: true },
+        },
+      },
+    });
     if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
-    res.json({ success: true, data: shapeGroup(group) });
+    let groupMeta: any = null;
+    try {
+      const metaRow = await prisma.setting.findUnique({ where: { key: `group_meta_${group.id}` } });
+      groupMeta = metaRow?.value || null;
+    } catch {}
+    res.json({ success: true, data: shapeGroup(group, groupMeta) });
   } catch (err) {
     console.error('[subgroups/:id]', err);
     res.status(500).json({ success: false, error: 'Failed to load group' });
@@ -237,14 +368,17 @@ router.post('/:id/members', requireAuth, requireTenantAdmin, async (req: Request
 router.delete('/:id/members/:userId', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id, userId } = req.params;
+    await detachChurchFromUserMeta(userId, id);
+
     const membership = await prisma.membership.findFirst({
       where: { userId, groupId: id },
     });
 
     if (membership) {
+      const nextRole = isZonalOrHQAdminRole(membership.role) ? membership.role : 'MEMBER';
       await prisma.membership.update({
         where: { id: membership.id },
-        data: { groupId: null },
+        data: { groupId: null, role: nextRole },
       });
     }
 
@@ -255,8 +389,7 @@ router.delete('/:id/members/:userId', requireAuth, requireTenantAdmin, async (re
   }
 });
 
-/** POST /subgroups/:id/assign-coordinator */
-router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
+async function assignCoordinatorToGroup(req: Request, res: Response, logPrefix: string) {
   try {
     const { id } = req.params;
     const { email, userId, identifier } = req.body;
@@ -279,12 +412,18 @@ router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async 
 
     const membership = await prisma.membership.findFirst({
       where: { userId: targetUser.id, organizationId: group.organizationId },
+      include: { group: true },
     });
+
+    const preserveRole =
+      membership?.role && isZonalOrHQAdminRole(membership.role)
+        ? membership.role
+        : 'GROUP_ADMIN';
 
     if (membership) {
       await prisma.membership.update({
         where: { id: membership.id },
-        data: { groupId: id, role: 'GROUP_ADMIN' },
+        data: { groupId: id, role: preserveRole },
       });
     } else {
       await prisma.membership.create({
@@ -299,15 +438,55 @@ router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async 
       });
     }
 
-    // Sync profile_meta for user
+    // Sync profile_meta for user (preserving existing coordinated churches so multi-church admins keep all churches)
     const metaKey = `profile_meta_${targetUser.id}`;
     const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
-    const currentMeta: any = existingMeta?.value || {};
+    const currentMeta: any = existingMeta?.value && typeof existingMeta.value === 'object' ? existingMeta.value : {};
+
+    const churchesMap = new Map<string, { id: string; name: string; zoneId: string }>();
+    if (Array.isArray(currentMeta.churches)) {
+      for (const c of currentMeta.churches) {
+        const cid = String(c?.id || c?.churchId || c?.groupId || '').trim();
+        if (cid) {
+          churchesMap.set(cid, {
+            id: cid,
+            name: String(c?.name || c?.churchName || c?.groupName || 'Church'),
+            zoneId: String(c?.zoneId || c?.organizationId || group.organizationId),
+          });
+        }
+      }
+    }
+    if (currentMeta.churchId && !churchesMap.has(String(currentMeta.churchId))) {
+      churchesMap.set(String(currentMeta.churchId), {
+        id: String(currentMeta.churchId),
+        name: String(currentMeta.church || 'Church'),
+        zoneId: group.organizationId,
+      });
+    }
+    if (membership?.groupId && membership.group && !churchesMap.has(membership.groupId)) {
+      churchesMap.set(membership.groupId, {
+        id: membership.groupId,
+        name: membership.group.name,
+        zoneId: membership.organizationId,
+      });
+    }
+    churchesMap.set(group.id, {
+      id: group.id,
+      name: group.name,
+      zoneId: group.organizationId,
+    });
+
+    const preserveMetaRole =
+      currentMeta?.role && isZonalOrHQAdminRole(currentMeta.role)
+        ? currentMeta.role
+        : 'church_coordinator';
+
     const updatedMeta = {
       ...currentMeta,
-      role: 'church_coordinator',
+      role: preserveMetaRole,
       church: group.name,
       churchId: group.id,
+      churches: Array.from(churchesMap.values()),
     };
     await prisma.setting.upsert({
       where: { key: metaKey },
@@ -315,79 +494,208 @@ router.post('/:id/assign-coordinator', requireAuth, requireZoneOrHqAdmin, async 
       update: { value: updatedMeta },
     });
 
+    // Also persist group_meta_${group.id} so GET /subgroups knows ALL coordinators for this church
+    const coordinatorName =
+      [targetUser.firstName, targetUser.lastName].filter(Boolean).join(' ') || targetUser.email || 'Coordinator';
+    const groupMetaKey = `group_meta_${group.id}`;
+    const existingGroupMetaRow = await prisma.setting.findUnique({ where: { key: groupMetaKey } }).catch(() => null);
+    const existingGroupMeta: any = existingGroupMetaRow?.value && typeof existingGroupMetaRow.value === 'object' ? existingGroupMetaRow.value : {};
+
+    const coordListMap = new Map<string, { id: string; name: string; email: string }>();
+    if (Array.isArray(existingGroupMeta.coordinators)) {
+      for (const c of existingGroupMeta.coordinators) {
+        const cid = String(c?.id || c?.userId || '').trim();
+        if (cid) {
+          coordListMap.set(cid, {
+            id: cid,
+            name: String(c?.name || c?.email || 'Coordinator'),
+            email: String(c?.email || ''),
+          });
+        }
+      }
+    }
+    if (existingGroupMeta.coordinatorId && !coordListMap.has(String(existingGroupMeta.coordinatorId))) {
+      coordListMap.set(String(existingGroupMeta.coordinatorId), {
+        id: String(existingGroupMeta.coordinatorId),
+        name: String(existingGroupMeta.coordinatorName || existingGroupMeta.coordinatorEmail || 'Coordinator'),
+        email: String(existingGroupMeta.coordinatorEmail || ''),
+      });
+    }
+    coordListMap.set(targetUser.id, {
+      id: targetUser.id,
+      name: coordinatorName,
+      email: targetUser.email || '',
+    });
+
+    const allCoords = Array.from(coordListMap.values());
+    const primaryCoord = allCoords[0];
+
+    const groupMetaValue = {
+      ...existingGroupMeta,
+      coordinatorId: primaryCoord?.id || targetUser.id,
+      coordinatorName: primaryCoord?.name || coordinatorName,
+      coordinatorEmail: primaryCoord?.email || targetUser.email,
+      coordinators: allCoords,
+      updatedAt: new Date().toISOString(),
+    };
+    await prisma.setting.upsert({
+      where: { key: groupMetaKey },
+      create: { key: groupMetaKey, value: groupMetaValue },
+      update: { value: groupMetaValue },
+    });
+
     res.json({ success: true, message: 'Coordinator assigned successfully' });
   } catch (err) {
-    console.error('[subgroups/:id/assign-coordinator]', err);
+    console.error(logPrefix, err);
     res.status(500).json({ success: false, error: 'Failed to assign coordinator' });
   }
+}
+
+/** POST /subgroups/:id/assign-coordinator */
+router.post('/:id/assign-coordinator', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  await assignCoordinatorToGroup(req, res, '[subgroups/:id/assign-coordinator]');
 });
 
 /** POST /subgroups/:id/coordinators — Alias for assign-coordinator */
-router.post('/:id/coordinators', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
+router.post('/:id/coordinators', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
+  await assignCoordinatorToGroup(req, res, '[subgroups/:id/coordinators]');
+});
+
+async function detachChurchFromUserMeta(userId: string, groupId: string) {
   try {
-    const { id } = req.params;
-    const { email, userId, identifier } = req.body;
-
-    let targetUser: any = null;
-    const lookupId = userId || (!identifier?.includes('@') ? identifier : null);
-    const lookupEmail = (email || (identifier?.includes('@') ? identifier : null))?.toLowerCase().trim();
-
-    if (lookupId) {
-      targetUser = await prisma.user.findUnique({ where: { id: lookupId } });
-    }
-    if (!targetUser && lookupEmail) {
-      targetUser = await prisma.user.findFirst({ where: { email: lookupEmail } });
-    }
-
-    if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
-
-    const group = await prisma.group.findUnique({ where: { id } });
-    if (!group) return res.status(404).json({ success: false, error: 'Group not found' });
-
-    const membership = await prisma.membership.findFirst({
-      where: { userId: targetUser.id, organizationId: group.organizationId },
-    });
-
-    if (membership) {
-      await prisma.membership.update({
-        where: { id: membership.id },
-        data: { groupId: id, role: 'GROUP_ADMIN' },
-      });
-    } else {
-      await prisma.membership.create({
-        data: {
-          id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          userId: targetUser.id,
-          organizationId: group.organizationId,
-          groupId: id,
-          role: 'GROUP_ADMIN',
-          status: 'ACTIVE',
-        },
-      });
-    }
-
-    // Sync profile_meta for user
-    const metaKey = `profile_meta_${targetUser.id}`;
+    const metaKey = `profile_meta_${userId}`;
     const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
-    const currentMeta: any = existingMeta?.value || {};
+    const currentMeta: any = existingMeta?.value && typeof existingMeta.value === 'object' ? existingMeta.value : null;
+    if (!currentMeta) return;
+
+    const remainingChurches = Array.isArray(currentMeta.churches)
+      ? currentMeta.churches.filter((c: any) => String(c?.id || c?.churchId || c?.groupId || '') !== groupId)
+      : [];
+
+    const nextPrimary = remainingChurches[0] || null;
+    const isCurrentPrimary = String(currentMeta.churchId || '') === groupId;
+    const isStillCoordinator = remainingChurches.length > 0;
+
+    const nextRole =
+      !isStillCoordinator && String(currentMeta.role || '').toLowerCase() === 'church_coordinator'
+        ? 'member'
+        : currentMeta.role;
+
     const updatedMeta = {
       ...currentMeta,
-      role: 'church_coordinator',
-      church: group.name,
-      churchId: group.id,
+      role: nextRole,
+      churchId: isCurrentPrimary ? (nextPrimary?.id || null) : currentMeta.churchId,
+      church: isCurrentPrimary ? (nextPrimary?.name || null) : currentMeta.church,
+      churches: remainingChurches,
     };
+
     await prisma.setting.upsert({
       where: { key: metaKey },
       create: { key: metaKey, value: updatedMeta },
       update: { value: updatedMeta },
     });
 
-    res.json({ success: true, message: 'Coordinator assigned successfully' });
+    // If their membership in this zone pointed to groupId as GROUP_ADMIN, update it to nextPrimary or demote to MEMBER
+    const mem = await prisma.membership.findFirst({
+      where: { userId, groupId },
+    });
+    if (mem) {
+      const nextRoleForMem =
+        isZonalOrHQAdminRole(mem.role)
+          ? mem.role
+          : (nextPrimary ? 'GROUP_ADMIN' : 'MEMBER');
+      await prisma.membership.update({
+        where: { id: mem.id },
+        data: {
+          groupId: nextPrimary?.id || mem.groupId,
+          role: nextRoleForMem,
+        },
+      });
+    }
   } catch (err) {
-    console.error('[subgroups/:id/coordinators]', err);
-    res.status(500).json({ success: false, error: 'Failed to assign coordinator' });
+    console.warn('[detachChurchFromUserMeta]', err);
   }
-});
+}
+
+/** DELETE /subgroups/:id/coordinators & POST /subgroups/:id/remove-coordinator — Unassign church coordinator(s) */
+const handleRemoveCoordinator = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const specificUserId = String(req.body?.userId || req.query?.userId || '').trim();
+    const groupMetaKey = `group_meta_${id}`;
+    const groupMetaRow = await prisma.setting.findUnique({ where: { key: groupMetaKey } }).catch(() => null);
+    const groupMeta: any = groupMetaRow?.value && typeof groupMetaRow.value === 'object' ? groupMetaRow.value : {};
+
+    if (specificUserId) {
+      // Unassign ONLY the specified user, keeping any co-coordinators intact
+      await detachChurchFromUserMeta(specificUserId, id);
+
+      const remainingCoords = Array.isArray(groupMeta.coordinators)
+        ? groupMeta.coordinators.filter((c: any) => String(c?.id || c?.userId || '') !== specificUserId)
+        : [];
+
+      if (remainingCoords.length > 0) {
+        const nextLead = remainingCoords[0];
+        await prisma.setting.upsert({
+          where: { key: groupMetaKey },
+          create: {
+            key: groupMetaKey,
+            value: {
+              ...groupMeta,
+              coordinatorId: nextLead.id,
+              coordinatorName: nextLead.name,
+              coordinatorEmail: nextLead.email,
+              coordinators: remainingCoords,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          update: {
+            value: {
+              ...groupMeta,
+              coordinatorId: nextLead.id,
+              coordinatorName: nextLead.name,
+              coordinatorEmail: nextLead.email,
+              coordinators: remainingCoords,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        });
+      } else if (String(groupMeta.coordinatorId || '') === specificUserId) {
+        await prisma.setting.delete({ where: { key: groupMetaKey } }).catch(() => {});
+      }
+    } else {
+      // Unassign all coordinators of this church
+      const adminMemberships = await prisma.membership.findMany({
+        where: { groupId: id, role: 'GROUP_ADMIN' },
+      });
+
+      const targetUserIds = new Set<string>();
+      if (groupMeta?.coordinatorId) targetUserIds.add(String(groupMeta.coordinatorId));
+      if (Array.isArray(groupMeta?.coordinators)) {
+        for (const c of groupMeta.coordinators) {
+          if (c?.id) targetUserIds.add(String(c.id));
+        }
+      }
+      for (const m of adminMemberships) {
+        targetUserIds.add(m.userId);
+      }
+
+      for (const uid of targetUserIds) {
+        await detachChurchFromUserMeta(uid, id);
+      }
+
+      await prisma.setting.delete({ where: { key: groupMetaKey } }).catch(() => {});
+    }
+
+    res.json({ success: true, message: 'Coordinator unassigned successfully' });
+  } catch (err) {
+    console.error('[subgroups/:id/remove-coordinator]', err);
+    res.status(500).json({ success: false, error: 'Failed to remove coordinator' });
+  }
+};
+
+router.delete('/:id/coordinators', requireAuth, requireTenantAdmin, handleRemoveCoordinator);
+router.post('/:id/remove-coordinator', requireAuth, requireTenantAdmin, handleRemoveCoordinator);
 
 /** POST /subgroups/:id/approve — Approve pending church/subgroup */
 router.post('/:id/approve', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
@@ -498,27 +806,6 @@ router.get('/members', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-/** GET /subgroups/:id/members — List members of a church / subgroup */
-router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const memberships = await prisma.membership.findMany({
-      where: { groupId: id },
-      include: { user: true, organization: true, group: true },
-      orderBy: { joinedAt: 'desc' },
-    });
-
-    res.json({
-      success: true,
-      count: memberships.length,
-      data: memberships.map(shapeSubgroupMember),
-    });
-  } catch (err) {
-    console.error('[subgroups/:id/members]', err);
-    res.status(500).json({ success: false, error: 'Failed to load group members' });
-  }
-});
-
 /** POST /subgroups/members — Add member to subgroup with body { subGroupId, userId } */
 router.post('/members', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
@@ -565,14 +852,17 @@ router.delete('/members', requireAuth, requireTenantAdmin, async (req: Request, 
     const targetGroupId = subGroupId || groupId;
     if (!targetGroupId || !userId) return res.status(400).json({ success: false, error: 'subGroupId and userId are required' });
 
+    await detachChurchFromUserMeta(userId, targetGroupId);
+
     const membership = await prisma.membership.findFirst({
       where: { userId, groupId: targetGroupId },
     });
 
     if (membership) {
+      const nextRole = isZonalOrHQAdminRole(membership.role) ? membership.role : 'MEMBER';
       await prisma.membership.update({
         where: { id: membership.id },
-        data: { groupId: null },
+        data: { groupId: null, role: nextRole },
       });
     }
 
@@ -629,9 +919,43 @@ router.patch('/:id', requireAuth, requireZoneOrHqAdmin, async (req: Request, res
     const updated = await prisma.group.update({
       where: { id },
       data: updateData,
+      include: {
+        _count: { select: { memberships: true } },
+        memberships: {
+          where: { role: 'GROUP_ADMIN' },
+          include: { user: true },
+          take: 1,
+        },
+      },
     });
 
-    res.json({ success: true, data: shapeGroup(updated) });
+    // If name changed, sync coordinator's profile_meta.churches so their switcher shows the updated church name
+    let groupMeta: any = null;
+    try {
+      const metaRow = await prisma.setting.findUnique({ where: { key: `group_meta_${id}` } });
+      groupMeta = metaRow?.value || null;
+      if (updateData.name) {
+        const coordId = groupMeta?.coordinatorId || updated.memberships?.[0]?.userId;
+        if (coordId) {
+          const pMetaKey = `profile_meta_${coordId}`;
+          const pRow = await prisma.setting.findUnique({ where: { key: pMetaKey } });
+          if (pRow?.value && typeof pRow.value === 'object') {
+            const pVal: any = { ...(pRow.value as Record<string, any>) };
+            if (String(pVal.churchId || '') === id) {
+              pVal.church = updateData.name;
+            }
+            if (Array.isArray(pVal.churches)) {
+              pVal.churches = pVal.churches.map((c: any) =>
+                String(c?.id || c?.churchId || '') === id ? { ...c, name: updateData.name } : c
+              );
+            }
+            await prisma.setting.update({ where: { key: pMetaKey }, data: { value: pVal } });
+          }
+        }
+      }
+    } catch {}
+
+    res.json({ success: true, data: shapeGroup(updated, groupMeta) });
   } catch (err: any) {
     console.error('[subgroups PATCH]', err);
     res.status(500).json({ success: false, error: err?.message || 'Failed to update group' });
@@ -642,6 +966,33 @@ router.patch('/:id', requireAuth, requireZoneOrHqAdmin, async (req: Request, res
 router.delete('/:id', requireAuth, requireZoneOrHqAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    // 1. Find coordinator and all members referencing this group to clean up their profile_meta & memberships
+    const groupMetaKey = `group_meta_${id}`;
+    const [groupMetaRow, groupMemberships] = await Promise.all([
+      prisma.setting.findUnique({ where: { key: groupMetaKey } }).catch(() => null),
+      prisma.membership.findMany({ where: { groupId: id } }).catch(() => []),
+    ]);
+
+    const affectedUserIds = new Set<string>();
+    const groupMeta: any = groupMetaRow?.value || {};
+    if (groupMeta?.coordinatorId) affectedUserIds.add(String(groupMeta.coordinatorId));
+    for (const m of groupMemberships) {
+      affectedUserIds.add(m.userId);
+    }
+
+    for (const uid of affectedUserIds) {
+      await detachChurchFromUserMeta(uid, id);
+    }
+
+    // 2. Detach remaining memberships, programs, songs, and group_meta before deleting the group
+    await Promise.all([
+      prisma.membership.updateMany({ where: { groupId: id }, data: { groupId: null } }).catch(() => {}),
+      prisma.program.deleteMany({ where: { groupId: id } }).catch(() => {}),
+      prisma.song.updateMany({ where: { groupId: id }, data: { groupId: null } }).catch(() => {}),
+      prisma.setting.delete({ where: { key: groupMetaKey } }).catch(() => {}),
+    ]);
+
     await prisma.group.delete({ where: { id } });
     res.json({ success: true, message: 'Group deleted successfully' });
   } catch (err: any) {

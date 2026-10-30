@@ -13,6 +13,7 @@ import {
   resetPasswordForEmail,
   getKingschatProfiles,
   issueTokensForProfile,
+  fetchAllUserMemberships,
 } from './auth.service';
 import prisma from '../lib/prisma';
 
@@ -441,40 +442,62 @@ router.get('/linked-accounts', requireAuth, async (req, res) => {
       currentUser.phone,
     );
 
-    // Fetch meta settings for all matched profiles to accurately show church name and role
+    // Fetch meta settings and memberships for all matched profiles to accurately show church name, zone, and role
     const accounts = await Promise.all(
       matchingProfiles.map(async (p) => {
         let churchName = (p.rawData as any)?.church || '';
+        let churchId = (p.rawData as any)?.churchId || null;
         let effectiveRole = p.role;
+        let zoneId = p.zoneId || (p.rawData as any)?.zoneId || null;
+        let zoneName = '';
 
         try {
           const meta = await prisma.setting.findUnique({ where: { key: `profile_meta_${p.id}` } });
           const metaVal: any = meta?.value || {};
           if (metaVal.church) churchName = metaVal.church;
+          if (metaVal.churchId) churchId = metaVal.churchId;
           if (metaVal.role) effectiveRole = metaVal.role;
         } catch {}
+
+        try {
+          const memberships = await fetchAllUserMemberships(p.id, p.rawData);
+          const primaryMem = memberships[0];
+          if (primaryMem) {
+            if (!zoneId) zoneId = primaryMem.organizationId || null;
+            zoneName = primaryMem.organization?.name || '';
+            if (!churchId && primaryMem.subgroupId) churchId = primaryMem.subgroupId;
+            if (!churchName && primaryMem.subgroup?.name) churchName = primaryMem.subgroup.name;
+          }
+        } catch {}
+
+        const fullName = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || 'Admin';
 
         return {
           id: p.id,
           email: p.email,
+          name: fullName,
           firstName: p.firstName,
           lastName: p.lastName,
           role: effectiveRole,
           hasHqAccess: p.hasHqAccess,
           avatarUrl: p.avatarUrl,
           phone: p.phone,
+          zoneId,
+          zoneName: zoneName || zoneId || '',
           zoneCode:
             (p.rawData as any)?.zoneCode ||
             (p.rawData as any)?.zone_code ||
-            (p.rawData as any)?.zoneId ||
+            zoneId ||
             '',
+          churchId,
+          churchName: churchName || null,
           church: churchName,
           isCurrent: p.id === userId,
         };
       })
     );
 
-    res.json({ success: true, data: accounts });
+    res.json({ success: true, currentUserId: userId, data: accounts, accounts });
   } catch (err: any) {
     console.error('[auth/linked-accounts error]', err);
     res.status(500).json({ success: false, error: 'Failed to retrieve linked accounts' });
