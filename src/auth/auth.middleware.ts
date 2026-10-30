@@ -94,15 +94,50 @@ export function requireTenantAdmin(req: Request, res: Response, next: NextFuncti
  * Strict role check ensuring ONLY Zone Administrators and HQ Admins
  * can create churches, edit church details, delete churches, or assign church coordinators.
  */
-export function requireZoneOrHqAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!canManageChurches(res.locals.auth?.role)) {
-    res.status(403).json({
-      success: false,
-      error: 'Forbidden: Only Zone Administrators and HQ Admins can create churches and appoint coordinators.',
-    });
+export async function requireZoneOrHqAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const role = res.locals.auth?.role;
+  if (canManageChurches(role)) {
+    next();
     return;
   }
-  next();
+
+  // Fallback: Check if the user has an active Zone Admin or HQ Admin membership in DB
+  const userId = res.locals.auth?.userId;
+  if (userId) {
+    try {
+      const { default: prisma } = await import('../lib/prisma');
+      const membership = await prisma.membership.findFirst({
+        where: {
+          userId,
+          status: { in: ['ACTIVE', 'active'] },
+          role: {
+            in: [
+              'ZONE_ADMIN', 'zone_admin', 'zone_coordinator', 'ZONE_COORDINATOR',
+              'COORDINATOR', 'coordinator', 'ORG_ADMIN', 'org_admin', 'ZONE_LEADER', 'zone_leader',
+              'HQ_ADMIN', 'hq_admin', 'ADMIN', 'admin', 'SUPER_ADMIN', 'super_admin',
+              'PRESIDENT', 'president', 'DIRECTOR', 'director', 'OFTP', 'oftp', 'EXECUTIVE', 'executive', 'BOSS', 'boss',
+            ],
+          },
+        },
+      });
+
+      if (membership) {
+        // Hydrate role in request locals so downstream handlers see the proper admin role
+        if (res.locals.auth) {
+          res.locals.auth.role = (membership.role || 'zone_admin').toLowerCase();
+        }
+        next();
+        return;
+      }
+    } catch (err) {
+      console.error('[requireZoneOrHqAdmin] DB fallback check error:', err);
+    }
+  }
+
+  res.status(403).json({
+    success: false,
+    error: 'Forbidden: Only Zone Administrators and HQ Admins can create churches and appoint coordinators.',
+  });
 }
 
 /**

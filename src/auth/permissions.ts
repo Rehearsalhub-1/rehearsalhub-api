@@ -57,5 +57,15 @@ export function canManageTenant(role: unknown): boolean {
  */
 export function canManageChurches(role: unknown): boolean {
   const normalized = normalizeRole(role)
-  return isHQRole(normalized) || normalized === 'zone_admin' || normalized === 'zone_coordinator'
+  return (
+    isHQRole(normalized) ||
+    normalized === 'zone_admin' ||
+    normalized === 'zone_coordinator' ||
+    normalized === 'coordinator' ||
+    normalized === 'org_admin' ||
+    normalized === 'zone_leader' ||
+    normalized === 'leader' ||
+    normalized === 'admin'
+  )
 }
+

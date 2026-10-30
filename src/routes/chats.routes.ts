@@ -606,8 +606,75 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
 
     const messageId = req.body.id || crypto.randomUUID();
 
+    // Resolve replyTo details
+    let resolvedReplyTo: any = null;
+    const rawReply = req.body.replyTo || req.body.reply_to || req.body.replyToId;
+    if (rawReply) {
+      if (typeof rawReply === 'object') {
+        resolvedReplyTo = {
+          id: rawReply.id || rawReply.messageId,
+          text: rawReply.text || rawReply.content || '',
+          senderName: rawReply.senderName || rawReply.sender || 'Participant',
+          type: rawReply.type || 'text',
+          imageUrl: rawReply.imageUrl || null,
+        };
+      } else if (typeof rawReply === 'string') {
+        if (rawReply.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(rawReply);
+            resolvedReplyTo = {
+              id: parsed.id || parsed.messageId,
+              text: parsed.text || parsed.content || '',
+              senderName: parsed.senderName || parsed.sender || 'Participant',
+              type: parsed.type || 'text',
+              imageUrl: parsed.imageUrl || null,
+            };
+          } catch {
+            resolvedReplyTo = { id: rawReply, text: 'Message', senderName: 'Participant' };
+          }
+        } else {
+          // It's a message ID string - look up target message in DB
+          try {
+            const targetMsg = await prisma.message.findUnique({
+              where: { id: rawReply },
+              include: { sender: true },
+            });
+            if (targetMsg) {
+              const formattedTarget = formatMessage(targetMsg);
+              resolvedReplyTo = {
+                id: targetMsg.id,
+                text: formattedTarget.text || (formattedTarget.type === 'voice' ? '🎤 Voice note' : (formattedTarget.imageUrl ? '📷 Photo' : 'Message')),
+                senderName: formattedTarget.senderName || 'Participant',
+                type: formattedTarget.type,
+                imageUrl: formattedTarget.imageUrl || null,
+              };
+            } else {
+              resolvedReplyTo = { id: rawReply, text: 'Message', senderName: 'Participant' };
+            }
+          } catch {
+            resolvedReplyTo = { id: rawReply, text: 'Message', senderName: 'Participant' };
+          }
+        }
+      }
+    }
+
     let storedText = text;
-    const hasStructuredData = req.body.playlistData || req.body.songData || req.body.profileData || req.body.contactData || req.body.pollOptions || req.body.media_url || req.body.mediaUrl || req.body.imageUrl || req.body.videoUrl || req.body.documentUrl || req.body.audioUrl || req.body.voiceUrl || req.body.documentName;
+    const hasStructuredData = Boolean(
+      req.body.playlistData ||
+      req.body.songData ||
+      req.body.profileData ||
+      req.body.contactData ||
+      req.body.pollOptions ||
+      req.body.media_url ||
+      req.body.mediaUrl ||
+      req.body.imageUrl ||
+      req.body.videoUrl ||
+      req.body.documentUrl ||
+      req.body.audioUrl ||
+      req.body.voiceUrl ||
+      req.body.documentName ||
+      resolvedReplyTo
+    );
 
     if (hasStructuredData) {
       storedText = JSON.stringify({
@@ -626,7 +693,7 @@ router.post('/:chatId/messages', requireAuth, async (req: Request, res: Response
         documentName: req.body.documentName || null,
         documentSize: req.body.documentSize || null,
         duration: req.body.duration || null,
-        replyTo: req.body.replyTo || null,
+        replyTo: resolvedReplyTo || null,
       });
     }
 

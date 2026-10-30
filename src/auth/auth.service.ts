@@ -16,6 +16,28 @@ function isHQZoneCode(code: string): boolean {
   return HQ_ZONE_CODES.has(code.toUpperCase().trim());
 }
 
+export const ADMIN_MEMBERSHIP_ROLES = new Set([
+  'hq_admin', 'HQ_ADMIN', 'admin', 'ADMIN', 'super_admin', 'SUPER_ADMIN',
+  'boss', 'BOSS', 'president', 'PRESIDENT', 'director', 'DIRECTOR', 'oftp', 'OFTP', 'executive', 'EXECUTIVE',
+  'zone_admin', 'ZONE_ADMIN', 'zone_coordinator', 'ZONE_COORDINATOR',
+  'coordinator', 'COORDINATOR', 'subgroup_admin', 'SUBGROUP_ADMIN',
+  'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
+  'church_admin', 'CHURCH_ADMIN', 'org_admin', 'ORG_ADMIN', 'zone_leader', 'ZONE_LEADER',
+  'group_admin', 'GROUP_ADMIN', 'group_coordinator', 'GROUP_COORDINATOR',
+  'leader', 'LEADER',
+]);
+
+export function isZonalOrHQAdminRole(role: unknown): boolean {
+  if (!role) return false;
+  const r = String(role).toUpperCase().trim();
+  return (
+    r === 'HQ_ADMIN' || r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'BOSS' ||
+    r === 'PRESIDENT' || r === 'DIRECTOR' || r === 'OFTP' || r === 'EXECUTIVE' ||
+    r === 'ZONE_ADMIN' || r === 'ZONE_COORDINATOR' || r === 'COORDINATOR' ||
+    r === 'ORG_ADMIN' || r === 'ZONE_LEADER' || r === 'LEADER'
+  );
+}
+
 export class AuthError extends Error {
   constructor(message: string, public readonly statusCode: number = 401) {
     super(message);
@@ -58,7 +80,7 @@ export function tokenRole(profile: { role: string | null; hasHqAccess?: boolean 
   const r = (profile.role || String(raw.role || '')).toLowerCase();
   if (r === 'admin' || r === 'hq_admin' || r === 'super_admin' || r === 'boss') return 'hq_admin';
   if (r === 'president' || r === 'director' || r === 'oftp' || r === 'executive') return r;
-  if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator' || r === 'coordinator' || r === 'org_admin') return 'zone_admin';
+  if (r === 'zone_admin' || r === 'zone_coordinator' || r === 'subgroup_admin' || r === 'subgroup_coordinator' || r === 'coordinator' || r === 'org_admin' || r === 'zone_leader' || r === 'leader') return 'zone_admin';
   if (r === 'church_coordinator' || r === 'church_admin' || r === 'group_admin' || r === 'group_coordinator') return 'church_coordinator';
   return 'member';
 }
@@ -73,9 +95,13 @@ export function profileFromUser(user: any): any {
   if (!user) return null;
   const memberships = Array.isArray(user.memberships) ? user.memberships : [];
   const hqAdminMembership = memberships.find((m: any) => isHQRole(m.role));
+  const zoneAdminMembership = memberships.find((m: any) => isZonalOrHQAdminRole(m.role));
+  const anyAdminMembership = memberships.find((m: any) => ADMIN_MEMBERSHIP_ROLES.has(m.role));
+  const activeMembership = hqAdminMembership || zoneAdminMembership || anyAdminMembership || memberships[0];
+
   const hasHqAdmin = Boolean(hqAdminMembership);
-  const primaryRole = (hqAdminMembership?.role || memberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqAdminMembership?.organizationId || memberships[0]?.organizationId || null;
+  const primaryRole = (activeMembership?.role || 'member').toLowerCase();
+  const primaryZoneId = activeMembership?.organizationId || null;
 
   return {
     id: user.id,
@@ -137,14 +163,6 @@ export type AuthUser = {
   memberships?: any[];
 };
 export type AuthTokenResult = { accessToken: string; refreshToken: string; user: AuthUser };
-
-const ADMIN_MEMBERSHIP_ROLES = new Set([
-  'hq_admin', 'HQ_ADMIN', 'admin', 'ADMIN', 'super_admin', 'SUPER_ADMIN',
-  'boss', 'BOSS', 'president', 'PRESIDENT', 'director', 'DIRECTOR', 'oftp', 'OFTP', 'executive', 'EXECUTIVE',
-  'zone_admin', 'ZONE_ADMIN', 'zone_coordinator', 'ZONE_COORDINATOR',
-  'coordinator', 'COORDINATOR', 'subgroup_admin', 'SUBGROUP_ADMIN',
-  'subgroup_coordinator', 'SUBGROUP_COORDINATOR', 'church_coordinator', 'CHURCH_COORDINATOR',
-]);
 
 let orgLookupCache: { orgMap: Map<string, any>; orgCodeMap: Map<string, any>; expiresAt: number } | null = null;
 
@@ -594,9 +612,13 @@ export async function refresh(rawToken: string, profileId?: string): Promise<{ a
   if (!user) throw new AuthError('User not found');
 
   const hqAdminMembership = user.memberships.find((m) => isHQRole(m.role));
+  const zoneAdminMembership = user.memberships.find((m) => isZonalOrHQAdminRole(m.role));
+  const anyAdminMembership = user.memberships.find((m) => ADMIN_MEMBERSHIP_ROLES.has(m.role));
+  const activeMembership = hqAdminMembership || zoneAdminMembership || anyAdminMembership || user.memberships[0];
+
   const hasHqAdmin = Boolean(hqAdminMembership);
-  const primaryRole = (hqAdminMembership?.role || user.memberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqAdminMembership?.organizationId || user.memberships[0]?.organizationId || null;
+  const primaryRole = (activeMembership?.role || 'member').toLowerCase();
+  const primaryZoneId = activeMembership?.organizationId || null;
   const normalizedRole = tokenRole({ role: primaryRole, hasHqAccess: hasHqAdmin });
 
   const newRaw = generateRefreshToken();
@@ -763,12 +785,16 @@ export async function getMe(profileId: string): Promise<MeResult> {
     }));
 
   const hqAdminMembership = canonicalMemberships.find((m) => isHQRole(m.role));
+  const zoneAdminMembership = canonicalMemberships.find((m) => isZonalOrHQAdminRole(m.role));
+  const anyAdminMembership = canonicalMemberships.find((m) => ADMIN_MEMBERSHIP_ROLES.has(m.role));
+  const activeMembership = hqAdminMembership || zoneAdminMembership || anyAdminMembership || canonicalMemberships[0];
+
   const hasHqAdmin = Boolean(hqAdminMembership || isHQRole(meta?.role) || isHQRole(meta?.administration));
   const primaryRole = hasHqAdmin
     ? 'hq_admin'
-    : (canonicalMemberships[0]?.role || 'member').toLowerCase();
-  const primaryZoneId = hqAdminMembership?.organizationId || canonicalMemberships[0]?.organizationId || null;
-  const primaryOrg = canonicalMemberships[0]?.organization;
+    : (activeMembership?.role || 'member').toLowerCase();
+  const primaryZoneId = activeMembership?.organizationId || null;
+  const primaryOrg = activeMembership?.organization || canonicalMemberships[0]?.organization;
   const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
   const zoneName = primaryOrg?.name || primaryZoneId;
 
