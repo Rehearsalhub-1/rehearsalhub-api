@@ -3,31 +3,67 @@ import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
-import { canManageTenant } from '../auth/permissions';
+import { canManageTenant, isHQRole } from '../auth/permissions';
+import { isZonalOrHQAdminRole } from '../auth/auth.service';
 import { hashPassword } from '../auth/password';
 import { broadcast } from '../ws/wsServer';
 
 const router = Router();
 
-function formatUserProfile(u: any, metaInput?: any) {
+function formatUserProfile(u: any, metaInput?: any, requestedZone?: any) {
   const meta: Record<string, any> = (metaInput && typeof metaInput === 'object' && !Array.isArray(metaInput)) ? metaInput : {};
   const activeMemberships = (u.memberships || []).filter((m: any) => m.status === 'ACTIVE');
-  const primaryMembership = activeMemberships[0];
+
+  // Only true HQ Admin roles count as HQ Admin (regular members in zone-001 are NOT HQ Admins)
+  const hqMembership = activeMemberships.find((m: any) => isHQRole(m.role));
+  const zoneAdminMembership = activeMemberships.find((m: any) =>
+    isZonalOrHQAdminRole(m.role)
+  );
+  const primaryMembership = hqMembership || zoneAdminMembership || activeMemberships[0];
+
+  const validRequestedZone = typeof requestedZone === 'string' && requestedZone !== 'all' && requestedZone !== 'global'
+    ? requestedZone
+    : '';
+  const rawZoneLookup = validRequestedZone || meta.activeZoneId || meta.zone_code || meta.zoneCode || '';
+  const preferredZoneKey = String(rawZoneLookup).trim().toLowerCase();
+  const preferredZoneMembership = preferredZoneKey
+    ? activeMemberships.find((m: any) =>
+        String(m.organizationId || '').toLowerCase() === preferredZoneKey ||
+        String(m.organization?.code || '').toLowerCase() === preferredZoneKey ||
+        String(m.organization?.invitationCode || '').toLowerCase() === preferredZoneKey
+      )
+    : null;
+  const activeZoneMembership = preferredZoneMembership || primaryMembership;
+
+  const isUserHq =
+    Boolean(hqMembership) ||
+    isHQRole(meta.role) ||
+    Boolean(meta.hasHqAccess) ||
+    Boolean(meta.has_hq_access);
 
   const phone = u.phone || null;
   const avatar = u.avatarUrl || null;
-  const zoneCode = primaryMembership?.organization?.code || primaryMembership?.organizationId || null;
+  const zoneCode = activeZoneMembership?.organization?.code || activeZoneMembership?.organization?.invitationCode || activeZoneMembership?.organizationId || null;
 
   const username = meta.username || meta.alias || (u.email ? u.email.split('@')[0] : null);
   const middleName = meta.middle_name || meta.middleName || null;
   const gender = meta.gender || null;
   const birthday = meta.birthday || null;
-  const region = meta.region || primaryMembership?.organization?.region || null;
-  const church = meta.church || primaryMembership?.group?.name || null;
-  const designation = meta.designation || primaryMembership?.voicePart || 'Member';
-  const administration = meta.administration || (primaryMembership?.role === 'ADMIN' ? 'Admin' : 'Member');
+  const region = meta.region || activeZoneMembership?.organization?.region || null;
+  const church = meta.church || activeZoneMembership?.group?.name || primaryMembership?.group?.name || null;
+  const designation = meta.designation || activeZoneMembership?.voicePart || primaryMembership?.voicePart || 'Member';
+  const administration = isUserHq
+    ? (meta.administration && meta.administration !== 'Member' ? meta.administration : 'HQ Admin')
+    : (meta.administration || (activeZoneMembership?.role === 'ADMIN' || isZonalOrHQAdminRole(activeZoneMembership?.role) ? 'Admin' : 'Member'));
 
   const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'Member';
+  // For non-HQ users who belong to multiple zones, scope their role to the active/requested zone so privileges don't leak across zones
+  const resolvedRole = isUserHq
+    ? 'hq_admin'
+    : preferredZoneMembership
+      ? (preferredZoneMembership.role || 'MEMBER').toLowerCase()
+      : (meta.role || primaryMembership?.role || 'MEMBER').toLowerCase();
+
   return {
     id: u.id,
     uid: u.id,
@@ -61,50 +97,52 @@ function formatUserProfile(u: any, metaInput?: any) {
     kingschat_id: u.kingschatId,
     profileCompleted: u.profileCompleted ?? false,
     profile_completed: u.profileCompleted ?? false,
-    role: (primaryMembership?.role || 'MEMBER').toLowerCase(),
-    hasHqAccess: primaryMembership?.organization?.isHq || false,
-    has_hq_access: primaryMembership?.organization?.isHq || false,
+    role: resolvedRole,
+    hasHqAccess: isUserHq,
+    has_hq_access: isUserHq,
     zoneCode,
     zone_code: zoneCode,
-    zoneId: primaryMembership?.organizationId || null,
-    zone_id: primaryMembership?.organizationId || null,
-    zoneName: primaryMembership?.organization?.name || null,
-    canAnnotate: meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false),
-    can_annotate: meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false),
-    canAccessArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
-    can_access_archive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
-    canSeeArchive: meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false,
-    canAccessPreRehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
-    can_access_pre_rehearsal: meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false,
+    zoneId: activeZoneMembership?.organizationId || null,
+    zone_id: activeZoneMembership?.organizationId || null,
+    zoneName: activeZoneMembership?.organization?.name || null,
+    canAnnotate: isUserHq ? true : (meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false)),
+    can_annotate: isUserHq ? true : (meta.canAnnotate ?? (meta.hiddenFeatures ? !meta.hiddenFeatures.hideAnnotations : false)),
+    canAccessArchive: isUserHq ? true : (meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
+    can_access_archive: isUserHq ? true : (meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
+    canSeeArchive: isUserHq ? true : (meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive ?? false),
+    canAccessPreRehearsal: isUserHq ? true : (meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
+    can_access_pre_rehearsal: isUserHq ? true : (meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal ?? false),
     canAccessOngoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
     can_access_ongoing: meta.can_access_ongoing ?? meta.canAccessOngoing ?? true,
     hiddenFeatures: {
-      hideArchives: meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
+      hideArchives: isUserHq ? false : (meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
         ? !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive)
-        : (meta.hiddenFeatures?.hideArchives ?? true),
-      hidePreRehearsal: meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
+        : (meta.hiddenFeatures?.hideArchives ?? true)),
+      hidePreRehearsal: isUserHq ? false : (meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
         ? !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal)
-        : (meta.hiddenFeatures?.hidePreRehearsal ?? true),
-      hideAnnotations: meta.canAnnotate !== undefined
+        : (meta.hiddenFeatures?.hidePreRehearsal ?? true)),
+      hideAnnotations: isUserHq ? false : (meta.canAnnotate !== undefined
         ? !meta.canAnnotate
-        : (meta.hiddenFeatures?.hideAnnotations ?? true),
+        : (meta.hiddenFeatures?.hideAnnotations ?? true)),
       hideOngoing: meta.can_access_ongoing !== undefined || meta.canAccessOngoing !== undefined
         ? !(meta.can_access_ongoing ?? meta.canAccessOngoing)
         : (meta.hiddenFeatures?.hideOngoing ?? false),
+      hideMinisteredSongs: false,
     },
     hidden_features: {
-      hideArchives: meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
+      hideArchives: isUserHq ? false : (meta.canSeeArchive !== undefined || meta.canAccessArchive !== undefined || meta.can_access_archive !== undefined
         ? !(meta.canSeeArchive ?? meta.canAccessArchive ?? meta.can_access_archive)
-        : (meta.hiddenFeatures?.hideArchives ?? true),
-      hidePreRehearsal: meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
+        : (meta.hiddenFeatures?.hideArchives ?? true)),
+      hidePreRehearsal: isUserHq ? false : (meta.can_access_pre_rehearsal !== undefined || meta.canAccessPreRehearsal !== undefined
         ? !(meta.can_access_pre_rehearsal ?? meta.canAccessPreRehearsal)
-        : (meta.hiddenFeatures?.hidePreRehearsal ?? true),
-      hideAnnotations: meta.canAnnotate !== undefined
+        : (meta.hiddenFeatures?.hidePreRehearsal ?? true)),
+      hideAnnotations: isUserHq ? false : (meta.canAnnotate !== undefined
         ? !meta.canAnnotate
-        : (meta.hiddenFeatures?.hideAnnotations ?? true),
+        : (meta.hiddenFeatures?.hideAnnotations ?? true)),
       hideOngoing: meta.can_access_ongoing !== undefined || meta.canAccessOngoing !== undefined
         ? !(meta.can_access_ongoing ?? meta.canAccessOngoing)
         : (meta.hiddenFeatures?.hideOngoing ?? false),
+      hideMinisteredSongs: false,
     },
     expoPushToken: meta.expoPushToken || meta.expo_push_token || null,
     expo_push_token: meta.expoPushToken || meta.expo_push_token || null,
@@ -369,7 +407,7 @@ const handleGetDirectory = async (req: any, res: any) => {
       // Non-blocking fallback if settings table is missing
     }
 
-    res.json({ success: true, count: users.length, data: users.map(u => formatUserProfile(u, metaMap.get(u.id) || {})) });
+    res.json({ success: true, count: users.length, data: users.map(u => formatUserProfile(u, metaMap.get(u.id) || {}, targetZone)) });
   } catch (err) {
     console.error('[profiles/directory]', err);
     res.status(500).json({ success: false, error: 'Failed to fetch directory' });
@@ -511,9 +549,35 @@ router.patch('/:userId', requireAuth, async (req, res) => {
       mergedHidden.hideOngoing = !effectiveCanOngoing;
     }
 
+    // Ensure HQ Admin status cannot be accidentally stripped via profile edits
+    const userMemsForPatch = await prisma.membership.findMany({ where: { userId } }).catch(() => []);
+    const isTargetHq =
+      userMemsForPatch.some((m) => isHQRole(m.role)) ||
+      isHQRole(currentMeta.role) ||
+      Boolean(currentMeta.hasHqAccess) ||
+      Boolean(currentMeta.has_hq_access);
+
+    let effectiveRole = currentMeta.role;
+    if (body.role !== undefined && isAdmin) {
+      if (isTargetHq && ['church_admin', 'church_coordinator', 'group_admin', 'member'].includes(String(body.role).toLowerCase())) {
+        effectiveRole = 'hq_admin';
+      } else {
+        effectiveRole = body.role;
+      }
+    } else if (isTargetHq) {
+      effectiveRole = 'hq_admin';
+    }
+
+    let effectiveAdmin = body.administration !== undefined ? body.administration : currentMeta.administration;
+    if (isTargetHq && (!effectiveAdmin || effectiveAdmin === 'Member')) {
+      effectiveAdmin = currentMeta.administration && currentMeta.administration !== 'Member' ? currentMeta.administration : 'HQ Admin';
+    }
+
     updatedMeta = {
       ...currentMeta,
-      ...(body.role !== undefined && isAdmin ? { role: body.role } : {}),
+      role: effectiveRole || (isTargetHq ? 'hq_admin' : currentMeta.role),
+      ...(isTargetHq ? { hasHqAccess: true, has_hq_access: true } : {}),
+      administration: effectiveAdmin,
       ...(body.username !== undefined ? { username: body.username } : {}),
       ...(body.alias !== undefined ? { alias: body.alias } : {}),
       ...(body.middle_name !== undefined ? { middle_name: body.middle_name } : {}),
@@ -574,11 +638,25 @@ router.patch('/:userId', requireAuth, async (req, res) => {
           create: {
             userId,
             organizationId: org.id,
-            role: 'MEMBER',
+            role: org.id === 'zone-001' && isHQRole(updatedMeta.role) ? 'HQ_ADMIN' : 'MEMBER',
             voicePart: voicePart || null,
             status: 'ACTIVE',
           },
         });
+
+        try {
+          updatedMeta = {
+            ...updatedMeta,
+            activeZoneId: org.id,
+            zone_code: org.invitationCode || org.code || org.id,
+            zoneCode: org.invitationCode || org.code || org.id,
+          };
+          await prisma.setting.upsert({
+            where: { key: metaKey },
+            create: { key: metaKey, value: updatedMeta },
+            update: { value: updatedMeta },
+          });
+        } catch {}
       }
     } else if (voicePart) {
       await prisma.membership.updateMany({
@@ -608,7 +686,12 @@ const handleUpdateRole = async (req: any, res: any) => {
   try {
     const { userId } = req.params;
     const auth = res.locals.auth;
-    const isHqAdmin = auth?.role === 'hq_admin' || auth?.role === 'admin' || auth?.role === 'super_admin';
+    const isHqAdmin =
+      auth?.role === 'hq_admin' ||
+      auth?.role === 'admin' ||
+      auth?.role === 'super_admin' ||
+      Boolean(auth?.hasHqAccess) ||
+      Boolean(auth?.has_hq_access);
     const isZoneAdmin = auth?.role === 'zone_admin' || auth?.role === 'zone_coordinator';
     const isAdmin = isHqAdmin || isZoneAdmin || canManageTenant(auth?.role);
 
@@ -625,6 +708,91 @@ const handleUpdateRole = async (req: any, res: any) => {
 
     if ((rawRole === 'hq_admin' || rawRole === 'super_admin') && !isHqAdmin) {
       res.status(403).json({ success: false, error: 'Only HQ Admins can assign HQ Admin role' });
+      return;
+    }
+
+    // Check if target user has HQ credentials
+    const metaKey = `profile_meta_${userId}`;
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } }).catch(() => null);
+    const currentMeta: Record<string, any> =
+      existingMeta?.value && typeof existingMeta.value === 'object' ? (existingMeta.value as Record<string, any>) : {};
+
+    const existingMems = await prisma.membership.findMany({ where: { userId } }).catch(() => []);
+    const targetIsHq =
+      existingMems.some((m) => isHQRole(m.role)) ||
+      isHQRole(currentMeta.role) ||
+      Boolean(currentMeta.hasHqAccess) ||
+      Boolean(currentMeta.has_hq_access);
+
+    const isAssigningChurch =
+      rawRole === 'church_admin' ||
+      rawRole === 'church_coordinator' ||
+      rawRole === 'group_admin';
+
+    // If target user is an HQ Admin and being assigned as a church coordinator:
+    // Retain HQ Admin privileges and add church to churches array!
+    if (targetIsHq && isAssigningChurch) {
+      const targetGroupId = req.body?.groupId || req.body?.churchId || null;
+      const targetZoneId = req.body?.zoneId || null;
+
+      const churchesMap = new Map<string, any>();
+      if (Array.isArray(currentMeta.churches)) {
+        for (const c of currentMeta.churches) {
+          const cid = String(c?.id || c?.churchId || c?.groupId || '').trim();
+          if (cid) churchesMap.set(cid, c);
+        }
+      }
+      if (targetGroupId) {
+        churchesMap.set(targetGroupId, {
+          id: targetGroupId,
+          name: req.body?.groupName || req.body?.churchName || 'Church',
+          zoneId: targetZoneId || 'zone-001',
+        });
+      }
+
+      const updatedMeta = {
+        ...currentMeta,
+        role: 'hq_admin',
+        hasHqAccess: true,
+        has_hq_access: true,
+        administration: currentMeta.administration && currentMeta.administration !== 'Member' ? currentMeta.administration : 'HQ Admin',
+        ...(targetGroupId ? { churchId: targetGroupId, church: req.body?.groupName || req.body?.churchName || currentMeta.church } : {}),
+        churches: Array.from(churchesMap.values()),
+      };
+
+      await prisma.setting.upsert({
+        where: { key: metaKey },
+        create: { key: metaKey, value: updatedMeta },
+        update: { value: updatedMeta },
+      });
+
+      // Update membership in targetZoneId (if not zone-001)
+      if (targetZoneId && targetZoneId !== 'zone-001') {
+        await prisma.membership.upsert({
+          where: { userId_organizationId: { userId, organizationId: targetZoneId } },
+          create: {
+            id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            userId,
+            organizationId: targetZoneId,
+            groupId: targetGroupId,
+            role: 'GROUP_ADMIN',
+            status: 'ACTIVE',
+          },
+          update: {
+            groupId: targetGroupId,
+            role: 'GROUP_ADMIN',
+            status: 'ACTIVE',
+          },
+        });
+      }
+
+      res.json({ success: true, message: 'HQ Admin church assignment saved', role: 'hq_admin' });
+      return;
+    }
+
+    // Accidental demotion prevention: explicit confirmDemoteHq required to demote an HQ Admin
+    if (targetIsHq && rawRole === 'member' && !req.body?.confirmDemoteHq) {
+      res.status(400).json({ success: false, error: 'Explicit confirmation required to demote an HQ Admin' });
       return;
     }
 
@@ -649,25 +817,33 @@ const handleUpdateRole = async (req: any, res: any) => {
     const targetZoneId = req.body?.zoneId || req.tenant?.effectiveZoneId || auth?.zoneId || null;
 
     if (targetZoneId) {
-      await prisma.membership.updateMany({
-        where: { userId, organizationId: targetZoneId },
-        data: { role: dbRole },
-      });
+      if (targetZoneId === 'zone-001' && targetIsHq && dbRole === 'GROUP_ADMIN') {
+        // Retain HQ_ADMIN in zone-001
+      } else {
+        await prisma.membership.updateMany({
+          where: { userId, organizationId: targetZoneId },
+          data: { role: dbRole },
+        });
+      }
     } else {
+      // If updating globally, never downgrade zone-001 HQ_ADMIN unless dbRole is explicitly HQ_ADMIN
       await prisma.membership.updateMany({
-        where: { userId },
+        where: {
+          userId,
+          ...(dbRole !== 'HQ_ADMIN' ? { organizationId: { not: 'zone-001' } } : {}),
+        },
         data: { role: dbRole },
       });
     }
 
-    const metaKey = `profile_meta_${userId}`;
-    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } }).catch(() => null);
-    const currentMeta: Record<string, any> =
-      existingMeta?.value && typeof existingMeta.value === 'object' ? (existingMeta.value as Record<string, any>) : {};
-
     const updatedMeta = {
       ...currentMeta,
-      role: metaRole,
+      role: targetIsHq ? 'hq_admin' : metaRole,
+      hasHqAccess: targetIsHq || metaRole === 'hq_admin',
+      has_hq_access: targetIsHq || metaRole === 'hq_admin',
+      administration: targetIsHq
+        ? (currentMeta.administration && currentMeta.administration !== 'Member' ? currentMeta.administration : 'HQ Admin')
+        : currentMeta.administration,
     };
 
     await prisma.setting.upsert({
@@ -676,7 +852,7 @@ const handleUpdateRole = async (req: any, res: any) => {
       update: { value: updatedMeta },
     });
 
-    res.json({ success: true, message: 'Role updated successfully', role: metaRole });
+    res.json({ success: true, message: 'Role updated successfully', role: updatedMeta.role });
   } catch (err: any) {
     console.error('[profiles/:userId/role]', err);
     res.status(500).json({ success: false, error: err?.message || 'Failed to update role' });

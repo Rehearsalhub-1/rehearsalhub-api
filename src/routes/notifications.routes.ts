@@ -226,6 +226,21 @@ const handleCreateNotification = async (req: Request, res: Response) => {
       });
       recipientUserIds = churchMembers.map((m) => m.userId);
       broadcast('notifications', `church_${resolvedChurchId}`, shapeNotification(notif, false));
+      if (recipientUserIds.length > 0) {
+        try {
+          await prisma.notificationDelivery.createMany({
+            data: recipientUserIds.map((uid) => ({
+              id: `del_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${uid}`,
+              notificationId: notifId,
+              userId: uid,
+              isRead: false,
+            })),
+            skipDuplicates: true,
+          });
+        } catch (delErr) {
+          console.warn('[notifications:createChurchDeliveries]', delErr);
+        }
+      }
     } else if (targetOrgId && targetOrgId !== 'global' && targetOrgId !== 'all') {
       // Zone-scoped broadcast
       const zoneMembers = await prisma.membership.findMany({

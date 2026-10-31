@@ -93,10 +93,13 @@ function shapeMember(m: any, meta: any = {}) {
   const churchId = m.groupId || m.churchId || null;
   const voicePart = m.voicePart || user.voicePart || user.designation || null;
 
-  const rawRole = (meta?.role || m.role || user.role || 'MEMBER').toLowerCase();
-  const isHQOrg = Boolean(m.organization?.isHq || m.organizationId === 'zone-001' || meta?.hasHqAccess || meta?.has_hq_access);
+  const metaRole = String(meta?.role || '').toLowerCase();
+  const memRole = String(m.role || user.role || 'MEMBER').toLowerCase();
+  const isTrueHqAdmin = ['hq_admin', 'super_admin', 'admin', 'president', 'director', 'oftp', 'executive', 'boss'].includes(memRole) || ['hq_admin', 'super_admin', 'admin', 'president', 'director', 'oftp', 'executive', 'boss'].includes(metaRole) || Boolean(meta?.hasHqAccess || meta?.has_hq_access);
+  const rawRole = isTrueHqAdmin ? 'hq_admin' : memRole;
+  const isHQOrg = isTrueHqAdmin;
   const isAdmin = Boolean(
-    meta?.isAdmin ||
+    isTrueHqAdmin ||
     rawRole.includes('admin') ||
     rawRole.includes('coord') ||
     rawRole === 'org_admin' ||
@@ -324,7 +327,7 @@ router.get('/zone/:zoneId', requireAuth, async (req: Request, res: Response) => 
     const auth = res.locals.auth;
     const targetZoneId = req.params.zoneId;
     const isHQAdmin = auth.role === 'admin' || auth.role === 'hq_admin' || auth.role === 'super_admin';
-    if (!isHQAdmin && auth.zoneId !== targetZoneId) {
+    if (!isHQAdmin && auth.zoneId !== targetZoneId && req.tenant?.effectiveZoneId !== targetZoneId) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 

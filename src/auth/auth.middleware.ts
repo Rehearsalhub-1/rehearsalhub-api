@@ -75,7 +75,7 @@ export function requireTenantAdmin(req: Request, res: Response, next: NextFuncti
     return requireAuth(req, res, () => {
       const role = res.locals.auth?.role;
       if (!canManageTenant(role) && !canAccessAdmin(role)) {
-        res.status(403).json({ success: false, error: 'Forbidden' });
+        return requireZoneOrHqAdmin(req, res, next) as any;
         return;
       }
       next();
@@ -84,7 +84,7 @@ export function requireTenantAdmin(req: Request, res: Response, next: NextFuncti
 
   const role = res.locals.auth?.role;
   if (!canManageTenant(role) && !canAccessAdmin(role)) {
-    res.status(403).json({ success: false, error: 'Forbidden' });
+    return requireZoneOrHqAdmin(req, res, next) as any;
     return;
   }
   next();
@@ -125,6 +125,7 @@ export async function requireZoneOrHqAdmin(req: Request, res: Response, next: Ne
         // Hydrate role in request locals so downstream handlers see the proper admin role
         if (res.locals.auth) {
           res.locals.auth.role = (membership.role || 'zone_admin').toLowerCase();
+          req.tenant = resolveTenantScope(req, res.locals.auth, res);
         }
         next();
         return;
@@ -159,7 +160,7 @@ export async function requireAdminMembership(req: Request, res: Response, next: 
     role === 'subgroup_admin' || role === 'subgroup_coordinator' || role === 'church_coordinator';
 
   if (!isAdminRole) {
-    res.status(403).json({ success: false, error: 'Forbidden' });
+    return requireZoneOrHqAdmin(req, res, next) as any;
     return;
   }
 

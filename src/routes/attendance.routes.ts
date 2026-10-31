@@ -88,7 +88,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const takeLimit = limit === 'all'
       ? 100000
-      : Math.min(parseInt(limit as string, 10) || 50000, 100000);
+      : Math.min(parseInt(limit as string, 10) || 5000, 100000);
 
     const rows = await prisma.attendance.findMany({
       where: whereClause,
@@ -352,6 +352,7 @@ const handleCheckIn = async (req: Request, res: Response) => {
       const existingToday = await prisma.attendance.findFirst({
         where: {
           userId: targetUserId,
+          organizationId: orgId,
           OR: [
             { checkInTime: { gte: startOfDay, lte: endOfDay } },
             { createdAt: { gte: startOfDay, lte: endOfDay } },

@@ -294,7 +294,7 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
 
     const where: any = { isMaster: true };
     if (!isHqUser) {
-      where.status = { not: 'hq_only' };
+      // All Ministered Songs are never restricted by role or zone
     }
 
     if (search) {
@@ -332,7 +332,7 @@ const getMinisteredSongsHandler = async (req: Request, res: Response) => {
     ]);
 
     const formatted = rows
-      .filter(r => isHqUser || (r.status !== 'hq_only' && !(r.audioUrls as any)?._isHQOnly))
+      // No role or zone filtering on All Ministered Songs
       .map(formatSong);
     res.json({
       success: true,
@@ -629,7 +629,42 @@ router.post('/import-from-ministered', requireAuth, async (req: Request, res: Re
     });
 
     for (const song of songs) {
-      await prisma.song.update({
+      if (song.organizationId === orgId) {
+        await prisma.song.update({ where: { id: song.id }, data: { status: 'active', isActive: true } }).catch(() => {});
+        continue;
+      }
+      const existingInZone = await prisma.song.findFirst({ where: { organizationId: orgId, title: { equals: song.title, mode: 'insensitive' } } });
+      if (existingInZone) {
+        await prisma.song.update({ where: { id: existingInZone.id }, data: { status: 'active', isActive: true } }).catch(() => {});
+        continue;
+      }
+      await prisma.song.create({
+        data: {
+          organizationId: orgId,
+          title: song.title,
+          key: song.key,
+          tempo: song.tempo,
+          lyrics: song.lyrics,
+          writer: song.writer,
+          category: song.category,
+          audioFile: song.audioFile,
+          audioUrls: song.audioUrls ?? undefined,
+          conductor: song.conductor,
+          leadSinger: song.leadSinger,
+          drummer: song.drummer,
+          leadKeyboardist: song.leadKeyboardist,
+          leadGuitarist: song.leadGuitarist,
+          bassGuitarist: song.bassGuitarist,
+          solfas: song.solfas,
+          comments: song.comments,
+          notes: song.notes,
+          isMaster: false,
+          isMinistered: true,
+          status: 'active',
+          isActive: true,
+        },
+      }).catch(() => {});
+      if (false) await prisma.song.update({
         where: { id: song.id },
         data: {
           organizationId: orgId,
@@ -825,6 +860,7 @@ router.get('/zone-songs', requireAuth, getSongsHandler);
 router.get('/active', requireAuth, async (req: Request, res: Response) => {
   try {
     const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
+    const targetGroupId = (req.query.churchId || req.query.subGroupId || req.query.groupId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || (req.headers['x-church-id'] as string) || null) as string | null;
 
     const liveSongs = await prisma.song.findMany({
       where: {
@@ -864,6 +900,16 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
 
     const filtered = liveSongs.filter((s) => {
       const liveZone = (s.audioUrls as any)?._liveZoneId;
+      const liveGroup = (s.audioUrls as any)?._liveGroupId;
+
+      // Church Isolation: If the song was taken live for a specific church, only show to callers in that church
+      if (liveGroup) {
+        if (!targetGroupId || String(liveGroup).trim().toLowerCase() !== String(targetGroupId).trim().toLowerCase()) {
+          return false;
+        }
+      } else if (targetGroupId && s.groupId && String(s.groupId).toLowerCase() !== String(targetGroupId).toLowerCase()) {
+        return false;
+      }
       if (liveZone) {
         return String(liveZone).trim().toLowerCase() === String(targetOrgId).trim().toLowerCase();
       }
@@ -1872,6 +1918,25 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
 router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const songId = req.params.id;
+    const song = await prisma.song.findUnique({ where: { id: songId } });
+    if (!song) {
+      return res.status(404).json({ success: false, error: 'Song not found' });
+    }
+
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+
+    // Safeguard 1: Only HQ Admins can delete Master Songs (All Ministered Songs)
+    if (song.isMaster && !isHqAdmin) {
+      return res.status(403).json({ success: false, error: 'Only HQ Administrators can delete songs from All Ministered Songs.' });
+    }
+
+    // Safeguard 2: Zone Admin can only delete songs within their own zone
+    const callerZoneId = req.tenant?.effectiveZoneId || auth.zoneId;
+    if (!isHqAdmin && song.organizationId && callerZoneId && song.organizationId !== callerZoneId) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to delete songs from another zone.' });
+    }
+
     await prisma.song.delete({ where: { id: songId } });
 
     broadcast('songs', songId, { id: songId, deleted: true });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { requireAuth, requireTenantAdmin, requireZoneOrHqAdmin } from '../auth/auth.middleware';
 import { isZonalOrHQAdminRole } from '../auth/auth.service';
+import { isHQRole } from '../auth/permissions';
 
 const router = Router();
 
@@ -177,15 +178,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const queryZoneId = (req.query.zoneId || req.query.zone_code) as string | undefined;
     const effectiveZoneId = queryZoneId || req.tenant?.effectiveZoneId || 'zone-001';
+    const isGlobal =
+      queryZoneId === 'all' ||
+      queryZoneId === 'global' ||
+      (req.tenant?.isHQAdmin && req.tenant?.isGlobalView && !queryZoneId && !req.tenant?.effectiveZoneId);
 
-    const whereClause: any = queryZoneId
-      ? { organizationId: queryZoneId }
-      : {
-          OR: [
-            { organizationId: effectiveZoneId },
-            { organizationId: 'zone-001' },
-          ],
-        };
+    const whereClause: any = isGlobal ? {} : { organizationId: effectiveZoneId };
 
     const groups = await prisma.group.findMany({
       where: whereClause,
@@ -279,8 +277,13 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
     const members = memberships.map((m) => {
       const meta: any = metaMap.get(m.userId) || {};
       const rawRole = (meta?.role || m.role || 'MEMBER').toLowerCase();
-      const isAdmin = rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'group_admin';
-      const resolvedRole = isAdmin ? 'church_admin' : 'member';
+      const isUserHq =
+        isHQRole(rawRole) ||
+        isHQRole(meta?.role) ||
+        Boolean(meta?.hasHqAccess) ||
+        Boolean(meta?.has_hq_access);
+      const isAdmin = rawRole.includes('admin') || rawRole.includes('coord') || rawRole === 'group_admin' || isUserHq;
+      const resolvedRole = isUserHq ? 'hq_admin' : (isAdmin ? 'church_admin' : 'member');
 
       return {
         id: m.id,
@@ -291,6 +294,8 @@ router.get('/:id/members', requireAuth, async (req: Request, res: Response) => {
         lastName: m.user.lastName,
         avatarUrl: m.user.avatarUrl,
         role: resolvedRole,
+        isHqAdmin: isUserHq,
+        hasHqAccess: isUserHq,
         rawRole: meta?.role || m.role,
         isAdmin,
         status: m.status,
@@ -415,15 +420,38 @@ async function assignCoordinatorToGroup(req: Request, res: Response, logPrefix: 
       include: { group: true },
     });
 
-    const preserveRole =
-      membership?.role && isZonalOrHQAdminRole(membership.role)
-        ? membership.role
-        : 'GROUP_ADMIN';
+    // Check if targetUser has HQ or Zone Admin status anywhere
+    const allUserMemberships = await prisma.membership.findMany({
+      where: { userId: targetUser.id },
+    });
+    const metaKey = `profile_meta_${targetUser.id}`;
+    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
+    const currentMeta: any = existingMeta?.value && typeof existingMeta.value === 'object' ? existingMeta.value : {};
+
+    const hasAnyHqRole =
+      allUserMemberships.some((m) => isHQRole(m.role)) ||
+      isHQRole(currentMeta.role) ||
+      Boolean(currentMeta.hasHqAccess) ||
+      Boolean(currentMeta.has_hq_access);
+
+    const hasAnyZoneAdminRole =
+      allUserMemberships.some((m) => isZonalOrHQAdminRole(m.role)) ||
+      isZonalOrHQAdminRole(currentMeta.role);
+
+    let memberRole = 'GROUP_ADMIN';
+    if (group.organizationId === 'zone-001' && hasAnyHqRole) {
+      memberRole = 'HQ_ADMIN';
+    } else if (membership?.role && isZonalOrHQAdminRole(membership.role)) {
+      memberRole = membership.role;
+    }
 
     if (membership) {
       await prisma.membership.update({
         where: { id: membership.id },
-        data: { groupId: id, role: preserveRole },
+        data: {
+          groupId: id,
+          role: group.organizationId === 'zone-001' && hasAnyHqRole ? 'HQ_ADMIN' : memberRole,
+        },
       });
     } else {
       await prisma.membership.create({
@@ -432,17 +460,13 @@ async function assignCoordinatorToGroup(req: Request, res: Response, logPrefix: 
           userId: targetUser.id,
           organizationId: group.organizationId,
           groupId: id,
-          role: 'GROUP_ADMIN',
+          role: group.organizationId === 'zone-001' && hasAnyHqRole ? 'HQ_ADMIN' : 'GROUP_ADMIN',
           status: 'ACTIVE',
         },
       });
     }
 
     // Sync profile_meta for user (preserving existing coordinated churches so multi-church admins keep all churches)
-    const metaKey = `profile_meta_${targetUser.id}`;
-    const existingMeta = await prisma.setting.findUnique({ where: { key: metaKey } });
-    const currentMeta: any = existingMeta?.value && typeof existingMeta.value === 'object' ? existingMeta.value : {};
-
     const churchesMap = new Map<string, { id: string; name: string; zoneId: string }>();
     if (Array.isArray(currentMeta.churches)) {
       for (const c of currentMeta.churches) {
@@ -477,13 +501,20 @@ async function assignCoordinatorToGroup(req: Request, res: Response, logPrefix: 
     });
 
     const preserveMetaRole =
-      currentMeta?.role && isZonalOrHQAdminRole(currentMeta.role)
-        ? currentMeta.role
-        : 'church_coordinator';
+      hasAnyHqRole
+        ? 'hq_admin'
+        : hasAnyZoneAdminRole
+          ? (currentMeta?.role && isZonalOrHQAdminRole(currentMeta.role) ? currentMeta.role : 'zone_admin')
+          : 'church_coordinator';
 
     const updatedMeta = {
       ...currentMeta,
       role: preserveMetaRole,
+      hasHqAccess: hasAnyHqRole ? true : Boolean(currentMeta.hasHqAccess),
+      has_hq_access: hasAnyHqRole ? true : Boolean(currentMeta.has_hq_access),
+      administration: hasAnyHqRole
+        ? (currentMeta.administration && currentMeta.administration !== 'Member' ? currentMeta.administration : 'HQ Admin')
+        : currentMeta.administration,
       church: group.name,
       churchId: group.id,
       churches: Array.from(churchesMap.values()),
@@ -576,14 +607,33 @@ async function detachChurchFromUserMeta(userId: string, groupId: string) {
     const isCurrentPrimary = String(currentMeta.churchId || '') === groupId;
     const isStillCoordinator = remainingChurches.length > 0;
 
+    const userMems = await prisma.membership.findMany({ where: { userId } }).catch(() => []);
+    const isUserHq =
+      userMems.some((m) => isHQRole(m.role)) ||
+      isHQRole(currentMeta.role) ||
+      Boolean(currentMeta.hasHqAccess) ||
+      Boolean(currentMeta.has_hq_access);
+    const isUserZoneAdmin =
+      userMems.some((m) => isZonalOrHQAdminRole(m.role)) ||
+      isZonalOrHQAdminRole(currentMeta.role);
+
     const nextRole =
-      !isStillCoordinator && String(currentMeta.role || '').toLowerCase() === 'church_coordinator'
-        ? 'member'
-        : currentMeta.role;
+      isUserHq
+        ? 'hq_admin'
+        : isUserZoneAdmin
+          ? 'zone_admin'
+          : !isStillCoordinator && String(currentMeta.role || '').toLowerCase() === 'church_coordinator'
+            ? 'member'
+            : currentMeta.role;
 
     const updatedMeta = {
       ...currentMeta,
       role: nextRole,
+      hasHqAccess: isUserHq ? true : Boolean(currentMeta.hasHqAccess),
+      has_hq_access: isUserHq ? true : Boolean(currentMeta.has_hq_access),
+      administration: isUserHq
+        ? (currentMeta.administration && currentMeta.administration !== 'Member' ? currentMeta.administration : 'HQ Admin')
+        : currentMeta.administration,
       churchId: isCurrentPrimary ? (nextPrimary?.id || null) : currentMeta.churchId,
       church: isCurrentPrimary ? (nextPrimary?.name || null) : currentMeta.church,
       churches: remainingChurches,
@@ -600,14 +650,18 @@ async function detachChurchFromUserMeta(userId: string, groupId: string) {
       where: { userId, groupId },
     });
     if (mem) {
-      const nextRoleForMem =
-        isZonalOrHQAdminRole(mem.role)
-          ? mem.role
-          : (nextPrimary ? 'GROUP_ADMIN' : 'MEMBER');
+      let nextRoleForMem = mem.role;
+      if (mem.organizationId === 'zone-001' && isUserHq) {
+        nextRoleForMem = 'HQ_ADMIN';
+      } else if (isZonalOrHQAdminRole(mem.role)) {
+        nextRoleForMem = mem.role;
+      } else {
+        nextRoleForMem = nextPrimary ? 'GROUP_ADMIN' : 'MEMBER';
+      }
       await prisma.membership.update({
         where: { id: mem.id },
         data: {
-          groupId: nextPrimary?.id || mem.groupId,
+          groupId: nextPrimary?.id || (mem.organizationId === 'zone-001' ? null : mem.groupId),
           role: nextRoleForMem,
         },
       });

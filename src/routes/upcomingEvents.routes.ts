@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { requireAuth } from '../auth/auth.middleware';
+import { requireAuth, requireTenantAdmin } from '../auth/auth.middleware';
 
 export const upcomingEventsRouter = Router();
 
@@ -36,7 +36,7 @@ upcomingEventsRouter.get('/:id', requireAuth, async (req: Request, res: Response
   }
 });
 
-upcomingEventsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
+upcomingEventsRouter.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const id = body.id || `upcoming-${Date.now()}`;
@@ -63,12 +63,19 @@ upcomingEventsRouter.post('/', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-upcomingEventsRouter.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+upcomingEventsRouter.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const body = req.body || {};
     const existing = await prisma.program.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, error: 'Event not found' });
+
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+    const callerZoneId = req.tenant?.effectiveZoneId || auth.zoneId;
+    if (!isHqAdmin && existing.organizationId && callerZoneId && existing.organizationId !== callerZoneId) {
+      return res.status(403).json({ success: false, error: 'Forbidden: You cannot modify an event belonging to another zone' });
+    }
 
     const updateData: any = {};
     if (body.title !== undefined || body.name !== undefined) updateData.name = body.title || body.name;
@@ -85,9 +92,19 @@ upcomingEventsRouter.patch('/:id', requireAuth, async (req: Request, res: Respon
   }
 });
 
-upcomingEventsRouter.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+upcomingEventsRouter.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const existing = await prisma.program.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Event not found' });
+
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+    const callerZoneId = req.tenant?.effectiveZoneId || auth.zoneId;
+    if (!isHqAdmin && existing.organizationId && callerZoneId && existing.organizationId !== callerZoneId) {
+      return res.status(403).json({ success: false, error: 'Forbidden: You cannot delete an event belonging to another zone' });
+    }
+
     await prisma.program.delete({ where: { id } });
     res.json({ success: true, message: 'Event deleted successfully' });
   } catch (err) {

@@ -106,10 +106,10 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
     effectiveZoneId = headerZoneId || queryZoneId || auth.zoneId || null;
     mode = 'church';
   } else if (isZoneAdmin) {
-    // Zone admins are LOCKED to their ONE admin org, but can switch into a church scope
-    // within their zone when dual-role or managing a church (x-scope: church + x-church-id).
+    // Zone admins can switch between zones they belong to via x-zone-id / zoneId,
+    // and can switch into a church scope within their zone.
     const dbVerifiedZoneId = (res as any)?.locals?.adminScope?.effectiveZoneId;
-    effectiveZoneId = dbVerifiedZoneId || auth.zoneId || headerZoneId || queryZoneId || null;
+    effectiveZoneId = dbVerifiedZoneId || headerZoneId || queryZoneId || auth.zoneId || null;
     const requestedChurchId = headerChurchId || queryChurchId || null;
     if (requestedChurchId && (headerScope === 'church' || Boolean(queryChurchId))) {
       effectiveChurchId = requestedChurchId;
@@ -119,10 +119,10 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
       mode = effectiveZoneId ? 'zone' : 'global';
     }
   } else {
-    // Regular members — lock to their JWT zone
-    effectiveZoneId = auth.zoneId || null;
-    effectiveChurchId = null;
-    mode = effectiveZoneId ? 'zone' : 'global';
+    // Regular members — respect their selected zone (x-zone-id / zoneId) if they belong to multiple zones
+    effectiveZoneId = headerZoneId || queryZoneId || auth.zoneId || null;
+    effectiveChurchId = headerChurchId || queryChurchId || null;
+    mode = effectiveChurchId ? 'church' : (effectiveZoneId ? 'zone' : 'global');
   }
 
   return {

@@ -274,7 +274,23 @@ app.get('/admin/dashboard/stats', requireAuth, async (req: express.Request, res:
       ? { isMaster: true }
       : { organizationId: effectiveZone };
 
-    const [totalMembers, activePrograms, totalSongs, pendingSongs] = await Promise.all([
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const attendanceFilter: any = {
+      OR: [
+        { checkInTime: { gte: startOfDay, lte: endOfDay } },
+        { createdAt: { gte: startOfDay, lte: endOfDay } },
+      ],
+      ...(effectiveChurch
+        ? { user: { memberships: { some: { groupId: effectiveChurch } } } }
+        : isHqAdmin && (!zoneId || zoneId === 'zone-001')
+          ? {}
+          : { organizationId: effectiveZone }),
+    };
+
+    const [totalMembers, activePrograms, totalSongs, pendingSongs, todayAttendance] = await Promise.all([
       prisma.membership.count({ where: memberFilter }),
       prisma.program.count({
         where: {
@@ -295,11 +311,12 @@ app.get('/admin/dashboard/stats', requireAuth, async (req: express.Request, res:
             : { organizationId: effectiveZone }),
         },
       }),
+      prisma.attendance.count({ where: attendanceFilter }).catch(() => 0),
     ]);
 
     res.json({
       success: true,
-      data: { totalMembers, activePrograms, totalSongs, pendingSongs },
+      data: { totalMembers, activePrograms, totalSongs, pendingSongs, todayAttendance },
     });
   } catch (err) {
     console.error('[admin/dashboard/stats]', err);

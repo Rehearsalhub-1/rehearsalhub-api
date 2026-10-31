@@ -42,9 +42,28 @@ function savePageCategoryMap() {
   } catch (err) {
     console.warn('[praise-nights] could not save program_page_categories.json:', err);
   }
+  prisma.setting.upsert({
+    where: { key: 'program_page_categories' },
+    update: { value: programIdToPageCategory },
+    create: { key: 'program_page_categories', value: programIdToPageCategory },
+  }).catch(() => {});
 }
 
 const programCategoryOrders: Record<string, string[]> = {};
+
+// Load persistent program category maps from database to survive server restarts/deploys
+(async () => {
+  try {
+    const pageCatRow = await prisma.setting.findUnique({ where: { key: 'program_page_categories' } });
+    if (pageCatRow?.value && typeof pageCatRow.value === 'object') {
+      Object.assign(programIdToPageCategory, pageCatRow.value);
+    }
+    const catOrderRow = await prisma.setting.findUnique({ where: { key: 'program_category_orders' } });
+    if (catOrderRow?.value && typeof catOrderRow.value === 'object') {
+      Object.assign(programCategoryOrders, catOrderRow.value);
+    }
+  } catch {}
+})();
 
 function resolveAudioForSong(s: any) {
   const urlsObj: Record<string, string> = {};
@@ -481,6 +500,11 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
 
     if (Array.isArray(req.body.categoryOrder)) {
       programCategoryOrders[id] = req.body.categoryOrder.map(String);
+      prisma.setting.upsert({
+        where: { key: 'program_category_orders' },
+        create: { key: 'program_category_orders', value: programCategoryOrders },
+        update: { value: programCategoryOrders },
+      }).catch(() => {});
     }
 
     if (req.body.pageCategory !== undefined) {

@@ -453,7 +453,7 @@ export async function fetchAllUserMemberships(userId: string, userRawData?: any)
           subgroupId: null,
           role: 'MEMBER',
           status: 'ACTIVE',
-          hasHqAccess: org?.isHq || effectiveOrgId === 'zone-001',
+          hasHqAccess: false,
           organization: org
             ? {
                 id: org.id,
@@ -520,14 +520,20 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
         resolvedChurchName = resolvedChurches[0].name;
       }
 
-      if (hqAdminMembership) {
-        const mRole = (hqAdminMembership.role || '').toLowerCase();
+      const isProfileHq =
+        Boolean(profile.hasHqAccess) ||
+        Boolean(profile.has_hq_access) ||
+        ['hq_admin', 'admin', 'super_admin'].includes(String(profile.role || '').toLowerCase()) ||
+        tokenRole(profile) === 'hq_admin';
+
+      if (hqAdminMembership || isProfileHq) {
+        const mRole = (hqAdminMembership?.role || profile.role || '').toLowerCase();
         if (['president', 'director', 'oftp', 'executive'].includes(mRole)) {
           resolvedRole = mRole;
         } else {
           resolvedRole = 'hq_admin';
         }
-        resolvedZoneId = resolvedZoneId || hqAdminMembership.organizationId;
+        resolvedZoneId = resolvedZoneId || hqAdminMembership?.organizationId || 'zone-001';
       } else if (zoneAdminMembership) {
         resolvedRole = tokenRole({ ...profile, role: zoneAdminMembership.role });
         resolvedZoneId = resolvedZoneId || zoneAdminMembership.organizationId || null;
@@ -945,12 +951,31 @@ export async function getMe(profileId: string): Promise<MeResult> {
   const anyAdminMembership = canonicalMemberships.find((m) => ADMIN_MEMBERSHIP_ROLES.has(m.role));
   const activeMembership = hqAdminMembership || zoneAdminMembership || anyAdminMembership || canonicalMemberships[0];
 
-  const hasHqAdmin = Boolean(hqAdminMembership || isHQRole(meta?.role) || isHQRole(meta?.administration));
+  const preferredZoneKey = String(meta?.activeZoneId || meta?.zone_code || meta?.zoneCode || '').trim().toLowerCase();
+  const preferredZoneMembership = preferredZoneKey
+    ? canonicalMemberships.find((m) =>
+        String(m.organizationId || '').toLowerCase() === preferredZoneKey ||
+        String(m.organization?.code || '').toLowerCase() === preferredZoneKey ||
+        String(m.organization?.invitationCode || '').toLowerCase() === preferredZoneKey
+      )
+    : null;
+  const zoneMembership = preferredZoneMembership || activeMembership;
+
+  const hasHqAdmin = Boolean(
+    hqAdminMembership ||
+    isHQRole(meta?.role) ||
+    isHQRole(meta?.administration) ||
+    meta?.hasHqAccess ||
+    meta?.has_hq_access
+  );
+  // HQ Admins keep hq_admin everywhere; non-HQ users who switch zones get their role in that specific zone
   const primaryRole = hasHqAdmin
     ? 'hq_admin'
-    : (activeMembership?.role || 'member').toLowerCase();
-  const primaryZoneId = activeMembership?.organizationId || null;
-  const primaryOrg = activeMembership?.organization || canonicalMemberships[0]?.organization;
+    : preferredZoneMembership
+      ? (preferredZoneMembership.role || 'member').toLowerCase()
+      : (activeMembership?.role || 'member').toLowerCase();
+  const primaryZoneId = zoneMembership?.organizationId || activeMembership?.organizationId || null;
+  const primaryOrg = zoneMembership?.organization || activeMembership?.organization || canonicalMemberships[0]?.organization;
   const zoneCode = primaryOrg?.code || primaryOrg?.invitationCode || primaryZoneId;
   const zoneName = primaryOrg?.name || primaryZoneId;
 
@@ -1057,18 +1082,40 @@ export async function getMe(profileId: string): Promise<MeResult> {
     can_access_ongoing: canAccessOngoing,
     canAnnotate,
     can_annotate: canAnnotate,
-    hiddenFeatures: meta.hiddenFeatures ?? {
-      hideArchives: !canAccessArchive,
-      hidePreRehearsal: !canAccessPreRehearsal,
-      hideAnnotations: !canAnnotate,
-      hideOngoing: !canAccessOngoing,
-    },
-    hidden_features: meta.hiddenFeatures ?? {
-      hideArchives: !canAccessArchive,
-      hidePreRehearsal: !canAccessPreRehearsal,
-      hideAnnotations: !canAnnotate,
-      hideOngoing: !canAccessOngoing,
-    },
+    hiddenFeatures: hasHqAdmin
+      ? {
+          ...(meta.hiddenFeatures || {}),
+          hideArchives: false,
+          hidePreRehearsal: false,
+          hideAnnotations: false,
+          hideOngoing: !canAccessOngoing,
+          hideMinisteredSongs: false,
+        }
+      : {
+          ...(meta.hiddenFeatures || {}),
+          hideArchives: !canAccessArchive,
+          hidePreRehearsal: !canAccessPreRehearsal,
+          hideAnnotations: !canAnnotate,
+          hideOngoing: !canAccessOngoing,
+          hideMinisteredSongs: false,
+        },
+    hidden_features: hasHqAdmin
+      ? {
+          ...(meta.hiddenFeatures || {}),
+          hideArchives: false,
+          hidePreRehearsal: false,
+          hideAnnotations: false,
+          hideOngoing: !canAccessOngoing,
+          hideMinisteredSongs: false,
+        }
+      : {
+          ...(meta.hiddenFeatures || {}),
+          hideArchives: !canAccessArchive,
+          hidePreRehearsal: !canAccessPreRehearsal,
+          hideAnnotations: !canAnnotate,
+          hideOngoing: !canAccessOngoing,
+          hideMinisteredSongs: false,
+        },
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
     raw: meta,

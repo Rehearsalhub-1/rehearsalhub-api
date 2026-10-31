@@ -130,6 +130,20 @@ router.post('/', requireAuth, requireTenantAdmin, async (req: Request, res: Resp
 router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const existing = await prisma.category.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Category not found' });
+
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+    const callerZoneId = req.tenant?.effectiveZoneId || auth.zoneId;
+
+    if (!isHqAdmin && (!existing.organizationId || existing.organizationId === 'zone-001')) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Only HQ Administrators can modify global categories' });
+    }
+    if (!isHqAdmin && callerZoneId && existing.organizationId !== callerZoneId) {
+      return res.status(403).json({ success: false, error: 'Forbidden: You cannot modify categories belonging to another zone' });
+    }
+
     const { name, color, type, order, image } = req.body;
 
     const updateData: any = {};
@@ -155,6 +169,20 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
 router.delete('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const existing = await prisma.category.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Category not found' });
+
+    const auth = res.locals.auth;
+    const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
+    const callerZoneId = req.tenant?.effectiveZoneId || auth.zoneId;
+
+    if (!isHqAdmin && (!existing.organizationId || existing.organizationId === 'zone-001')) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Only HQ Administrators can delete global categories' });
+    }
+    if (!isHqAdmin && callerZoneId && existing.organizationId !== callerZoneId) {
+      return res.status(403).json({ success: false, error: 'Forbidden: You cannot delete categories belonging to another zone' });
+    }
+
     await prisma.category.delete({ where: { id } });
     res.json({ success: true, message: 'Category deleted' });
   } catch (err) {
