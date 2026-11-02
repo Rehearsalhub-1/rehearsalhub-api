@@ -1295,13 +1295,17 @@ router.get(['/praise-nights', '/member-rehearsals'], requireAuth, async (req: Re
 
         return {
           ...p,
+          scope: 'subgroup',
           subGroupId: p.groupId,
+          churchId: p.groupId,
+          groupId: p.groupId,
           status: resolvedStage,
           category: resolvedStage,
           stage: resolvedStage,
           isActive,
           isArchived,
           songs: p.programSongs.map((ps) => ps.song),
+          songIds: p.programSongs.map((ps) => ps.songId || ps.song?.id),
           songCount: p.programSongs.length,
         };
       }),

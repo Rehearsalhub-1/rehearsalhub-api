@@ -234,9 +234,13 @@ function shapeProgram(p: any) {
     isArchived,
     organizationId: p.organizationId || p.organization_id || null,
     groupId: p.groupId || p.group_id || null,
+    subGroupId: p.groupId || p.group_id || null,
+    churchId: p.groupId || p.group_id || null,
+    scope: (p.groupId || p.group_id) ? 'subgroup' : 'zone',
     location: p.location || null,
     bannerImage: p.bannerImage || p.banner_image || null,
     songCount: programSongsList.length || (p.rehearsalCount || 0),
+    songIds: programSongsList.map((s: any) => s.id),
     heardCount,
     categoryOrder: programCategoryOrders[p.id] || p.categoryOrder || [],
     songs: programSongsList,
@@ -259,7 +263,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const auth = res.locals.auth;
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
     const targetZone = zoneId || req.tenant?.effectiveZoneId;
-    const targetGroup = groupId || subGroupId || churchId || (req.tenant?.mode === 'church' ? req.tenant.effectiveChurchId : null) || null;
+    const explicitGroup = groupId || subGroupId || churchId || null;
+    const targetGroup = explicitGroup || (!zoneId && req.tenant?.mode === 'church' ? req.tenant.effectiveChurchId : null) || null;
 
     const where: any = {};
     if (category && category !== 'all') {

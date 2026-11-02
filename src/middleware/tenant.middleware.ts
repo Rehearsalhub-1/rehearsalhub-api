@@ -102,9 +102,14 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
     // Church coordinators can switch between the churches they coordinate via x-church-id / churchId,
     // falling back to their primary JWT churchId.
     const requestedChurchId = headerChurchId || queryChurchId || null;
-    effectiveChurchId = requestedChurchId || auth.churchId || null;
     effectiveZoneId = headerZoneId || queryZoneId || auth.zoneId || null;
-    mode = 'church';
+    if (headerScope === 'zone' || headerScope === 'global') {
+      effectiveChurchId = null;
+      mode = effectiveZoneId ? 'zone' : 'global';
+    } else {
+      effectiveChurchId = requestedChurchId || auth.churchId || null;
+      mode = effectiveChurchId ? 'church' : (effectiveZoneId ? 'zone' : 'global');
+    }
   } else if (isZoneAdmin) {
     // Zone admins can switch between zones they belong to via x-zone-id / zoneId,
     // and can switch into a church scope within their zone.
@@ -121,8 +126,13 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
   } else {
     // Regular members — respect their selected zone (x-zone-id / zoneId) if they belong to multiple zones
     effectiveZoneId = headerZoneId || queryZoneId || auth.zoneId || null;
-    effectiveChurchId = headerChurchId || queryChurchId || null;
-    mode = effectiveChurchId ? 'church' : (effectiveZoneId ? 'zone' : 'global');
+    if (headerScope === 'zone' || headerScope === 'global') {
+      effectiveChurchId = null;
+      mode = effectiveZoneId ? 'zone' : 'global';
+    } else {
+      effectiveChurchId = headerChurchId || queryChurchId || null;
+      mode = effectiveChurchId ? 'church' : (effectiveZoneId ? 'zone' : 'global');
+    }
   }
 
   return {

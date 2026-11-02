@@ -860,7 +860,8 @@ router.get('/zone-songs', requireAuth, getSongsHandler);
 router.get('/active', requireAuth, async (req: Request, res: Response) => {
   try {
     const targetOrgId = (req.query.zoneId as string) || req.tenant?.effectiveZoneId || 'zone-001';
-    const targetGroupId = (req.query.churchId || req.query.subGroupId || req.query.groupId || (req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || (req.headers['x-church-id'] as string) || null) as string | null;
+    const explicitGroupId = (req.query.churchId || req.query.subGroupId || req.query.groupId || null) as string | null;
+    const targetGroupId = explicitGroupId || (!req.query.zoneId && req.tenant?.mode === 'church' ? req.tenant?.effectiveChurchId : null) || null;
 
     const liveSongs = await prisma.song.findMany({
       where: {
@@ -902,14 +903,20 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
       const liveZone = (s.audioUrls as any)?._liveZoneId;
       const liveGroup = (s.audioUrls as any)?._liveGroupId;
 
-      // Church Isolation: If the song was taken live for a specific church, only show to callers in that church
-      if (liveGroup) {
-        if (!targetGroupId || String(liveGroup).trim().toLowerCase() !== String(targetGroupId).trim().toLowerCase()) {
-          return false;
-        }
-      } else if (targetGroupId && s.groupId && String(s.groupId).toLowerCase() !== String(targetGroupId).toLowerCase()) {
-        return false;
+      // Strict Church Isolation:
+      // If caller is querying for Zone live songs (!targetGroupId):
+      // - Reject songs that have a church liveGroup or church groupId
+      // - For program-linked songs: reject if the program is church-scoped (program.groupId is present)
+      // If caller is querying for Church live songs (targetGroupId is present):
+      // - Require church liveGroup or church groupId to match targetGroupId
+      // - Or require the matching program to have program.groupId === targetGroupId
+      if (!targetGroupId) {
+        if (liveGroup || s.groupId) return false;
+      } else {
+        if (liveGroup && String(liveGroup).trim().toLowerCase() !== String(targetGroupId).trim().toLowerCase()) return false;
+        if (s.groupId && String(s.groupId).trim().toLowerCase() !== String(targetGroupId).trim().toLowerCase()) return false;
       }
+
       if (liveZone) {
         return String(liveZone).trim().toLowerCase() === String(targetOrgId).trim().toLowerCase();
       }
@@ -918,7 +925,8 @@ router.get('/active', requireAuth, async (req: Request, res: Response) => {
       }
       const hasMatchingProgram = s.programSongs?.some((ps) =>
         ps.program?.organizationId?.trim().toLowerCase() === String(targetOrgId).trim().toLowerCase() &&
-        ps.program?.status !== 'archived'
+        ps.program?.status !== 'archived' &&
+        (targetGroupId ? ps.program?.groupId === targetGroupId : !ps.program?.groupId)
       );
       return Boolean(hasMatchingProgram);
     });
@@ -1658,14 +1666,17 @@ const updateSongStatusHandler = async (req: Request, res: Response) => {
       existing.programSongs?.[0]?.program?.organizationId ||
       null;
 
+    const targetProgram = body.programId
+      ? existing.programSongs?.find((ps: any) => ps.programId === body.programId || ps.program?.id === body.programId)?.program
+      : null;
     const effectiveChurchId =
       body.groupId ||
       body.subGroupId ||
       body.churchId ||
+      targetProgram?.groupId ||
       req.tenant?.effectiveChurchId ||
       (req.headers['x-church-id'] as string) ||
       existing.groupId ||
-      existing.programSongs?.[0]?.program?.groupId ||
       null;
 
     const currentAudioUrls = (existing?.audioUrls && typeof existing.audioUrls === 'object') ? (existing.audioUrls as any) : {};
