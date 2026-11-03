@@ -136,7 +136,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       // No take — return all records
     });
 
-    const shapedAssets = assets.map(shapeMedia);
+    // Filter to only R2/Cloudflare assets — exclude legacy Cloudinary URLs
+    const R2_DOMAIN = process.env.R2_PUBLIC_URL || 'r2.dev';
+    const shapedAssets = assets
+      .filter(a => {
+        const url = (a as any).url || (a as any).videoUrl || '';
+        return url.includes('r2.dev') || url.includes(R2_DOMAIN) || !url.includes('cloudinary.com');
+      })
+      .map(shapeMedia);
 
     // Also query media_videos to supply rehearsal and praise night videos
     let combined = shapedAssets;
