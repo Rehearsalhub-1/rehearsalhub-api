@@ -264,7 +264,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const isHqAdmin = auth.role === 'hq_admin' || auth.role === 'admin' || auth.role === 'super_admin' || Boolean(auth.hasHqAccess);
     const targetZone = zoneId || req.tenant?.effectiveZoneId;
     const explicitGroup = groupId || subGroupId || churchId || null;
-    const targetGroup = explicitGroup || (!zoneId && req.tenant?.mode === 'church' ? req.tenant.effectiveChurchId : null) || null;
+    const targetGroup = explicitGroup || (includeChurch === 'true' && req.tenant?.mode === 'church' ? req.tenant.effectiveChurchId : null) || null;
 
     const where: any = {};
     if (category && category !== 'all') {
@@ -517,6 +517,15 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
       savePageCategoryMap();
     }
 
+    const explicitGroupId =
+      req.body.groupId !== undefined
+        ? req.body.groupId
+        : req.body.subGroupId !== undefined
+        ? req.body.subGroupId
+        : req.body.churchId !== undefined
+        ? req.body.churchId
+        : undefined;
+
     const updated = await prisma.program.update({
       where: { id },
       data: {
@@ -529,6 +538,7 @@ router.patch('/:id', requireAuth, requireTenantAdmin, async (req: Request, res: 
         isArchived: nextIsArchived,
         bannerImage: bannerImage || banner || undefined,
         organizationId: organizationId || zoneId || undefined,
+        ...(explicitGroupId !== undefined ? { groupId: explicitGroupId } : {}),
       },
       include: {
         programSongs: {

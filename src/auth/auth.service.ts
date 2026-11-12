@@ -164,6 +164,8 @@ export type AuthUser = {
   phoneNumber?: string | null;
   hasHqAccess?: boolean;
   has_hq_access?: boolean;
+  adminScreens?: string[];
+  admin_screens?: string[];
   memberships?: any[];
 };
 export type AuthTokenResult = { accessToken: string; refreshToken: string; user: AuthUser };
@@ -551,11 +553,26 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
   await prisma.refreshToken.create({
     data: { id: crypto.randomUUID(), userId: profile.id, tokenHash, expiresAt: refreshExpiresAt() },
   });
+
+  let meta: any = profile.rawData && typeof profile.rawData === 'object' ? profile.rawData : null;
+  if (!meta || (!meta.adminScreens && !meta.admin_screens)) {
+    try {
+      const metaRow = await prisma.setting.findUnique({ where: { key: `profile_meta_${profile.id}` } });
+      if (metaRow?.value && typeof metaRow.value === 'object') {
+        meta = { ...meta, ...(metaRow.value as Record<string, any>) };
+      }
+    } catch {}
+  }
+  const userAdminScreens: string[] = Array.isArray(meta?.adminScreens)
+    ? meta.adminScreens
+    : (Array.isArray(meta?.admin_screens) ? meta.admin_screens : []);
+
   const accessToken = signAccessToken({
     sub: profile.id,
     role: resolvedRole,
     zoneId: resolvedZoneId ?? undefined,
     churchId: resolvedChurchId ?? undefined,
+    adminScreens: userAdminScreens,
   });
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || email || 'Member';
   return {
@@ -587,6 +604,8 @@ async function issueTokens(profile: any): Promise<AuthTokenResult> {
       phoneNumber: profile.phone || null,
       hasHqAccess: profile.hasHqAccess || ['president', 'director', 'oftp', 'executive', 'hq_admin', 'admin', 'super_admin'].includes(resolvedRole),
       has_hq_access: profile.hasHqAccess || ['president', 'director', 'oftp', 'executive', 'hq_admin', 'admin', 'super_admin'].includes(resolvedRole),
+      adminScreens: userAdminScreens,
+      admin_screens: userAdminScreens,
       memberships: canonicalMemberships,
     },
   };
@@ -844,6 +863,8 @@ export type MeResult = AuthUser & {
   can_annotate?: boolean;
   canAccessOngoing?: boolean;
   can_access_ongoing?: boolean;
+  adminScreens?: string[];
+  admin_screens?: string[];
   hiddenFeatures?: Record<string, boolean>;
   hidden_features?: Record<string, boolean>;
   raw?: Record<string, any>;
@@ -1116,6 +1137,12 @@ export async function getMe(profileId: string): Promise<MeResult> {
           hideOngoing: !canAccessOngoing,
           hideMinisteredSongs: false,
         },
+    adminScreens: Array.isArray(meta?.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta?.admin_screens) ? meta.admin_screens : []),
+    admin_screens: Array.isArray(meta?.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta?.admin_screens) ? meta.admin_screens : []),
     memberships: canonicalMemberships,
     legacyMemberships: { zoneMembers, hqMembers },
     raw: meta,

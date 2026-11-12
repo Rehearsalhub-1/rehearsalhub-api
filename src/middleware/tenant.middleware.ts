@@ -64,8 +64,14 @@ export function resolveTenantScope(req: Request, auth: any, res?: Response): Ten
 
   const role: string = (auth.role || '').toLowerCase();
   const isHQAdmin = HQ_ROLES.has(role) || Boolean(auth.hasHqAccess || auth.has_hq_access);
-  const isZoneAdmin = role === 'zone_admin' || role === 'zone_coordinator' || role === 'subgroup_admin' || role === 'subgroup_coordinator';
-  const isChurchCoordinator = role === 'church_coordinator' || role === 'church_admin' || role === 'group_admin' || role === 'group_coordinator';
+  const isZoneAdmin = role === 'zone_admin' || role === 'zone_coordinator';
+  const isChurchCoordinator =
+    role === 'church_coordinator' ||
+    role === 'church_admin' ||
+    role === 'group_admin' ||
+    role === 'group_coordinator' ||
+    role === 'subgroup_admin' ||
+    role === 'subgroup_coordinator';
 
   // Read client-requested scope headers
   const headerZoneId = (req.headers['x-zone-id'] as string) || (req.headers['x-zone-code'] as string) || null;

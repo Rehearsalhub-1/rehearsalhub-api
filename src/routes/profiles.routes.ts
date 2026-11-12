@@ -146,6 +146,12 @@ function formatUserProfile(u: any, metaInput?: any, requestedZone?: any) {
     },
     expoPushToken: meta.expoPushToken || meta.expo_push_token || null,
     expo_push_token: meta.expoPushToken || meta.expo_push_token || null,
+    adminScreens: Array.isArray(meta.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta.admin_screens) ? meta.admin_screens : []),
+    admin_screens: Array.isArray(meta.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta.admin_screens) ? meta.admin_screens : []),
     memberships: activeMemberships.map((m: any) => ({
       id: `${m.userId}_${m.organizationId}`,
       organizationId: m.organizationId,
@@ -202,6 +208,8 @@ const updateProfileSchema = z.object({
   avatar: z.string().optional(),
   expo_push_token: z.string().optional(),
   expoPushToken: z.string().optional(),
+  adminScreens: z.array(z.string()).optional(),
+  admin_screens: z.array(z.string()).optional(),
 }).passthrough();
 
 // GET /profiles/check-username/:username
@@ -595,6 +603,9 @@ router.patch('/:userId', requireAuth, async (req, res) => {
       ...(body.can_access_pre_rehearsal !== undefined ? { can_access_pre_rehearsal: body.can_access_pre_rehearsal } : {}),
       ...(body.canAnnotate !== undefined ? { canAnnotate: body.canAnnotate } : {}),
       ...(body.can_annotate !== undefined ? { canAnnotate: body.can_annotate } : {}),
+      ...(body.adminScreens !== undefined
+        ? { adminScreens: Array.isArray(body.adminScreens) ? body.adminScreens : [] }
+        : (body.admin_screens !== undefined ? { adminScreens: Array.isArray(body.admin_screens) ? body.admin_screens : [] } : {})),
       hiddenFeatures: mergedHidden,
       ...((body.expoPushToken || body.expo_push_token) !== undefined ? {
         expoPushToken: body.expoPushToken || body.expo_push_token,

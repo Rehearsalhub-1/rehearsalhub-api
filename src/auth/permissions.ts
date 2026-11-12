@@ -25,7 +25,10 @@ export function isHQRole(role: unknown): boolean {
          normalized === 'executive' || normalized === 'boss'
 }
 
-export function canAccessAdmin(role: unknown): boolean {
+export function canAccessAdmin(role: unknown, adminScreens?: unknown[]): boolean {
+  if (Array.isArray(adminScreens) && adminScreens.length > 0) {
+    return true;
+  }
   const normalized = normalizeRole(role)
   return isHQRole(normalized) ||
     normalized === 'org_admin' ||

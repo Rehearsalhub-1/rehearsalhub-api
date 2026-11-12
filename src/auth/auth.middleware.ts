@@ -58,6 +58,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
       zoneId: payload.zoneId || null,
       /** churchId from JWT claim — set for church_coordinator role */
       churchId: payload.churchId || null,
+      adminScreens: payload.adminScreens || [],
       jti: payload.jti,
       exp: payload.exp!,
     };
@@ -103,6 +104,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
         role: payload.role,
         zoneId: payload.zoneId || null,
         churchId: payload.churchId || null,
+        adminScreens: payload.adminScreens || [],
         jti: payload.jti,
         exp: payload.exp!,
       };
@@ -120,21 +122,26 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
 }
 
 export function requireTenantAdmin(req: Request, res: Response, next: NextFunction): void {
+  const checkAccess = () => {
+    const role = res.locals.auth?.role;
+    const adminScreens = res.locals.auth?.adminScreens;
+    if (Array.isArray(adminScreens) && adminScreens.length > 0) {
+      return true;
+    }
+    return canManageTenant(role) || canAccessAdmin(role, adminScreens);
+  };
+
   if (!res.locals.auth) {
     return requireAuth(req, res, () => {
-      const role = res.locals.auth?.role;
-      if (!canManageTenant(role) && !canAccessAdmin(role)) {
+      if (!checkAccess()) {
         return requireZoneOrHqAdmin(req, res, next) as any;
-        return;
       }
       next();
     });
   }
 
-  const role = res.locals.auth?.role;
-  if (!canManageTenant(role) && !canAccessAdmin(role)) {
+  if (!checkAccess()) {
     return requireZoneOrHqAdmin(req, res, next) as any;
-    return;
   }
   next();
 }

@@ -68,6 +68,14 @@ router.get('/', async (req: Request, res: Response) => {
         if (name) resolvedLeadSinger = name;
       }
 
+      const rawCategories = (s.audioUrls as any)?._categories;
+      const resolvedCategories: string[] = Array.isArray(rawCategories) && rawCategories.length > 0
+        ? rawCategories
+        : (Array.isArray(s.categories) && s.categories.length > 0
+          ? s.categories
+          : (s.category ? [s.category] : ['Master Library']));
+      const primaryCategory = s.category || resolvedCategories[0] || 'Master Library';
+
       return {
         id: s.id,
         programId: primaryProgram?.id || null,
@@ -81,7 +89,8 @@ router.get('/', async (req: Request, res: Response) => {
         lyrics: s.lyrics || null,
         writer: s.writer || null,
         solfas: s.solfas || null,
-        category: s.category || 'Master Library',
+        category: primaryCategory,
+        categories: resolvedCategories,
         imageUrl: s.imageUrl || (s as any).image_url || null,
         image: s.imageUrl || (s as any).image_url || null,
         audioFile: s.audioFile || null,
@@ -143,9 +152,56 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /master-songs/:id
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const song = await prisma.song.findUnique({ where: { id: req.params.id } });
-    if (!song) return res.status(404).json({ success: false, error: 'Song not found' });
-    res.json({ success: true, data: song });
+    const s = await prisma.song.findUnique({
+      where: { id: req.params.id },
+      include: {
+        roleAssignments: { include: { user: true } },
+        programSongs: {
+          include: {
+            program: {
+              select: { id: true, name: true, bannerImage: true }
+            }
+          },
+          take: 1,
+        }
+      }
+    });
+    if (!s) return res.status(404).json({ success: false, error: 'Song not found' });
+
+    const primaryProgram = s.programSongs?.[0]?.program;
+    const progName = primaryProgram?.name || null;
+    const leadSingerRole = s.roleAssignments?.find(
+      (r: any) => r.role === 'LEAD_SINGER' || r.role === 'lead_singer'
+    );
+    let resolvedLeadSinger = s.leadSinger || null;
+    if (leadSingerRole?.user) {
+      const u: any = leadSingerRole.user;
+      const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email;
+      if (name) resolvedLeadSinger = name;
+    }
+
+    const rawCategories = (s.audioUrls as any)?._categories;
+    const resolvedCategories: string[] = Array.isArray(rawCategories) && rawCategories.length > 0
+      ? rawCategories
+      : (Array.isArray((s as any).categories) && (s as any).categories.length > 0
+        ? (s as any).categories
+        : (s.category ? [s.category] : ['Master Library']));
+    const primaryCategory = s.category || resolvedCategories[0] || 'Master Library';
+
+    res.json({
+      success: true,
+      data: {
+        ...s,
+        programId: primaryProgram?.id || null,
+        praiseNightId: primaryProgram?.id || null,
+        program: progName,
+        programName: progName,
+        programBannerImage: primaryProgram?.bannerImage || null,
+        category: primaryCategory,
+        categories: resolvedCategories,
+        leadSinger: resolvedLeadSinger,
+      }
+    });
   } catch (error) {
     console.error('Error fetching song:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch song' });
@@ -158,6 +214,23 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
     const body = req.body || {};
     const songId = body.id || `master_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+    const categoriesList: string[] = Array.isArray(body.categories) && body.categories.length > 0
+      ? body.categories.map((c: any) => String(c).trim()).filter(Boolean)
+      : (body.category ? [String(body.category).trim()].filter(Boolean) : ['Master Library']);
+    const primaryCategory = categoriesList[0] || 'Master Library';
+
+    let urls = body.audioUrls || body.audio_urls || null;
+    const customList = Array.isArray(body.customParts)
+      ? body.customParts
+      : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : null);
+    if (!urls || typeof urls !== 'object') {
+      urls = urls ? { full: urls } : {};
+    }
+    if (customList && customList.length > 0) {
+      urls = { ...urls, _customParts: customList };
+    }
+    urls = { ...urls, _categories: categoriesList };
+
     const row = await prisma.song.create({
       data: {
         id: songId,
@@ -166,19 +239,9 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
         tempo: body.tempo || null,
         lyrics: body.lyrics || null,
         writer: body.writer || null,
-        category: body.category || 'Master Library',
+        category: primaryCategory,
         audioFile: body.audioFile || body.audio_file || null,
-        audioUrls: (() => {
-          let urls = body.audioUrls || body.audio_urls || null;
-          const customList = Array.isArray(body.customParts)
-            ? body.customParts
-            : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : null);
-          if (customList && customList.length > 0) {
-            if (!urls || typeof urls !== 'object') urls = {};
-            urls = { ...urls, _customParts: customList };
-          }
-          return urls;
-        })(),
+        audioUrls: urls,
         conductor: body.conductor || null,
         leadSinger: body.leadSinger || body.lead_singer || null,
         drummer: body.drummer || null,
@@ -192,7 +255,15 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
       },
     });
 
-    res.status(201).json({ success: true, message: 'Master song created', data: row });
+    res.status(201).json({
+      success: true,
+      message: 'Master song created',
+      data: {
+        ...row,
+        category: primaryCategory,
+        categories: categoriesList,
+      }
+    });
   } catch (err) {
     console.error('[master POST]', err);
     res.status(500).json({ success: false, error: 'Failed to create master song' });
@@ -214,16 +285,31 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     if (body.tempo !== undefined) data.tempo = body.tempo;
     if (body.lyrics !== undefined) data.lyrics = body.lyrics;
     if (body.writer !== undefined) data.writer = body.writer;
-    if (body.category !== undefined) data.category = body.category;
     if (body.audioFile !== undefined || body.audio_file !== undefined) data.audioFile = body.audioFile || body.audio_file;
     if (body.audioUrls !== undefined || body.audio_urls !== undefined) data.audioUrls = body.audioUrls || body.audio_urls;
+
     if (body.customParts !== undefined) {
       const customList = Array.isArray(body.customParts)
         ? body.customParts
         : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
-      const currentUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      const currentUrls = ((data.audioUrls !== undefined ? data.audioUrls : existing.audioUrls) || {}) as Record<string, any>;
       data.audioUrls = { ...currentUrls, _customParts: customList };
     }
+
+    if (body.categories !== undefined && Array.isArray(body.categories)) {
+      const cleanCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
+      data.category = cleanCategories[0] || body.category || existing.category || 'Master Library';
+      const currentUrls = ((data.audioUrls !== undefined ? data.audioUrls : existing.audioUrls) || {}) as Record<string, any>;
+      data.audioUrls = { ...currentUrls, _categories: cleanCategories };
+    } else if (body.category !== undefined) {
+      data.category = body.category;
+      const currentUrls = ((data.audioUrls !== undefined ? data.audioUrls : existing.audioUrls) || {}) as Record<string, any>;
+      const existingCats = Array.isArray(currentUrls._categories) ? currentUrls._categories : [];
+      if (existingCats.length <= 1) {
+        data.audioUrls = { ...currentUrls, _categories: [body.category] };
+      }
+    }
+
     if (body.conductor !== undefined) data.conductor = body.conductor;
     if (body.leadSinger !== undefined || body.lead_singer !== undefined) data.leadSinger = body.leadSinger || body.lead_singer;
     if (body.drummer !== undefined) data.drummer = body.drummer;
@@ -242,7 +328,20 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
     }
 
     const updated = await prisma.song.update({ where: { id: songId }, data });
-    res.json({ success: true, message: 'Master song updated', data: updated });
+    const rawCategories = (updated.audioUrls as any)?._categories;
+    const resolvedCategories: string[] = Array.isArray(rawCategories) && rawCategories.length > 0
+      ? rawCategories
+      : (updated.category ? [updated.category] : ['Master Library']);
+
+    res.json({
+      success: true,
+      message: 'Master song updated',
+      data: {
+        ...updated,
+        category: updated.category || resolvedCategories[0] || 'Master Library',
+        categories: resolvedCategories,
+      }
+    });
   } catch (err) {
     console.error('[master PATCH]', err);
     res.status(500).json({ success: false, error: 'Failed to update master song' });

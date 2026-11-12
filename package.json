@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "postinstall": "prisma generate",
     "build": "prisma generate && tsc",
-    "test": "tsx --test tenant.middleware.test.ts auth-contract.test.ts",
+    "test": "tsx --test tenant.middleware.test.ts auth-contract.test.ts granular-screen-permissions.test.ts",
     "migrate:auth-internal": "tsx auth_internal.ts",
     "verify:rls": "tsx verify_rls.ts",
     "secure:identity-rls": "tsx secure_identity_rls.ts",

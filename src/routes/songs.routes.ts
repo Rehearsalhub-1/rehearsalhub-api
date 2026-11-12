@@ -1235,9 +1235,19 @@ router.post('/import-to-master', requireAuth, async (req: Request, res: Response
 
     for (const song of songsToImport) {
       const masterSongId = `master_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const safeAudioUrls = song.audioUrls && typeof song.audioUrls === 'object'
-        ? (song.audioUrls as any)
-        : (song.audioFile ? { full: song.audioFile } : undefined);
+      let safeAudioUrls: Record<string, any> = song.audioUrls && typeof song.audioUrls === 'object'
+        ? { ...(song.audioUrls as any) }
+        : (song.audioFile ? { full: song.audioFile } : {});
+      const existingCats: string[] = Array.isArray(safeAudioUrls._categories) && safeAudioUrls._categories.length > 0
+        ? [...safeAudioUrls._categories]
+        : (song.category ? [song.category] : []);
+      const progName = song.programSongs?.[0]?.program?.name;
+      if (progName && !existingCats.includes(progName)) {
+        existingCats.push(progName);
+      }
+      if (existingCats.length > 0) {
+        safeAudioUrls._categories = existingCats;
+      }
 
       const newMaster = await prisma.song.create({
         data: {
@@ -1247,9 +1257,9 @@ router.post('/import-to-master', requireAuth, async (req: Request, res: Response
           tempo: song.tempo || null,
           lyrics: song.lyrics || null,
           writer: song.writer || null,
-          category: song.category || 'Master Library',
+          category: existingCats[0] || song.category || 'Master Library',
           audioFile: song.audioFile || null,
-          audioUrls: safeAudioUrls,
+          audioUrls: Object.keys(safeAudioUrls).length > 0 ? safeAudioUrls : undefined,
           conductor: song.conductor || null,
           leadSinger: song.leadSinger || null,
           drummer: song.drummer || null,
@@ -1459,9 +1469,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
     }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
-      data.category = body.categories[0] || body.category || '';
+      const cleanCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
+      data.category = cleanCategories[0] || body.category || existing.category || '';
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
-      data.audioUrls = { ...currentAudioUrls, _categories: body.categories };
+      data.audioUrls = { ...currentAudioUrls, _categories: cleanCategories };
     } else if (body.category !== undefined) {
       data.category = body.category;
     }
@@ -1792,9 +1803,10 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
       data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
     }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
-      data.category = body.categories[0] || body.category || '';
+      const cleanCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
+      data.category = cleanCategories[0] || body.category || existing.category || '';
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
-      data.audioUrls = { ...currentAudioUrls, _categories: body.categories };
+      data.audioUrls = { ...currentAudioUrls, _categories: cleanCategories };
     } else if (body.category !== undefined) {
       data.category = body.category;
     }

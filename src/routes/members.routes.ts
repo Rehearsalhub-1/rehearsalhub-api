@@ -155,6 +155,12 @@ function shapeMember(m: any, meta: any = {}) {
     can_access_pre_rehearsal: Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
     canAccessOngoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
     can_access_ongoing: meta?.can_access_ongoing !== false && meta?.canAccessOngoing !== false,
+    adminScreens: Array.isArray(meta?.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta?.admin_screens) ? meta.admin_screens : []),
+    admin_screens: Array.isArray(meta?.adminScreens)
+      ? meta.adminScreens
+      : (Array.isArray(meta?.admin_screens) ? meta.admin_screens : []),
     hiddenFeatures: meta?.hiddenFeatures || {
       hideArchives: !Boolean(meta?.canSeeArchive || meta?.canAccessArchive || meta?.can_access_archive),
       hidePreRehearsal: !Boolean(meta?.can_access_pre_rehearsal || meta?.canAccessPreRehearsal),
