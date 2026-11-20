@@ -159,6 +159,7 @@ function shapeProgram(p: any) {
             leadSinger: resolvedLeadSinger,
             conductor: s.conductor || '',
             conductorGuide: s.conductor || '',
+            conductorDocUrl: (s.audioUrls as any)?._conductorDocUrl || (s as any).conductorDocUrl || null,
             drummer: s.drummer || '',
             leadKeyboardist: s.leadKeyboardist || s.lead_keyboardist || '',
             leadGuitarist: s.leadGuitarist || s.lead_guitarist || '',

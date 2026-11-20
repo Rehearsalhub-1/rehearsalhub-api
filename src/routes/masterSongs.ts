@@ -106,6 +106,7 @@ router.get('/', async (req: Request, res: Response) => {
           return customKeys.length > 0 ? customKeys : [];
         })(),
         conductor: s.conductor || null,
+        conductorDocUrl: (s.audioUrls as any)?._conductorDocUrl || null,
         leadSinger: resolvedLeadSinger,
         drummer: s.drummer || null,
         bassGuitarist: s.bassGuitarist || null,
@@ -200,6 +201,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         category: primaryCategory,
         categories: resolvedCategories,
         leadSinger: resolvedLeadSinger,
+        conductorDocUrl: (s.audioUrls as any)?._conductorDocUrl || null,
       }
     });
   } catch (error) {
@@ -228,6 +230,9 @@ router.post('/', requireAuth, requireMasterEditor, async (req: Request, res: Res
     }
     if (customList && customList.length > 0) {
       urls = { ...urls, _customParts: customList };
+    }
+    if (body.conductorDocUrl !== undefined && String(body.conductorDocUrl).trim()) {
+      urls = { ...urls, _conductorDocUrl: String(body.conductorDocUrl).trim() };
     }
     urls = { ...urls, _categories: categoriesList };
 
@@ -294,6 +299,10 @@ router.patch('/:id', requireAuth, requireMasterEditor, async (req: Request, res:
         : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
       const currentUrls = ((data.audioUrls !== undefined ? data.audioUrls : existing.audioUrls) || {}) as Record<string, any>;
       data.audioUrls = { ...currentUrls, _customParts: customList };
+    }
+    if (body.conductorDocUrl !== undefined) {
+      const currentUrls = ((data.audioUrls !== undefined ? data.audioUrls : existing.audioUrls) || {}) as Record<string, any>;
+      data.audioUrls = { ...currentUrls, _conductorDocUrl: body.conductorDocUrl ? String(body.conductorDocUrl).trim() : '' };
     }
 
     if (body.categories !== undefined && Array.isArray(body.categories)) {

@@ -77,6 +77,7 @@ function broadcastSongUpdate(
     leadSinger: formatted.leadSinger,
     writer: formatted.writer,
     conductor: formatted.conductor,
+    conductorDocUrl: formatted.conductorDocUrl || null,
     key: formatted.key,
     tempo: formatted.tempo,
     category: formatted.category,
@@ -192,6 +193,7 @@ function shapeSong(song: any) {
     leadSinger: resolvedLeadSinger,
     conductor: resolvedConductorPerson,
     conductorGuide: resolvedConductorGuide,
+    conductorDocUrl: (song.audioUrls as any)?._conductorDocUrl || (song as any).conductorDocUrl || null,
     drummer: song.drummer || '',
     leadKeyboardist: song.leadKeyboardist || '',
     leadGuitarist: song.leadGuitarist || '',
@@ -1382,6 +1384,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       if (!audioUrlsData || typeof audioUrlsData !== 'object') audioUrlsData = {};
       audioUrlsData = { ...audioUrlsData, _customParts: customPartsList };
     }
+    if (body.conductorDocUrl !== undefined && String(body.conductorDocUrl).trim()) {
+      if (!audioUrlsData || typeof audioUrlsData !== 'object') audioUrlsData = {};
+      audioUrlsData = { ...audioUrlsData, _conductorDocUrl: String(body.conductorDocUrl).trim() };
+    }
 
     const newSong = await prisma.song.create({
       data: {
@@ -1467,6 +1473,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
       data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
+    }
+    if (body.conductorDocUrl !== undefined) {
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _conductorDocUrl: body.conductorDocUrl ? String(body.conductorDocUrl).trim() : '' };
     }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
       const cleanCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
@@ -1801,6 +1811,10 @@ router.patch('/praise-night/:id', requireAuth, async (req: Request, res: Respons
         : (body.customParts && typeof body.customParts === 'object' ? Object.keys(body.customParts) : []);
       const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
       data.audioUrls = { ...currentAudioUrls, _customParts: customPartsList };
+    }
+    if (body.conductorDocUrl !== undefined) {
+      const currentAudioUrls = (data.audioUrls || existing.audioUrls || {}) as Record<string, any>;
+      data.audioUrls = { ...currentAudioUrls, _conductorDocUrl: body.conductorDocUrl ? String(body.conductorDocUrl).trim() : '' };
     }
     if (body.categories !== undefined && Array.isArray(body.categories)) {
       const cleanCategories = body.categories.map((c: any) => String(c).trim()).filter(Boolean);
